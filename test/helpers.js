@@ -66,8 +66,13 @@ export const vsError = (message, status) => Object.assign(new Error(message), { 
  * A stand-in for the viaSocket gateway. `state.connections[userId]` and `state.flows[userId]` play
  * viaSocket's records; `calls` logs every call; `fail[method]` makes the next call to it throw.
  */
-const SERVICES = { gmail: 'rowo0bqrhj5g', slack: 'rowbu58rc', 'google-calendar': 'rowkhibv5efp', whatsapp_business_cloud: 'row3icnwu2su' }
-const VERSIONS = { rowogelpy0h6: 'rowwj0sfmhub', row1jrbor: 'rowslackv107' }
+const SERVICES = { gmail: 'rowo0bqrhj5g', slack: 'rowbu58rc', 'google-calendar': 'rowkhibv5efp', whatsapp_business_cloud: 'row3icnwu2su', razorpay: 'row2n5tu2hd9' }
+const VERSIONS = {
+  rowogelpy0h6: 'rowwj0sfmhub', row1jrbor: 'rowslackv107',
+  row7kcom7ds1: 'vcalfreebusy', rowuitv4m6uy: 'vcalcreate', rowo9a3brirh: 'vcalupdate', row32ktr5oju: 'vcaldelete',
+  rowtl0joo241: 'vrzpcreate', rowlcouozywu: 'vrzplist', rowyqfuoa1gu: 'vrzpcancel'
+}
+export const V = VERSIONS
 
 export function fakeVs({ gmailServiceId = 'rowo0bqrhj5g' } = {}) {
   const state = {
@@ -75,8 +80,13 @@ export function fakeVs({ gmailServiceId = 'rowo0bqrhj5g' } = {}) {
     options: [{ label: 'me@example.com', value: 'me@example.com' }],
     slackChannels: [{ label: '#leads', value: 'C0LEADS' }, { label: '#team', value: 'C0TEAM' }],
     runResult: { id: 'msg_123', threadId: 'thr_1', labelIds: ['SENT'] },
-    slackResult: { ok: true, channel: 'C0LEADS', ts: '1761000000.000100' }
+    slackResult: { ok: true, channel: 'C0LEADS', ts: '1761000000.000100' },
+    calendars: [{ label: 'Asha (primary)', value: 'primary' }],
+    busy: [],               // [{ start, end }] ISO strings, what Free/Busy answers
+    events: {},             // eventId → event, as Create Event made them
+    paymentLinks: {}        // reference_id → link, as Razorpay holds them
   }
+  let events = 0
   const calls = []
   const fail = {}
   const step = (name, args) => {
@@ -111,13 +121,45 @@ export function fakeVs({ gmailServiceId = 'rowo0bqrhj5g' } = {}) {
     },
     async listOptions(userId, actionVersionId, params) {
       step('listOptions', [userId, actionVersionId, params])
-      return { options: params.fieldKey === 'destination.channel_id' ? state.slackChannels : state.options, offset: null }
+      const options = params.fieldKey === 'destination.channel_id' ? state.slackChannels : params.fieldKey === 'calendar_id' ? state.calendars : state.options
+      return { options, offset: null }
     },
-    async runAction(scriptId, actionVersionId, inputData) { step('runAction', [scriptId, actionVersionId, inputData]); return actionVersionId === VERSIONS.row1jrbor ? state.slackResult : state.runResult }
+    async runAction(scriptId, actionVersionId, inputData) {
+      step('runAction', [scriptId, actionVersionId, inputData])
+      if (actionVersionId === VERSIONS.row1jrbor) return state.slackResult
+      if (actionVersionId === VERSIONS.row7kcom7ds1) {
+        return { kind: 'calendar#freeBusy', timeMin: `${inputData.date}T00:00:00.000Z`, timeMax: `${inputData.date}T23:59:59.000Z`, calendars: { 'me@example.com': { busy: state.busy } } }
+      }
+      if (actionVersionId === VERSIONS.rowuitv4m6uy) {
+        const id = `evt${++events}`
+        state.events[id] = { id, ...inputData }
+        return { id, status: 'confirmed', htmlLink: `https://calendar.google.com/event?eid=${id}` }
+      }
+      if (actionVersionId === VERSIONS.rowo9a3brirh) { Object.assign(state.events[inputData.eventId] || {}, inputData); return { id: inputData.eventId, status: 'confirmed' } }
+      if (actionVersionId === VERSIONS.row32ktr5oju) { delete state.events[inputData.eventId]; return {} }
+      if (actionVersionId === VERSIONS.rowtl0joo241) {
+        const link = { id: `plink_${Object.keys(state.paymentLinks).length + 1}`, short_url: `https://rzp.io/r/${inputData.reference_id}`, status: 'created', amount: inputData.amount, amount_paid: 0, reference_id: inputData.reference_id }
+        state.paymentLinks[inputData.reference_id] = link
+        return link
+      }
+      if (actionVersionId === VERSIONS.rowlcouozywu) return { payment_links: Object.values(state.paymentLinks).filter((l) => l.reference_id === inputData.reference_id) }
+      if (actionVersionId === VERSIONS.rowyqfuoa1gu) {
+        const link = Object.values(state.paymentLinks).find((l) => l.id === inputData.payment_link_id)
+        if (link) link.status = 'cancelled'
+        return link || {}
+      }
+      return state.runResult
+    }
   }
   /** Pretend the user finished the Connect popup for Gmail. */
   vs.connectGmail = (userId, authId = `auth${Math.random().toString(36).slice(2, 8)}_${gmailServiceId}`, extra = {}) => {
     state.connections[userId] = [...(state.connections[userId] || []), { id: authId, service_id: gmailServiceId, service_name: 'Gmail', iconUrl: 'https://icons.example/gmail.svg', connection_label: '{"Email":"me@example.com"}', isExpired: false, ...extra }]
+    return authId
+  }
+  /** Pretend the user finished the Connect popup for another curated app. */
+  vs.connectApp = (userId, slug) => {
+    const authId = `auth${Math.random().toString(36).slice(2, 8)}_${SERVICES[slug]}`
+    state.connections[userId] = [...(state.connections[userId] || []), { id: authId, service_id: SERVICES[slug], service_name: slug, connection_label: `{"Email":"me@example.com"}`, isExpired: false }]
     return authId
   }
   /** Pretend the user finished the Connect popup for Slack. */

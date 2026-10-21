@@ -15,14 +15,19 @@ export const CURATED_APPS = [
     usedBy: ['New Lead Alert', 'Buyer Follow-Up Reminders']
   },
   {
-    slug: 'google-calendar', name: 'Google Calendar', actions: ['row7kcom7ds1', 'rowuitv4m6uy'], inUse: false,
-    purpose: 'Will check your availability and book property viewings.',
-    usedBy: ['Property Viewing Scheduler (not built yet)']
+    slug: 'google-calendar', name: 'Google Calendar', actions: ['row7kcom7ds1', 'rowuitv4m6uy', 'rowo9a3brirh', 'row32ktr5oju'], inUse: true,
+    purpose: 'Checks your availability and books, moves and cancels property viewings in your calendar.',
+    usedBy: ['Property Viewing Scheduler']
   },
   {
     slug: 'whatsapp_business_cloud', name: 'WhatsApp Business', actions: ['rowsd70emhii'], inUse: false,
     purpose: 'Will send approved template messages to buyers and tenants from your own WhatsApp Business number.',
     usedBy: ['Not used yet: needs a Meta-approved message template and DealSaathi’s WhatsApp sending']
+  },
+  {
+    slug: 'razorpay', name: 'Razorpay', actions: ['rowtl0joo241', 'rowlcouozywu', 'rowyqfuoa1gu'], inUse: true,
+    purpose: 'Creates rent payment links and checks whether they have been paid. Optional: without it, you confirm payments yourself.',
+    usedBy: ['Rent and Payment Reminders']
   }
 ]
 

@@ -36,28 +36,25 @@ export const AUTOMATIONS = [
     channels: ['gmail', 'slack'], needsScheduler: true
   },
   {
-    key: 'viewing_scheduler', name: 'Property Viewing Scheduler', available: false, defaultEnabled: false,
-    description: 'Checks your Google Calendar, books a viewing you confirm, and sends the confirmation.',
-    trigger: 'You request a viewing or approve a suggested slot',
-    action: 'Google Calendar free/busy check, event creation after confirmation, and a confirmation message',
-    channels: ['google-calendar'],
-    blocker: 'Not built yet. It needs Google Calendar connected (Integrations) and DealSaathi’s viewing workflow, which is the next thing to build.'
+    key: 'viewing_scheduler', name: 'Property Viewing Scheduler', available: true, defaultEnabled: false,
+    description: 'Finds free times in your Google Calendar, books the viewing you confirm, and sends the confirmation.',
+    trigger: 'You schedule a viewing on the Viewings page and confirm a slot',
+    action: 'Google Calendar free/busy check, a re-check, the calendar event, and a Gmail confirmation to the lead',
+    channels: ['google-calendar', 'gmail']
   },
   {
-    key: 'viewing_feedback', name: 'Post-Viewing Feedback', available: false, defaultEnabled: false,
-    description: 'Asks the buyer for feedback after a viewing and updates their saved preferences.',
-    trigger: 'A viewing ends and you confirm it took place',
-    action: 'A feedback request, the recorded answer, and updated buyer preferences',
-    channels: [],
-    blocker: 'Not built yet. It depends on the Viewing Scheduler, and on a buyer messaging channel: WhatsApp Business with an approved template, or email.'
+    key: 'viewing_feedback', name: 'Post-Viewing Feedback', available: true, defaultEnabled: false,
+    description: 'After you mark a viewing as having taken place, asks the buyer for feedback and updates their preferences.',
+    trigger: 'You mark a viewing completed (DealSaathi reminds you when a viewing has ended)',
+    action: 'A private feedback link by Gmail; the answer updates the buyer’s saved preferences and future matches',
+    channels: ['gmail']
   },
   {
-    key: 'rent_reminders', name: 'Rent and Payment Reminders', available: false, defaultEnabled: false,
+    key: 'rent_reminders', name: 'Rent and Payment Reminders', available: true, defaultEnabled: false,
     description: 'Reminds tenants before and after rent is due, and stops once payment is verified.',
-    trigger: 'A rent due date approaches or passes',
-    action: 'Reminders through a configured channel, stopped only by a verified or manually confirmed payment',
-    channels: [],
-    blocker: 'Not built yet. It needs tenancy records in DealSaathi; automatic payment verification also needs a Razorpay connection (otherwise payments are confirmed by hand).'
+    trigger: 'Rent due dates approaching or passing (checked every 15 minutes)',
+    action: 'Gmail reminders with an optional Razorpay payment link; stopped only by Razorpay’s paid status or a payment you record',
+    channels: ['gmail', 'razorpay'], needsScheduler: true
   }
 ]
 

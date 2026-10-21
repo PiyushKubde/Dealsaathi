@@ -82,6 +82,10 @@ const TYPE_LABEL = { apartment: 'Apartment', independent_house: 'Independent hou
 export function scoreMatch(lead, property) {
   const wants = lead.customer_type === 'buyer' ? 'sale' : lead.customer_type === 'tenant' ? 'rent' : null
   if (!wants || wants !== property.listing_type || property.status !== 'available') return null
+  // What the lead has said no to (post-viewing feedback): that listing, and localities they rejected.
+  if (lead.excludedPropertyIds?.includes(property.id)) return null
+  const rejected = lead.excluded_localities ? JSON.parse(lead.excluded_localities) : []
+  if (rejected.length && rejected.includes(String(property.locality || property.city || '').trim().toLowerCase())) return null
   let score = 0
   const reasons = []
   const gaps = []
@@ -119,13 +123,19 @@ export function scoreMatch(lead, property) {
 }
 
 /** Ranked buyers (or tenants) for one property, best first. */
+/** The lead with the listings it has turned down, as scoreMatch reads them. */
+export function withExclusions(db, lead) {
+  return { ...lead, excludedPropertyIds: db.prepare('SELECT property_id FROM lead_property_exclusions WHERE lead_id = ?').all(lead.id).map((r) => r.property_id) }
+}
+
 export function matchLeadsFor(db, property) {
-  const leads = db.prepare("SELECT * FROM leads WHERE customer_type IN ('buyer','tenant') AND status NOT IN ('won','lost')").all()
+  const leads = db.prepare("SELECT * FROM leads WHERE customer_type IN ('buyer','tenant') AND status NOT IN ('won','lost')").all().map((l) => withExclusions(db, l))
   return leads.map((lead) => ({ lead, match: scoreMatch(lead, property) })).filter((m) => m.match).sort((a, b) => b.match.score - a.match.score)
 }
 
 /** Ranked available properties for one lead, best first. */
-export function matchPropertiesFor(db, lead, { limit = 20 } = {}) {
+export function matchPropertiesFor(db, rawLead, { limit = 20 } = {}) {
+  const lead = withExclusions(db, rawLead)
   const props = db.prepare("SELECT * FROM properties WHERE status = 'available'").all().map(toProperty)
   return props.map((property) => ({ property, match: scoreMatch(lead, property) })).filter((m) => m.match).sort((a, b) => b.match.score - a.match.score).slice(0, limit)
 }
@@ -153,6 +163,12 @@ function refreshMatches(db, property, userId) {
     }
   }
   return { matched: found.length, newMatches: added }
+}
+
+/** Recomputes one listing's matches (after a lead's preferences changed). */
+export function rematchProperty(db, propertyId, userId = null) {
+  const property = getProperty(db, propertyId)
+  return property ? refreshMatches(db, property, userId) : null
 }
 
 export function listPropertyMatches(db, propertyId) {

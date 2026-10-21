@@ -7,8 +7,11 @@ An AI assistant for real estate brokers, built on viaSocket.
 | Accounts | Each broker signs up with their own login and gets a stable id (`usr_…`), which is also their identity on viaSocket | Working |
 | Leads | Add with AI (viaSocket AI) or a form, review, confirm, edit, delete, duplicate checks, follow-up date, activity history | Working |
 | Properties | Listings with buyer matching on save; clearly labelled sample listings | Working (local data) |
-| Integrations | A fixed list of the apps DealSaathi uses (Gmail, Slack, Google Calendar, WhatsApp Business), connected through the official **Connect** popup (`viasocket-apps/browser` `connect()`), live status, reconnect, disconnect | Working; each broker signs in to their own apps |
-| Real Estate Automations | Seven DealSaathi automations with native settings, on/off, run history and retry. No viaSocket builder or app catalog is shown | 4 built, 3 marked *Needs setup* (see below) |
+| Integrations | A fixed list of the apps DealSaathi uses (Gmail, Slack, Google Calendar, Razorpay, WhatsApp Business), connected through the official **Connect** popup (`viasocket-apps/browser` `connect()`), live status, reconnect, disconnect | Working; each broker signs in to their own apps |
+| Real Estate Automations | Seven DealSaathi automations with native settings, on/off, run history and retry. No viaSocket builder or app catalog is shown | All 7 built; each needs its broker's own connections (see below) |
+| Viewings | Free times from the broker's Google Calendar, review, book, move, cancel, mark taken place / no-show | Built; needs Google Calendar |
+| Feedback | A private one-time link per completed viewing; answers update the buyer's preferences and matches | Built; needs Gmail |
+| Tenancies and rent | Tenancies, monthly rent, reminders before/on/after the due date, Razorpay payment links, verified payments | Built; needs Gmail, Razorpay optional |
 
 | Automation | Trigger | Acts through | Status |
 | --- | --- | --- | --- |
@@ -16,9 +19,9 @@ An AI assistant for real estate brokers, built on viaSocket.
 | New Property → Buyer Matching | A property is saved | DealSaathi | Working |
 | Property Recommendations | The broker picks listings on a lead's page | Gmail · Send Email, after approval | Built; needs Gmail connected |
 | Buyer Follow-Up Reminders | Embarko scheduler, every 15 minutes (`/tasks/automations`) | DealSaathi reminders; optional Gmail or Slack | Built; scheduler only on the hosted app |
-| Property Viewing Scheduler | | Google Calendar | Not built |
-| Post-Viewing Feedback | | | Not built |
-| Rent and Payment Reminders | | | Not built |
+| Property Viewing Scheduler | The broker books a free time on the Viewings page | Google Calendar · Get Free/Busy Information, Create / Update / Delete Event; optional Gmail confirmation | Built; needs Google Calendar connected |
+| Post-Viewing Feedback | The broker marks a viewing as taken place | Gmail · Send Email with a private link; the answer updates preferences and matches | Built; needs Gmail connected |
+| Rent and Payment Reminders | Embarko scheduler, every 15 minutes, or "Run check now" | Gmail · Send Email; optional Razorpay · Create / List / Cancel Payment Link | Built; scheduler only on the hosted app |
 
 ## Run it on your computer
 
@@ -89,7 +92,12 @@ The skill's test-connection step, for proving Gmail · Send Email works before a
 | `server/integrations/apps.js` | The curated list of apps on the Integrations page |
 | `server/integrations/run.js` | Runs one allowlisted viaSocket action on a broker's own connection |
 | `embarko.json` | The hosted app's schedule |
-| `server/properties/service.js` | Listings and buyer matching |
+| `server/properties/service.js` | Listings and buyer matching (honours feedback exclusions) |
+| `server/viewings/service.js` | Free times, booking, moving, cancelling and outcomes of viewings |
+| `server/feedback/service.js` | Feedback links (only a hash is stored), the public answer, preference updates |
+| `server/rent/service.js` | Tenancies, monthly rent, reminder stages, payment links, payment verification, audit |
+| `server/time.js` | Time zone conversions for viewings and rent |
+| `public/feedback.html`, `public/feedback.js` | The buyer's feedback page: standalone, loads no app code |
 | `server/leads/` | Lead rules, storage, duplicates, activity |
 | `server/assistant/` | AI lead extraction and the confirm/cancel flow |
 | `public/` | The web pages (the Connect popup uses `/vendor/viasocket-apps-browser.js`, served from the installed package) |
@@ -104,3 +112,10 @@ The skill's test-connection step, for proving Gmail · Send Email works before a
 - viaSocket's slug lookup does not find `gmail` today (reported to viaSocket). DealSaathi then finds the slug in
   `catalog.list()`, which does list it; the check script still reports it.
 - Budgets are plain rupee amounts: a tenant's monthly rent and a buyer's price look alike.
+- Rent is marked paid only when Razorpay reports the payment link paid (`List Payment Links`, checked by the scheduler
+  or "Check Razorpay"), or when the broker records a payment with a note saying how it was verified. A created or
+  opened link changes nothing.
+- Rent reminders are not sent between 21:00 and 09:00 India time; only the latest reminder stage that has arrived is
+  sent, so a tenancy added late does not get a burst of old reminders.
+- A viewing can be booked only at a time Google Calendar reports free when the broker confirms (checked again then).
+  Attendance is recorded by the broker; DealSaathi does not guess it from the calendar.

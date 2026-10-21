@@ -51,7 +51,7 @@ function lookingFor(l) {
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '')
 const typeBadge = (t) => (t ? `<span class="badge ${esc(t)}">${esc(label('customer_type', t))}</span>` : '')
-const VIA_LABELS = { form: 'form', assistant: 'AI assistant (confirmed by you)', gmail: 'Gmail via viaSocket', matching: 'automatic matching', automation: 'Buyer Follow-Up Reminders' }
+const VIA_LABELS = { form: 'form', assistant: 'AI assistant (confirmed by you)', gmail: 'Gmail via viaSocket', matching: 'automatic matching', automation: 'Buyer Follow-Up Reminders', calendar: 'Google Calendar via viaSocket', feedback: 'the buyer’s feedback' }
 const dash = (v) => (v == null || v === '' ? '<span class="muted">Unknown</span>' : esc(v))
 
 class ApiError extends Error {
@@ -281,7 +281,7 @@ async function renderLeadDetail(id) {
   ]
   main.innerHTML = `
     <div class="page-head"><div><a href="#/leads" class="small">← All leads</a><h1>${esc(l.full_name)}</h1></div>
-      <div class="row"><a class="btn ghost" href="#/leads/${l.id}/edit">Edit</a><button class="btn danger" id="delete">Delete</button></div></div>
+      <div class="row"><a class="btn ghost" href="#/viewings?lead=${l.id}">Schedule viewing</a><a class="btn ghost" href="#/leads/${l.id}/edit">Edit</a><button class="btn danger" id="delete">Delete</button></div></div>
     <div class="grid two-col">
       <section class="card"><h2>Details</h2><dl class="details">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></section>
       <section class="card"><h2>Activity</h2><ul class="timeline">${activities.map((a) => `<li><strong>${esc(a.summary)}</strong>
@@ -690,6 +690,7 @@ const STATUS_BADGE = {
 }
 const appIcon = (url, name) => (url ? `<img class="app-icon" src="${esc(url)}" alt="" width="28" height="28" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">` : `<span class="app-icon app-icon-fallback" aria-hidden="true">${esc((name || '?')[0])}</span>`)
 
+const TIMEZONES = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Hong_Kong', 'Asia/Shanghai', 'Asia/Tokyo', 'Australia/Sydney', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid', 'Europe/Moscow', 'Africa/Johannesburg', 'America/New_York', 'America/Toronto', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Mexico_City', 'America/Sao_Paulo']
 const PILL = {
   enabled: '<span class="pill pill-on">Enabled</span>',
   disabled: '<span class="pill pill-off">Disabled</span>',
@@ -877,6 +878,37 @@ async function renderAutomations() {
         ${a.lastCheck ? `<br>Last check: ${esc(fmtDateTime(a.lastCheck.at))} (${esc(a.lastCheck.trigger)}): ${a.lastCheck.created} new reminder(s).` : ''}</div>
       <div class="row"><button class="btn ghost small" type="button" id="run-now">Run check now</button><span id="run-now-out" class="small"></span></div>`
 
+    if (a.key === 'viewing_scheduler') body = `
+      <div class="field"><label>Google Calendar account</label>${accountSelect('google-calendar', 'calendarConnectionId', cfg.calendarConnectionId)}</div>
+      <div class="field"><label for="calendarId">Book viewings in</label><select id="calendarId" name="calendarId"><option value="">Loading calendars…</option></select></div>
+      <div class="form-grid">
+        <div class="field"><label for="timezone">Time zone</label><select id="timezone" name="timezone">${TIMEZONES.map((z) => `<option ${z === (cfg.timezone || 'Asia/Kolkata') ? 'selected' : ''}>${z}</option>`).join('')}</select></div>
+        <div class="field"><label for="durationMinutes">Usual length</label><select id="durationMinutes" name="durationMinutes">${[30, 45, 60, 90, 120].map((m) => `<option value="${m}" ${m === (cfg.durationMinutes || 60) ? 'selected' : ''}>${m} minutes</option>`).join('')}</select></div>
+        <div class="field"><label for="dayStart">Viewings from</label><input id="dayStart" name="dayStart" type="time" value="${esc(cfg.dayStart || '09:00')}"></div>
+        <div class="field"><label for="dayEnd">until</label><input id="dayEnd" name="dayEnd" type="time" value="${esc(cfg.dayEnd || '19:00')}"></div>
+      </div>
+      <div class="field"><label>Confirm to the lead by</label>
+        <div class="row"><label class="radio"><input type="radio" name="confirmation" value="none" ${cfg.confirmation !== 'gmail' ? 'checked' : ''}> No message (shown as “not sent”)</label>
+        <label class="radio"><input type="radio" name="confirmation" value="gmail" ${cfg.confirmation === 'gmail' ? 'checked' : ''}> Email (Gmail)</label></div></div>
+      <div class="field" data-conf="gmail"><label>Gmail account</label>${accountSelect('gmail', 'gmailConnectionId', cfg.gmailConnectionId)}</div>
+      <p class="small muted">Free times come from your calendar’s busy times. Each booking re-checks the slot first, and is marked Busy in your calendar.</p>`
+    if (a.key === 'viewing_feedback') body = `
+      <div class="field"><label>Send feedback requests from Gmail account</label>${accountSelect('gmail', 'gmailConnectionId', cfg.gmailConnectionId)}</div>
+      <div class="field"><label for="expiryDays">Feedback link stays open for</label><div class="row"><input id="expiryDays" name="expiryDays" type="number" min="1" max="60" value="${esc(cfg.expiryDays ?? 14)}" style="width:6rem"> days</div></div>
+      <p class="small muted">When a viewing ends, DealSaathi reminds you to say whether it took place. Only then is the request sent. The buyer’s page shows only that viewing’s listings; their answer updates their budget, rejected areas and future matches.</p>`
+    if (a.key === 'rent_reminders') body = `
+      <div class="field"><label>Send reminders from Gmail account</label>${accountSelect('gmail', 'gmailConnectionId', cfg.gmailConnectionId)}</div>
+      <div class="form-grid">
+        <div class="field"><label for="beforeDays">First reminder, days before due</label><input id="beforeDays" name="beforeDays" type="number" min="0" max="15" value="${esc(cfg.beforeDays ?? 3)}"><div class="hint">0 = none before the due date.</div></div>
+        <div class="field"><label for="afterDays">Overdue reminders after (days)</label><input id="afterDays" name="afterDays" value="${esc((cfg.afterDays ?? [3, 7]).join(', '))}"><div class="hint">Up to five, e.g. 3, 7, 14.</div></div>
+      </div>
+      <label class="radio"><input type="checkbox" name="onDue" ${cfg.onDue !== false ? 'checked' : ''}> Also remind on the due date</label>
+      <div class="field"><label for="razorpayConnectionId">Payment links (optional)</label>${(apps.bySlug.razorpay?.connections || []).filter((c) => c.status === 'active').length
+        ? `<select id="razorpayConnectionId" name="razorpayConnectionId"><option value="">Don’t use Razorpay: I confirm payments myself</option>${apps.bySlug.razorpay.connections.filter((c) => c.status === 'active').map((c) => `<option value="${c.id}" ${String(c.id) === String(cfg.razorpayConnectionId) ? 'selected' : ''}>Razorpay: ${esc(c.label || 'account')}</option>`).join('')}</select>`
+        : '<div class="notice info small">Without Razorpay you confirm payments yourself on the Rent page. <a href="#/integrations">Connect Razorpay</a> to add payment links and automatic checks.</div>'}</div>
+      <p class="small muted">Reminders go out between 9 am and 9 pm (India time), one per stage, and stop when Razorpay reports the link paid or you record a payment.</p>
+      <div class="notice ${a.scheduler ? 'ok' : 'warn'} small">${a.scheduler ? 'The scheduler checks every 15 minutes.' : 'The 15-minute scheduler runs only on the hosted DealSaathi. Here, use Run check now.'}</div>
+      <div class="row"><button class="btn ghost small" type="button" id="rent-run-now">Run check now</button><span id="rent-run-out" class="small"></span></div>`
     panel.innerHTML = `<h2 id="auto-title">${esc(a.name)}</h2><p class="small muted">${esc(a.description)}</p>
       <form id="auto-form" class="stack" novalidate>${body}
         <label class="switch"><input type="checkbox" name="enabled" ${a.enabled ? 'checked' : ''}><span>Automation on</span></label>
@@ -905,6 +937,39 @@ async function renderAutomations() {
         sel.innerHTML = `<option value="">${esc(error.message)}</option>`
       }
     }
+    const loadCalendars = async () => {
+      const sel = form.elements.calendarId
+      const conn = form.elements.calendarConnectionId?.value
+      if (!sel) return
+      if (!conn) { sel.innerHTML = '<option value="">Connect Google Calendar first</option>'; return }
+      try {
+        const { options } = await api(`/api/viewings/calendars?connectionId=${encodeURIComponent(conn)}`)
+        sel.innerHTML = '<option value="">Choose a calendar</option>' + options.map((o) => `<option value="${esc(o.value)}" ${o.value === cfg.calendarId ? 'selected' : ''}>${esc(o.label)}</option>`).join('')
+      } catch (error) {
+        sel.innerHTML = `<option value="">${esc(error.message)}</option>`
+      }
+    }
+    if (a.key === 'viewing_scheduler') {
+      loadCalendars()
+      form.elements.calendarConnectionId?.addEventListener('change', loadCalendars)
+      const showConf = () => { const g = form.querySelector('input[name="confirmation"]:checked')?.value === 'gmail'; form.querySelectorAll('[data-conf]').forEach((el) => { el.hidden = !g }) }
+      form.querySelectorAll('input[name="confirmation"]').forEach((r) => r.addEventListener('change', showConf))
+      showConf()
+    }
+    document.getElementById('rent-run-now')?.addEventListener('click', async (e) => {
+      const out = document.getElementById('rent-run-out')
+      e.target.disabled = true
+      try {
+        await api(`/api/automations/${a.key}`, { method: 'PUT', body: { enabled: a.enabled, config: collect() } })
+        const { result } = await api('/api/automations/rent_reminders/run', { method: 'POST', body: {} })
+        out.textContent = `Checked: ${result.sent} reminder(s) sent, ${result.verified} payment(s) verified${result.failed ? `, ${result.failed} failed (see runs)` : ''}.`
+        draw()
+      } catch (error) {
+        out.textContent = error.details?.problems ? error.details.problems.join(' ') : error.message
+      } finally {
+        e.target.disabled = false
+      }
+    })
     form.querySelectorAll('input[name="ch"]').forEach((r) => r.addEventListener('change', showChannel))
     form.elements.slackConnectionId?.addEventListener('change', loadChannels)
     if (form.querySelector('input[name="ch"]')) showChannel()
@@ -914,6 +979,21 @@ async function renderAutomations() {
       const config = {}
       if (a.key === 'property_recommendations') config.connectionId = form.elements.gmailConnectionId?.value || null
       if (a.key === 'followup_reminders') config.inactiveDays = Number(form.elements.inactiveDays.value)
+      if (a.key === 'viewing_scheduler') {
+        const cal = form.elements.calendarId
+        Object.assign(config, {
+          calendarConnectionId: form.elements.calendarConnectionId?.value || null, calendarId: cal?.value || null, calendarLabel: cal?.selectedOptions[0]?.textContent || '',
+          timezone: form.elements.timezone.value, dayStart: form.elements.dayStart.value, dayEnd: form.elements.dayEnd.value, durationMinutes: Number(form.elements.durationMinutes.value),
+          confirmation: form.querySelector('input[name="confirmation"]:checked')?.value || 'none', gmailConnectionId: form.elements.gmailConnectionId?.value || null
+        })
+      }
+      if (a.key === 'viewing_feedback') Object.assign(config, { gmailConnectionId: form.elements.gmailConnectionId?.value || null, expiryDays: Number(form.elements.expiryDays.value) })
+      if (a.key === 'rent_reminders') {
+        Object.assign(config, {
+          gmailConnectionId: form.elements.gmailConnectionId?.value || null, beforeDays: Number(form.elements.beforeDays.value), afterDays: form.elements.afterDays.value,
+          onDue: form.elements.onDue.checked, razorpayConnectionId: form.elements.razorpayConnectionId?.value || null
+        })
+      }
       if (ch) {
         config[a.key === 'followup_reminders' ? 'notify' : 'channel'] = ch
         if (ch === 'gmail') Object.assign(config, { connectionId: form.elements.gmailConnectionId?.value || null, emailTo: form.elements.emailTo.value })
@@ -1270,6 +1350,322 @@ async function renderFollowupPanel(lead, box, preset = null) {
   })
 }
 
+// ---------- viewings (Property Viewing Scheduler) ----------
+const VIEW_STATUS = {
+  draft: '<span class="pill pill-off">Draft</span>', booking: '<span class="pill pill-setup">Booking…</span>', booked: '<span class="pill pill-on">Booked</span>',
+  failed: '<span class="pill pill-err">Not booked</span>', unknown: '<span class="pill pill-setup">Outcome unknown</span>', completed: '<span class="pill pill-on">Took place</span>',
+  no_show: '<span class="pill pill-off">No-show</span>', cancelled: '<span class="pill pill-off">Cancelled</span>'
+}
+const CONF_STATUS = { not_sent: 'Not sent', not_configured: 'Not sent: no channel set', sent: 'Sent', failed: 'Failed', unknown: 'Outcome unknown' }
+const todayLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+
+async function renderViewings(params) {
+  main.innerHTML = `
+    <div class="page-head"><div><h1>Viewings</h1><p>Booked in your Google Calendar after you confirm a free time. You record whether each viewing took place.</p></div></div>
+    <div id="v-setup"></div>
+    <section class="card" id="v-new"><h2>Schedule a viewing</h2><p class="muted">Loading…</p></section>
+    <section class="card" style="margin-top:1rem"><h2>Your viewings</h2><div id="v-list"><p class="muted">Loading…</p></div></section>`
+  const auto = (await api('/api/automations')).automations.find((a) => a.key === 'viewing_scheduler')
+  const box = document.getElementById('v-new')
+  if (auto.status !== 'enabled') {
+    box.innerHTML = `<h2>Schedule a viewing</h2><div class="notice warn">Switch on <strong>Property Viewing Scheduler</strong> on the <a href="#/automations">Automations</a> page first.${auto.problems.length ? `<ul>${auto.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}</div>`
+  } else {
+    const [{ leads }, { properties }] = await Promise.all([api('/api/leads?limit=200'), api('/api/properties?status=available')])
+    const real = properties.filter((p) => !p.is_sample)
+    const preLead = params.get('lead')
+    box.innerHTML = `<h2>Schedule a viewing</h2>
+      <form id="v-form" class="stack" novalidate>
+        <div class="form-grid">
+          <div class="field"><label for="v-lead">Lead</label><select id="v-lead" name="leadId"><option value="">Choose a lead</option>${leads.map((l) => `<option value="${l.id}" ${String(l.id) === preLead ? 'selected' : ''}>${esc(l.full_name)} (${esc(l.code)})</option>`).join('')}</select></div>
+          <div class="field"><label for="v-date">Date</label><input id="v-date" name="date" type="date" min="${todayLocal()}" value="${todayLocal()}"></div>
+          <div class="field"><label for="v-dur">Length</label><select id="v-dur" name="durationMinutes">${[30, 45, 60, 90, 120].map((m) => `<option value="${m}" ${m === auto.config.durationMinutes ? 'selected' : ''}>${m} minutes</option>`).join('')}</select></div>
+        </div>
+        <div class="field"><label>Properties to view</label>${real.length ? `<div class="pick-list">${real.map((p) => `<label class="radio"><input type="checkbox" name="prop" value="${p.id}"> ${esc(p.title)} <span class="muted small">${esc([p.locality, p.city].filter(Boolean).join(', '))}</span></label>`).join('')}</div>` : '<div class="notice info small">No available real listings. Add one on the Properties page (sample listings cannot be viewed).</div>'}</div>
+        <div class="row"><button class="btn ghost" type="button" id="v-find">Find free times</button><span class="small muted">Times in ${esc(auto.config.timezone)}, ${esc(auto.config.dayStart)}–${esc(auto.config.dayEnd)}.</span></div>
+        <div id="v-slots"></div>
+        <div id="v-review"></div>
+      </form>`
+    const form = document.getElementById('v-form')
+    let chosen = null
+    document.getElementById('v-find').addEventListener('click', async () => {
+      const out = document.getElementById('v-slots')
+      document.getElementById('v-review').innerHTML = ''
+      chosen = null
+      out.innerHTML = '<p class="muted small">Checking your Google Calendar…</p>'
+      try {
+        const r = await api(`/api/viewings/slots?date=${encodeURIComponent(form.elements.date.value)}&durationMinutes=${form.elements.durationMinutes.value}`)
+        out.innerHTML = r.slots.length
+          ? `<p class="small muted">Free in your calendar (${r.busyCount} busy period${r.busyCount === 1 ? '' : 's'} that day; checked ${esc(fmtDateTime(r.checkedAt))}):</p><div class="slot-grid">${r.slots.map((sl) => `<button type="button" class="btn ghost small" data-slot="${sl.start}">${esc(sl.label)}</button>`).join('')}</div>`
+          : '<div class="notice info small">No free time that day in your working hours. Try another date.</div>'
+        out.querySelectorAll('[data-slot]').forEach((b) => b.addEventListener('click', () => {
+          out.querySelectorAll('[data-slot]').forEach((x) => x.classList.toggle('primary', x === b))
+          chosen = b.dataset.slot
+          showReview()
+        }))
+      } catch (error) { out.innerHTML = `<div class="notice err">${esc(error.message)}</div>` }
+    })
+    const showReview = () => {
+      const lead = leads.find((l) => String(l.id) === form.elements.leadId.value)
+      document.getElementById('v-review').innerHTML = `<div class="review-box stack">
+        <label class="radio"><input type="checkbox" name="inviteLead" ${lead?.email ? '' : 'disabled'}> Send the lead a Google Calendar invitation${lead?.email ? ` (${esc(lead.email)})` : ' (no email on record)'}</label>
+        <div class="field"><label for="v-note">Note for the calendar (optional)</label><input id="v-note" name="note" maxlength="500"></div>
+        <div id="v-msg"></div><div class="row end"><button class="btn primary" type="button" id="v-prepare">Review booking</button></div></div>`
+      document.getElementById('v-prepare').addEventListener('click', prepare)
+    }
+    const prepare = async () => {
+      const msg = document.getElementById('v-msg')
+      try {
+        const { viewing: v, confirmationWillBeSent } = await api('/api/viewings', { method: 'POST', body: {
+          leadId: Number(form.elements.leadId.value), propertyIds: [...form.querySelectorAll('input[name="prop"]:checked')].map((c) => Number(c.value)),
+          start: chosen, durationMinutes: Number(form.elements.durationMinutes.value), inviteLead: form.elements.inviteLead?.checked === true, note: form.elements.note?.value
+        } })
+        document.getElementById('v-review').innerHTML = `<div class="review-box">
+          <div class="review-state"><span class="badge draft">Not booked yet</span><strong>Check the viewing</strong></div>
+          <dl class="details"><dt>Lead</dt><dd>${esc(v.leadName)}</dd><dt>When</dt><dd>${esc(v.when)} · ${v.durationMinutes} min</dd>
+            <dt>Properties</dt><dd>${v.properties.map((p) => esc(p.title)).join('<br>')}</dd><dt>Where</dt><dd>${esc(v.location)}</dd>
+            <dt>Invitation</dt><dd>${v.inviteLead ? 'Google Calendar invitation to the lead' : 'None'}</dd>
+            <dt>Confirmation</dt><dd>${confirmationWillBeSent ? 'Emailed to the lead from your Gmail after booking' : 'None: no channel set, or the lead has no email'}</dd></dl>
+          <div id="v-book-msg"></div>
+          <div class="row end"><button class="btn primary" id="v-book">Confirm booking</button></div></div>`
+        document.getElementById('v-book').addEventListener('click', async (e) => {
+          e.target.disabled = true
+          e.target.textContent = 'Checking and booking…'
+          try {
+            const { viewing: b } = await api(`/api/viewings/${v.id}/book`, { method: 'POST', body: {} })
+            toast(b.status === 'booked' ? `Booked in Google Calendar${b.confirmationStatus === 'sent' ? '; confirmation emailed' : ''}.` : `Not booked: ${b.error}`)
+            renderViewings(new URLSearchParams())
+          } catch (error) {
+            document.getElementById('v-book-msg').innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+            e.target.disabled = false
+            e.target.textContent = 'Confirm booking'
+          }
+        })
+      } catch (error) {
+        msg.innerHTML = `<div class="notice err">${esc(error.details?.fields ? Object.values(error.details.fields).join(' ') : error.message)}</div>`
+      }
+    }
+  }
+  loadViewingList()
+}
+
+async function loadViewingList() {
+  const list = document.getElementById('v-list')
+  if (!list) return
+  try {
+    const { viewings } = await api('/api/viewings')
+    list.innerHTML = viewings.length ? `<ul class="timeline">${viewings.map((v) => `<li data-v="${v.id}">
+      <div class="row" style="justify-content:space-between"><div><a href="#/leads/${v.leadId}"><strong>${esc(v.leadName)}</strong></a> ${VIEW_STATUS[v.status]}
+        <div class="small">${esc(v.when)} · ${v.durationMinutes} min · ${v.properties.map((p) => esc(p.title)).join(', ')}</div>
+        <div class="small muted">Confirmation: ${esc(CONF_STATUS[v.confirmationStatus])}${v.confirmationDetail ? ` (${esc(v.confirmationDetail)})` : ''}${v.eventLink ? ` · <a href="${esc(v.eventLink)}" target="_blank" rel="noopener">Open in Google Calendar</a>` : ''}${v.feedback ? ` · Feedback: ${esc(v.feedback.status.replace('_', ' '))}` : ''}</div>
+        ${v.error ? `<div class="small" style="color:var(--danger)">${esc(v.error)}</div>` : ''}
+        ${v.status === 'booked' && v.ended ? '<div class="notice warn small" style="margin-top:.35rem">This viewing has ended. Did it take place?</div>' : ''}</div>
+      <div class="row">
+        ${v.status === 'booked' && Date.parse(v.startAt) <= Date.now() ? '<button class="btn primary small" data-act="completed">It took place</button><button class="btn ghost small" data-act="no_show">No-show</button>' : ''}
+        ${v.status === 'booked' && !v.ended ? '<button class="btn ghost small" data-act="move">Move</button>' : ''}
+        ${v.status === 'booked' && v.confirmationStatus === 'failed' ? '<button class="btn ghost small" data-act="resend">Resend confirmation</button>' : ''}
+        ${['failed', 'unknown'].includes(v.status) ? '<button class="btn ghost small" data-act="retry">Try booking again</button>' : ''}
+        ${['booked', 'failed', 'unknown'].includes(v.status) && !v.ended ? '<button class="btn ghost small" data-act="cancel">Cancel</button>' : ''}
+      </div></div><div class="v-extra"></div></li>`).join('')}</ul>` : '<p class="muted">No viewings yet.</p>'
+    list.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => viewingAction(viewings.find((v) => v.id === b.closest('[data-v]').dataset.v), b.dataset.act, b)))
+  } catch (error) {
+    list.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+  }
+}
+
+async function viewingAction(v, act, btn) {
+  const extra = btn.closest('[data-v]').querySelector('.v-extra')
+  try {
+    if (act === 'completed' || act === 'no_show') {
+      const r = await api(`/api/viewings/${v.id}/outcome`, { method: 'POST', body: { outcome: act } })
+      toast(act === 'completed' ? `Marked as taken place. Feedback: ${r.feedback?.detail || r.feedback?.status}` : 'Marked as a no-show.')
+    } else if (act === 'cancel') {
+      if (!(await confirmDialog('Cancel this viewing?', v.status === 'booked' ? 'DealSaathi removes the event from your Google Calendar and, if the lead had a confirmation, emails them.' : 'This viewing was not booked in your calendar; it is just closed.', 'Cancel viewing'))) return
+      const r = await api(`/api/viewings/${v.id}/cancel`, { method: 'POST', body: {} })
+      toast(`Cancelled${r.leadNotified ? `; lead notified: ${r.leadNotified}` : ''}.`)
+    } else if (act === 'resend') {
+      const r = await api(`/api/viewings/${v.id}/confirmation`, { method: 'POST', body: {} })
+      toast(`Confirmation: ${CONF_STATUS[r.viewing.confirmationStatus]}.`)
+    } else if (act === 'retry') {
+      if (v.status === 'unknown' && !(await confirmDialog('Is it missing from your calendar?', 'The last attempt got no answer, so it may already be in your Google Calendar. Book again only if it is not there.', 'Book again'))) return
+      const r = await api(`/api/viewings/${v.id}/book`, { method: 'POST', body: { confirmNotInCalendar: v.status === 'unknown' } })
+      toast(r.viewing.status === 'booked' ? 'Booked in Google Calendar.' : `Not booked: ${r.viewing.error}`)
+    } else if (act === 'move') {
+      extra.innerHTML = `<div class="row" style="margin-top:.5rem"><input type="date" min="${todayLocal()}" value="${esc(v.localDate)}" style="width:auto"><button class="btn ghost small" data-find>Find free times</button></div><div data-slots></div>`
+      extra.querySelector('[data-find]').addEventListener('click', async () => {
+        const date = extra.querySelector('input[type=date]').value
+        const out = extra.querySelector('[data-slots]')
+        try {
+          const r = await api(`/api/viewings/slots?date=${date}&durationMinutes=${v.durationMinutes}&except=${v.id}`)
+          out.innerHTML = r.slots.length ? `<div class="slot-grid">${r.slots.map((sl) => `<button class="btn ghost small" data-slot="${sl.start}">${esc(sl.label)}</button>`).join('')}</div>` : '<p class="small muted">No free time that day.</p>'
+          out.querySelectorAll('[data-slot]').forEach((sb) => sb.addEventListener('click', async () => {
+            try {
+              const m = await api(`/api/viewings/${v.id}/reschedule`, { method: 'POST', body: { start: sb.dataset.slot } })
+              toast(`Moved to ${m.viewing.when}${m.leadNotified ? `; lead notified: ${m.leadNotified}` : ''}.`)
+              loadViewingList()
+            } catch (error) { out.innerHTML = `<div class="notice err small">${esc(error.message)}</div>` }
+          }))
+        } catch (error) { out.innerHTML = `<div class="notice err small">${esc(error.message)}</div>` }
+      })
+      return
+    }
+    loadViewingList()
+  } catch (error) {
+    toast(error.message)
+  }
+}
+
+// ---------- feedback (Post-Viewing Feedback) ----------
+const FB_STATUS = { created: 'Not sent', sent: 'Sent, waiting for the answer', send_failed: 'Send failed', send_unknown: 'Send outcome unknown', submitted: 'Answered', expired: 'Expired' }
+const VERDICT_LABEL = { liked: 'Liked it', too_expensive: 'Too expensive', wrong_location: 'Wrong location', wrong_size: 'Wrong size or layout', other_property: 'Interested in another property' }
+
+async function renderFeedback() {
+  main.innerHTML = `<div class="page-head"><div><h1>Feedback</h1><p>Requests sent after viewings you marked as taken place, and what buyers answered.</p></div></div>
+    <section class="card"><div id="fb-list"><p class="muted">Loading…</p></div></section>`
+  const box = document.getElementById('fb-list')
+  try {
+    const { requests } = await api('/api/feedback')
+    box.innerHTML = requests.length ? `<ul class="timeline">${requests.map((r) => `<li><div class="row" style="justify-content:space-between"><div>
+        <a href="#/leads/${r.leadId}"><strong>${esc(r.leadName)}</strong></a> <span class="pill ${r.status === 'submitted' ? 'pill-on' : r.status === 'send_failed' ? 'pill-err' : 'pill-setup'}">${esc(FB_STATUS[r.status])}</span>
+        <div class="small muted">Viewing ${esc(r.viewedAt)} · ${r.properties.map((p) => esc(p.title)).join(', ')}${r.sendDetail ? ` · ${esc(r.sendDetail)}` : ''}</div></div>
+        ${['send_failed', 'send_unknown'].includes(r.status) ? `<button class="btn ghost small" data-resend="${r.id}" data-unknown="${r.status === 'send_unknown'}">Send again</button>` : ''}</div>
+        ${r.response ? `<ul class="small">${r.response.answers.map((a) => `<li>${esc(r.properties.find((p) => p.id === a.propertyId)?.title || 'Listing')}: <strong>${esc(VERDICT_LABEL[a.verdict])}</strong></li>`).join('')}</ul>
+          ${r.response.comments ? `<p class="small">“${esc(r.response.comments)}”</p>` : ''}
+          ${r.preferenceChanges.length ? `<div class="notice info small"><strong>Preferences updated:</strong><ul>${r.preferenceChanges.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></div>` : ''}` : ''}</li>`).join('')}</ul>`
+      : '<p class="muted">No feedback requests yet. They are sent when you mark a viewing as having taken place (with Post-Viewing Feedback switched on).</p>'
+    box.querySelectorAll('[data-resend]').forEach((b) => b.addEventListener('click', async () => {
+      const unknown = b.dataset.unknown === 'true'
+      if (unknown && !(await confirmDialog('Send it again?', 'The last email got no answer, so it may have arrived. Check your Gmail Sent folder first.', 'Send again'))) return
+      try {
+        const r = await api(`/api/feedback/${b.dataset.resend}/resend`, { method: 'POST', body: { confirm: unknown } })
+        toast(`Feedback request: ${FB_STATUS[r.status] || r.status}.`)
+        renderFeedback()
+      } catch (error) { toast(error.message) }
+    }))
+  } catch (error) {
+    box.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+  }
+}
+
+// ---------- tenancies and rent (Rent and Payment Reminders) ----------
+const DUE_STATE = {
+  upcoming: '<span class="pill pill-off">Upcoming</span>', due_today: '<span class="pill pill-setup">Due today</span>', overdue: '<span class="pill pill-err">Overdue</span>',
+  partially_paid: '<span class="pill pill-setup">Part paid</span>', partially_paid_due_today: '<span class="pill pill-setup">Part paid · due today</span>', partially_paid_overdue: '<span class="pill pill-err">Part paid · overdue</span>',
+  paid: '<span class="pill pill-on">Paid</span>', waived: '<span class="pill pill-off">Waived</span>', cancelled: '<span class="pill pill-off">Cancelled</span>'
+}
+const rupees = (n) => `₹${Number(n).toLocaleString('en-IN')}`
+const T_FIELDS = [
+  { key: 'tenant_name', label: 'Tenant name', type: 'text', required: true },
+  { key: 'tenant_email', label: 'Tenant email', type: 'email', hint: 'Reminders are emailed here.' },
+  { key: 'tenant_phone', label: 'Tenant phone', type: 'tel' },
+  { key: 'property_label', label: 'Property', type: 'text', required: true, hint: 'e.g. Flat 4B, Koramangala' },
+  { key: 'rent_amount', label: 'Monthly rent (₹)', type: 'number', min: 1, max: 100000000, required: true },
+  { key: 'due_day', label: 'Due on day of month', type: 'number', min: 1, max: 28, required: true },
+  { key: 'lease_start', label: 'Lease start', type: 'date', required: true },
+  { key: 'lease_end', label: 'Lease end', type: 'date' },
+  { key: 'reference', label: 'Agreement reference', type: 'text' },
+  { key: 'notes', label: 'Notes', type: 'textarea', wide: true }
+]
+
+async function renderRent() {
+  main.innerHTML = `<div class="page-head"><div><h1>Tenancies and rent</h1><p>Rent is paid only when Razorpay confirms it or you record a payment you verified.</p></div>
+      <div class="row"><a class="btn primary" href="#/rent/new">Add tenancy</a></div></div><div id="rent-body"><p class="muted">Loading…</p></div>`
+  const box = document.getElementById('rent-body')
+  try {
+    const d = await api('/api/rent')
+    const dueRow = (x) => `<li class="conn-row"><div style="flex:1;min-width:0"><a href="#/rent/${x.tenancyId}"><strong>${esc(x.tenantName)}</strong></a> ${DUE_STATE[x.state]}
+      <div class="small muted">${esc(x.propertyLabel)} · ${esc(x.period)} · due ${esc(x.dueDate)} · ${rupees(x.outstanding)} owed${x.reminders.length ? ` · last reminder: ${esc(x.reminders.at(-1).status)}` : ''}</div></div></li>`
+    box.innerHTML = `
+      <div class="grid stats"><div class="card stat"><div class="label">Outstanding</div><div class="value">${rupees(d.totals.outstanding)}</div></div>
+        <div class="card stat"><div class="label">Overdue</div><div class="value">${rupees(d.totals.overdue)}</div></div>
+        <div class="card stat"><div class="label">Active tenancies</div><div class="value">${d.tenancies.filter((t) => t.status === 'active').length}</div></div></div>
+      <div class="grid two-col">
+        <section class="card"><h2>Overdue</h2>${d.overdue.length ? `<ul class="timeline">${d.overdue.map(dueRow).join('')}</ul>` : '<p class="muted">Nothing overdue.</p>'}</section>
+        <section class="card"><h2>Due soon</h2>${d.dueSoon.length ? `<ul class="timeline">${d.dueSoon.map(dueRow).join('')}</ul>` : '<p class="muted">Nothing due soon.</p>'}</section>
+      </div>
+      <section class="card" style="margin-top:1rem"><h2>Tenancies</h2>${d.tenancies.length ? `<table><thead><tr><th>Tenant</th><th>Property</th><th>Rent</th><th>Due day</th><th>Lease ends</th><th>Status</th></tr></thead><tbody>
+        ${d.tenancies.map((t) => `<tr data-t="${t.id}" tabindex="0"><td class="cell-name">${esc(t.tenantName)}${t.optOut ? ' <span class="badge">Opted out</span>' : ''}</td><td>${esc(t.propertyLabel)}</td><td>${rupees(t.rentAmount)}</td><td>${t.dueDay}</td><td>${esc(t.leaseEnd || '—')}</td><td>${esc(t.status)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No tenancies yet.</p>'}</section>`
+    box.querySelectorAll('tr[data-t]').forEach((tr) => tr.addEventListener('click', () => { location.hash = `#/rent/${tr.dataset.t}` }))
+  } catch (error) {
+    box.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+  }
+}
+
+async function renderTenancyForm(id) {
+  let t = { due_day: 1, lease_start: todayLocal() }
+  if (id) t = (await api(`/api/rent/tenancies/${encodeURIComponent(id)}`)).tenancy
+  main.innerHTML = `<div class="page-head"><div><a href="${id ? `#/rent/${id}` : '#/rent'}" class="small">← Back</a><h1>${id ? 'Edit tenancy' : 'Add tenancy'}</h1>
+      <p>Rent is tracked from the month the tenancy is added (or its start, if later): no backlog of past months is created.</p></div></div>
+    <form class="card" id="t-form" novalidate><div id="t-notice"></div>
+      <div class="form-grid">${T_FIELDS.map((f) => fieldHtml(f, t[f.key])).join('')}
+        <div class="field"><label><input type="checkbox" name="reminders_opt_out" style="width:auto" ${t.reminders_opt_out ? 'checked' : ''}> Tenant opted out of reminders</label></div>
+        ${id ? `<div class="field"><label for="t-status">Status</label><select id="t-status" name="status">${['active', 'paused', 'ended'].map((x) => `<option ${x === t.status ? 'selected' : ''}>${x}</option>`).join('')}</select></div>` : ''}
+      </div>
+      <div class="row end" style="margin-top:1rem"><button class="btn primary" type="submit">Save</button></div></form>`
+  const form = document.getElementById('t-form')
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const tenancy = Object.fromEntries(T_FIELDS.map((f) => [f.key, form.elements[f.key].value.trim() === '' ? null : f.type === 'number' ? Number(form.elements[f.key].value) : form.elements[f.key].value.trim()]))
+    tenancy.reminders_opt_out = form.elements.reminders_opt_out.checked
+    if (id) tenancy.status = form.elements.status.value
+    try {
+      const r = id ? await api(`/api/rent/tenancies/${id}`, { method: 'PATCH', body: { tenancy } }) : await api('/api/rent/tenancies', { method: 'POST', body: { tenancy } })
+      toast('Tenancy saved.')
+      location.hash = `#/rent/${r.tenancy.id}`
+    } catch (error) {
+      showFieldErrors(form, error.details?.fields)
+      document.getElementById('t-notice').innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+    }
+  })
+}
+
+async function renderTenancy(id) {
+  const d = await api(`/api/rent/tenancies/${encodeURIComponent(id)}`)
+  const t = d.tenancy
+  main.innerHTML = `<div class="page-head"><div><a href="#/rent" class="small">← Tenancies</a><h1>${esc(t.tenant_name)}</h1><p>${esc(t.property_label)} · ${rupees(t.rent_amount)} a month, due on day ${t.due_day} · ${esc(t.status)}${t.reminders_opt_out ? ' · opted out of reminders' : ''}</p></div>
+      <a class="btn ghost" href="#/rent/${t.id}/edit">Edit</a></div>
+    <section class="card"><h2>Rent</h2>${d.dues.length ? `<ul class="timeline">${d.dues.map((x) => `<li data-due="${x.id}">
+      <div class="row" style="justify-content:space-between"><div><strong>${esc(x.period)}</strong> ${DUE_STATE[x.state]} <span class="small">due ${esc(x.dueDate)} · ${rupees(x.amount)}${x.amountPaid ? ` · ${rupees(x.amountPaid)} paid` : ''}${x.verificationSource ? ` (${x.verificationSource === 'razorpay' ? 'confirmed by Razorpay' : 'recorded by you'})` : ''}</span>
+        ${x.paymentLink ? `<div class="small">Payment link: <a href="${esc(x.paymentLink.url)}" target="_blank" rel="noopener">${esc(x.paymentLink.url)}</a> (Razorpay status: ${esc(x.paymentLink.status)})</div>` : ''}
+        ${x.paymentLinkError ? `<div class="small" style="color:var(--danger)">Payment link: ${esc(x.paymentLinkError)}</div>` : ''}
+        ${x.reminders.length ? `<div class="small muted">Reminders: ${x.reminders.map((r) => `${esc(r.stage.replace('_', ' '))} ${esc(r.status)}`).join(', ')}</div>` : ''}</div>
+      ${['open', 'partially_paid'].includes(x.status) ? `<div class="row"><button class="btn ghost small" data-pay>Record payment</button>${x.paymentLink ? '<button class="btn ghost small" data-check>Check Razorpay</button>' : ''}<button class="btn ghost small" data-waive>Waive</button></div>` : ''}</div>
+      <div class="due-extra"></div></li>`).join('')}</ul>` : '<p class="muted">No rent obligations yet.</p>'}</section>
+    <section class="card" style="margin-top:1rem"><h2>History</h2><ul class="timeline">${d.events.map((e) => `<li class="small"><strong>${esc(e.detail)}</strong><div class="muted">${esc(fmtDateTime(e.created_at))}</div></li>`).join('')}</ul></section>`
+  main.querySelectorAll('[data-due]').forEach((li) => {
+    const dueId = li.dataset.due
+    const extra = li.querySelector('.due-extra')
+    li.querySelector('[data-pay]')?.addEventListener('click', () => {
+      const x = d.dues.find((y) => String(y.id) === dueId)
+      extra.innerHTML = `<form class="form-grid" style="margin-top:.5rem" novalidate>
+        <div class="field" data-field="amount"><label>Amount received (₹)</label><input name="amount" type="number" min="1" value="${x.outstanding}"><div class="err"></div></div>
+        <div class="field" data-field="paidOn"><label>Received on</label><input name="paidOn" type="date" max="${todayLocal()}" value="${todayLocal()}"><div class="err"></div></div>
+        <div class="field wide" data-field="note"><label>How you verified it</label><input name="note" placeholder="e.g. HDFC statement, UTR 1234"><div class="err"></div></div>
+        <div class="row end wide"><button class="btn primary small">Record verified payment</button></div></form>`
+      const f = extra.querySelector('form')
+      f.addEventListener('submit', async (e) => {
+        e.preventDefault()
+        try {
+          await api(`/api/rent/dues/${dueId}/payments`, { method: 'POST', body: { amount: Number(f.elements.amount.value), paidOn: f.elements.paidOn.value, note: f.elements.note.value } })
+          toast('Payment recorded.')
+          renderTenancy(id)
+        } catch (error) { showFieldErrors(f, error.details?.fields); if (!error.details?.fields) toast(error.message) }
+      })
+    })
+    li.querySelector('[data-check]')?.addEventListener('click', async () => {
+      try {
+        const r = await api(`/api/rent/dues/${dueId}/check`, { method: 'POST', body: {} })
+        toast(r.check.changed ? 'Razorpay confirmed a payment.' : `Razorpay status: ${r.check.status || 'no change'}.`)
+        renderTenancy(id)
+      } catch (error) { toast(error.message) }
+    })
+    li.querySelector('[data-waive]')?.addEventListener('click', async () => {
+      const note = prompt('Why is this month waived?')
+      if (!note) return
+      try { await api(`/api/rent/dues/${dueId}/waive`, { method: 'POST', body: { note } }); renderTenancy(id) } catch (error) { toast(error.message) }
+    })
+  })
+}
+
 // ---------- router ----------
 async function route() {
   if (session.mode === 'locked') return renderLocked()
@@ -1290,6 +1686,12 @@ async function route() {
     else if (section === 'properties' && parts[1] && parts[2] === 'edit') await renderPropertyForm(parts[1])
     else if (section === 'properties' && parts[1]) await renderPropertyDetail(parts[1])
     else if (section === 'properties') await renderProperties(params)
+    else if (section === 'viewings') await renderViewings(params)
+    else if (section === 'feedback') await renderFeedback()
+    else if (section === 'rent' && parts[1] === 'new') await renderTenancyForm(null)
+    else if (section === 'rent' && parts[1] && parts[2] === 'edit') await renderTenancyForm(parts[1])
+    else if (section === 'rent' && parts[1]) await renderTenancy(parts[1])
+    else if (section === 'rent') await renderRent()
     else if (section === 'integrations') await renderIntegrations()
     else if (section === 'automations') await renderAutomations()
     else main.innerHTML = '<div class="empty"><h1>Page not found</h1><p><a href="#/dashboard">Go to the dashboard</a></p></div>'

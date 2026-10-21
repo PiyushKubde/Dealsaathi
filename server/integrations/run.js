@@ -8,7 +8,81 @@ import { cleanViasocketMessage, requireOwnConnection, requireViasocket, viasocke
 /** The only actions DealSaathi runs. Code picks one of these by name; nothing else can be run. */
 export const ACTIONS = {
   gmail_send_email: { slug: 'gmail', app: 'Gmail', actionId: 'rowogelpy0h6', version: 'V55', check: 'check the Gmail Sent folder' },
-  slack_send_message: { slug: 'slack', app: 'Slack', actionId: 'row1jrbor', version: 'V107', check: 'check the Slack channel' }
+  slack_send_message: { slug: 'slack', app: 'Slack', actionId: 'row1jrbor', version: 'V107', check: 'check the Slack channel' },
+  calendar_free_busy: { slug: 'google-calendar', app: 'Google Calendar', actionId: 'row7kcom7ds1', version: 'V3', check: 'try again' },
+  calendar_create_event: { slug: 'google-calendar', app: 'Google Calendar', actionId: 'rowuitv4m6uy', version: 'V23', check: 'check your Google Calendar' },
+  calendar_update_event: { slug: 'google-calendar', app: 'Google Calendar', actionId: 'rowo9a3brirh', version: 'V13', check: 'check your Google Calendar' },
+  calendar_delete_event: { slug: 'google-calendar', app: 'Google Calendar', actionId: 'row32ktr5oju', version: 'V6', check: 'check your Google Calendar' },
+  razorpay_create_link: { slug: 'razorpay', app: 'Razorpay', actionId: 'rowtl0joo241', version: 'V5', check: 'check your Razorpay payment links' },
+  razorpay_list_links: { slug: 'razorpay', app: 'Razorpay', actionId: 'rowlcouozywu', version: 'V2', check: 'try again' },
+  razorpay_cancel_link: { slug: 'razorpay', app: 'Razorpay', actionId: 'rowyqfuoa1gu', version: 'V2', check: 'check your Razorpay payment links' }
+}
+
+/** prepareRun + execute, for callers that turn a setup error into the same answer as a refusal. */
+export async function runOnce(db, vs, userId, connectionId, actionKey, inputData) {
+  const action = ACTIONS[actionKey]
+  let prepared
+  try {
+    prepared = await prepareRun(db, vs, userId, connectionId, action)
+  } catch (error) {
+    return { outcome: 'failed', notSent: true, reason: error.message || `Could not prepare ${action.app}.` }
+  }
+  return execute(vs, prepared, inputData)
+}
+
+/** A Google Calendar event from Create/Update Event: { id, htmlLink, status } (a refusal comes as { message }). */
+export function readCalendarEvent(result) {
+  const core = unwrap(result)
+  if (!core || typeof core !== 'object') return { ok: false, reason: 'Google Calendar returned no event details.' }
+  const failure = explicitFailure(result, core)
+  if (failure) return { ok: false, reason: failure }
+  if (typeof core.id !== 'string' || !core.id) {
+    if (typeof core.message === 'string') return { ok: false, reason: core.message.slice(0, 300) }
+    return { ok: false, unknown: true, reason: 'viaSocket answered without a Google Calendar event id, so the booking cannot be confirmed. Check your calendar before trying again.' }
+  }
+  return { ok: true, eventId: core.id, link: typeof core.htmlLink === 'string' ? core.htmlLink : null, status: typeof core.status === 'string' ? core.status : null }
+}
+
+/** Free/busy: { timeMin, timeMax, calendars: { <id>: { busy: [{ start, end }], errors? } } }. */
+export function readFreeBusy(result) {
+  const core = unwrap(result)
+  const calendars = core?.calendars
+  if (!calendars || typeof calendars !== 'object') {
+    return { ok: false, reason: typeof core?.message === 'string' ? core.message.slice(0, 300) : 'Google Calendar did not return availability.' }
+  }
+  const entries = Object.values(calendars)
+  const errors = entries.flatMap((c) => (Array.isArray(c?.errors) ? c.errors : []))
+  if (errors.length) return { ok: false, reason: `Google Calendar could not read this calendar (${String(errors[0]?.reason || 'error')}).` }
+  const busy = entries.flatMap((c) => (Array.isArray(c?.busy) ? c.busy : []))
+    .map((b) => ({ start: Date.parse(b.start), end: Date.parse(b.end) }))
+    .filter((b) => Number.isFinite(b.start) && Number.isFinite(b.end) && b.end > b.start)
+  const timeMin = Date.parse(core.timeMin)
+  const timeMax = Date.parse(core.timeMax)
+  return { ok: true, busy, timeMin: Number.isFinite(timeMin) ? timeMin : null, timeMax: Number.isFinite(timeMax) ? timeMax : null }
+}
+
+/** Razorpay payment link: { id, short_url, status, amount, amount_paid } (amounts in paise). */
+export function readPaymentLink(result) {
+  const core = unwrap(result)
+  if (!core || typeof core !== 'object') return { ok: false, reason: 'Razorpay returned no payment link.' }
+  const failure = explicitFailure(result, core)
+  if (failure) return { ok: false, reason: failure }
+  if (typeof core.id !== 'string' || !core.id.startsWith('plink_')) return { ok: false, unknown: true, reason: 'viaSocket answered without a Razorpay payment link id.' }
+  return { ok: true, id: core.id, url: typeof core.short_url === 'string' ? core.short_url : null, status: core.status, amount: core.amount, amountPaid: core.amount_paid ?? 0 }
+}
+
+/** List Payment Links by reference: the links Razorpay holds for that reference. */
+export function readPaymentLinkList(result) {
+  const core = unwrap(result)
+  const list = Array.isArray(core) ? core : Array.isArray(core?.payment_links) ? core.payment_links : Array.isArray(core?.items) ? core.items : null
+  if (!list) {
+    const failure = core && typeof core === 'object' ? explicitFailure(result, core) : null
+    return { ok: false, reason: failure || 'Razorpay did not return a list of payment links.' }
+  }
+  return {
+    ok: true,
+    links: list.filter((l) => l && typeof l.id === 'string').map((l) => ({ id: l.id, status: String(l.status || ''), amount: Number(l.amount) || 0, amountPaid: Number(l.amount_paid) || 0, referenceId: l.reference_id ?? null }))
+  }
 }
 
 export async function serviceIdOf(vs, slug, app) {
@@ -165,5 +239,18 @@ export async function gmailFromOptions(db, vs, userId, connectionId) {
     return options.map((o) => ({ label: String(o.label), value: String(o.value) }))
   } catch (error) {
     throw viasocketError(error, 'list your Gmail sender addresses')
+  }
+}
+
+/** The options a PICK key of an allowlisted action offers for the broker's own connection. */
+export async function pickOptions(db, vs, userId, connectionId, actionKey, fieldKey, existingFields = {}) {
+  const action = ACTIONS[actionKey]
+  const connection = await requireActiveConnection(db, vs, userId, connectionId, action)
+  const versionId = await versionIdOf(vs, connection.service_id, action)
+  try {
+    const { options } = await vs.listOptions(userId, versionId, { fieldKey, authId: connection.auth_id, existingFields })
+    return options.map((o) => ({ label: String(o.label), value: String(o.value) }))
+  } catch (error) {
+    throw viasocketError(error, `list your ${action.app} options`)
   }
 }

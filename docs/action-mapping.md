@@ -83,15 +83,47 @@ move a follow-up from *awaiting confirmation* to *sending*, so a double click se
 | New Property → Buyer Matching | Property saved, in the same transaction | Local matching with reasons | On/off (default on). Automatic sending to buyers is shown as unavailable (needs WhatsApp Business) | One activity entry per new match | Working |
 | Property Recommendations | Broker ticks matching, non-sample listings and asks to email them | Gmail · Send Email, after the broker approves the email | The Gmail account; approval always required | Single-send guard per email | Built; needs Gmail |
 | Buyer Follow-Up Reminders | Embarko schedule, every 15 minutes, or "Run check now" | Reminder rows and lead activity; optional Gmail or Slack summary | Days without activity (1–90), notify none/Gmail/Slack | One reminder per lead, reason and anchor (follow-up date or last activity time) | Built; scheduler only when hosted |
-| Property Viewing Scheduler | | | | | **Needs setup:** not built (Google Calendar) |
-| Post-Viewing Feedback | | | | | **Needs setup:** not built (depends on viewings and a buyer channel) |
-| Rent and Payment Reminders | | | | | **Needs setup:** not built (tenancies; Razorpay or manual verification) |
+| Property Viewing Scheduler | The broker confirms a free time on the Viewings page | Google Calendar · Free/Busy, Create, Update, Delete Event; Gmail · Send Email for the optional confirmation | Calendar account and calendar (picker), time zone, length, working hours, confirmation none/Gmail | One booked viewing per broker per start time (partial unique index); a booking is claimed before the event is created; an unknown outcome is retried only after the broker confirms it is not in the calendar | Built; needs Google Calendar |
+| Post-Viewing Feedback | The broker marks a viewing as taken place | Gmail · Send Email with `/feedback/<token>` | Gmail account, link lifetime (1–60 days) | One request per viewing (unique); one answer per request; a resend rotates the token | Built; needs Gmail |
+| Rent and Payment Reminders | Embarko schedule, every 15 minutes, or "Run check now" | Gmail · Send Email; Razorpay · Create / List / Cancel Payment Link | Gmail account, days before, on the day, days after (e.g. `3,7`), optional Razorpay account | One obligation per tenancy and month; one reminder per obligation and stage (`dedupe_key`); one link per attempt (`reference_id`); one payment record per Razorpay link and amount | Built; scheduler only when hosted |
 
 An automation can be switched on only when its settings are complete and its connection is live on viaSocket.
 If a connection later disappears, the card shows **Needs setup** and its runs fail with the reason; nothing is sent.
 Every run is stored (`automation_runs`) with trigger, status, summary and error. A run cut off by a restart becomes **unknown**.
 
-## Catalog actions checked for the next workflows (not built yet)
+## Google Calendar (Property Viewing Scheduler)
+
+Slug `google-calendar`, service `rowkhibv5efp`. Each broker connects their own Google account.
+
+| Action | Id · version | Inputs DealSaathi sends | Success requires |
+| --- | --- | --- | --- |
+| Get Free/Busy Information | `row7kcom7ds1` V3 | `calendar_id` (picked by the broker from the action's own picker), `date` (DD-MM-YYYY), `timeZone` | A `calendars.<id>.busy` list. Only the `timeMin`–`timeMax` range it covers is offered |
+| Create Calendar Event | `rowuitv4m6uy` V23 | `calendar_id`, `summary`, `description` (properties, note), `location`, `startdate`, `starttime`, `meeting_duration` (HH:MM), `timeZone` (one of the action's 20), `attendees` (the lead's email only when the broker ticks "invite"; otherwise empty), `transparency: opaque` | An event `id` in the answer |
+| Update Calendar Event | `rowo9a3brirh` V13 | The event id and the new start/duration | The same event `id` |
+| Delete Calendar Event | `row32ktr5oju` V6 | The event id | No error. If the delete is refused, the viewing stays booked and the broker is told |
+
+The free/busy check runs again just before the event is created. A viewing is **booked** only with an event id.
+
+## Feedback links
+
+The link is `https://<app>/feedback/<32 random bytes, base64url>`. Only its SHA-256 is stored. The page and its API
+(`/api/public/feedback/:token`, rate limited) show the lead's first name, the viewing date and the viewed listings'
+title and area: no email, phone, notes, prices, address or broker data. *Too expensive* lowers the buyer's maximum
+budget to the lakh below that price; *wrong location* leaves that locality out of matching; any answer other than
+*liked* removes that listing from the buyer's recommendations.
+
+## Razorpay (Rent and Payment Reminders)
+
+Slug `razorpay`, service `row2n5tu2hd9`. Optional: without it, reminders are sent without a link and payments are
+recorded by the broker.
+
+| Action | Id · version | Inputs | Use |
+| --- | --- | --- | --- |
+| Create Payment Link | `rowtl0joo241` V5 | `amount` (paise, what is still owed), `currency: INR`, `accept_partial: false`, `description`, `customer` {name, email, contact}, `reference_id: ds-rent-<obligation>-<attempt>`, `link_type: standard`, `add_customer: true`, `notes`; Razorpay's own notification is not requested (DealSaathi emails the link) | A `plink_…` id and `short_url`; the reference is claimed before the call |
+| List Payment Links | `rowlcouozywu` V2 | `search_mode: reference_id`, the reference | `status` and `amount_paid`: **paid** or **partially_paid** are the only ways Razorpay marks rent paid |
+| Cancel Payment Link | `rowyqfuoa1gu` V2 | The link id | When the broker records a payment or waives the month |
+
+## Catalog actions checked for later workflows (not built)
 
 | Workflow | App · action (live catalog) | Ids | Blocker |
 | --- | --- | --- | --- |
@@ -99,7 +131,6 @@ Every run is stored (`automation_runs`) with trigger, status, summary and error.
 | (rejected) | Built-in WhatsApp · Send WhatsApp Message (NoAuth) | `rowax61bwd33` V18 | Its 97 templates belong to viaSocket's own business account (support, webinars, billing). Using them would send from viaSocket's number with viaSocket's text |
 | Reply tracking | WhatsApp Business Cloud (Meta) · Message Notification trigger | | Same account; replies only, never "opened" |
 | Slack alerts and summaries | Slack · Send Message | slug `slack`, `rowbu58rc`, V107; channel is a picker | A Slack workspace connected by the broker |
-| Viewings | Google Calendar · Get Free/Busy Information, Create Calendar Event; New Upcoming Event trigger | slug `google-calendar`, `rowkhibv5efp` | A Google Calendar connected by the broker; the client's availability from a real reply |
 | Itinerary travel times | Google Map · Get a Distance Matrix | slug `Google-Map`, `rowa0ibichgc` (Basic sign-in) | A Google Maps API key, connected by the broker; otherwise ordering is labelled approximate |
-| Rent payment status | Razorpay · Create Payment Link; Any Payment Link Gets Paid trigger | slug `razorpay`, `row2n5tu2hd9` | A Razorpay account connected by the property manager; otherwise payments are verified manually |
-| Scheduled checks | Embarko schedule `GET /tasks/automations` every 15 minutes | embarko.json | Built for Follow-Up Reminders; rent will use the same route |
+| Instant rent confirmation | Razorpay · Any Payment Link Gets Paid trigger | slug `razorpay` | Needs a viaSocket flow per broker; the 15-minute List Payment Links check is used instead |
+| Scheduled checks | Embarko schedule `GET /tasks/automations` every 15 minutes | embarko.json | Built: follow-up reminders, ended viewings, rent reminders and payment checks |

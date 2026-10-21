@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex">
+  <title>Your viewing feedback</title>
+  <style>
+    :root { --bg: #f6f7f9; --card: #fff; --text: #16202a; --muted: #5b6673; --border: #e2e6eb; --primary: #0f766e; --primary-soft: #e6f4f2; --ok: #157347; --err: #b42318; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #0f1419; --card: #161c23; --text: #e6ebf0; --muted: #9aa6b2; --border: #2a333d; --primary: #2dd4bf; --primary-soft: #12302d; --ok: #4ade80; --err: #f97066; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 560px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+    .muted { color: var(--muted); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; margin-top: 1rem; }
+    .card h2 { font-size: 1.05rem; margin: 0; }
+    .opts { display: grid; gap: .5rem; margin-top: .75rem; }
+    .opt { display: flex; gap: .6rem; align-items: center; border: 1px solid var(--border); border-radius: 10px; padding: .7rem .8rem; cursor: pointer; }
+    .opt:has(input:checked) { border-color: var(--primary); background: var(--primary-soft); }
+    .opt input { width: 1.1rem; height: 1.1rem; accent-color: var(--primary); }
+    textarea { width: 100%; min-height: 6rem; font: inherit; padding: .6rem; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text); }
+    button { font: inherit; font-weight: 600; width: 100%; padding: .8rem; margin-top: 1rem; border: 0; border-radius: 10px; background: var(--primary); color: #fff; cursor: pointer; }
+    button[disabled] { opacity: .6; }
+    .msg { margin-top: 1rem; padding: .8rem; border-radius: 10px; }
+    .msg.ok { color: var(--ok); background: var(--primary-soft); }
+    .msg.err { color: var(--err); border: 1px solid var(--err); }
+  </style>
+</head>
+<body>
+  <main id="root"><p class="muted">Loading…</p></main>
+  <script src="/feedback.js"></script>
+</body>
+</html>

@@ -15,7 +15,7 @@ import { AppError, validationError } from '../errors.js'
 import { getLead, logActivity, requireLead } from '../leads/service.js'
 import { requireViasocket } from '../integrations/service.js'
 import { ACTIONS, execute, gmailFromOptions, gmailInput, prepareRun, readGmailResult, requireActiveConnection, serviceIdOf } from '../integrations/run.js'
-import { getProperty, scoreMatch } from '../properties/service.js'
+import { getProperty, scoreMatch, withExclusions } from '../properties/service.js'
 import { finishRun, getSetting, startRun } from '../automations/store.js'
 
 export const GMAIL = { slug: 'gmail', actionId: ACTIONS.gmail_send_email.actionId, version: ACTIONS.gmail_send_email.version, name: 'Gmail', event: 'Send Email' }
@@ -87,7 +87,8 @@ const inr = (n) => (n >= 1e7 ? `â‚¹${+(n / 1e7).toFixed(2)} Cr` : n >= 1e5 ? `â‚
 const TYPE = { apartment: 'apartment', independent_house: 'independent house', villa: 'villa', plot: 'plot', commercial: 'commercial space', other: 'property' }
 
 /** The listings to recommend: saved, available, real (not samples) and still matching this lead. */
-function recommendable(db, lead, propertyIds) {
+function recommendable(db, rawLead, propertyIds) {
+  const lead = withExclusions(db, rawLead)
   if (!Array.isArray(propertyIds) || !propertyIds.length) throw validationError({ properties: 'Choose at least one listing.' })
   if (propertyIds.length > MAX_RECOMMENDED) throw validationError({ properties: `Choose up to ${MAX_RECOMMENDED} listings.` })
   const ids = [...new Set(propertyIds.map(Number))]

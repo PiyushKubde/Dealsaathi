@@ -119,7 +119,7 @@ export function createAuth({ db, accessCode, hosted = false }) {
 
     /** Guards /api: health and the session routes are always reachable. Sets req.user. */
     guard(req, res, next) {
-      if (req.path === '/health' || req.path === '/session' || req.path.startsWith('/session/')) return next()
+      if (req.path === '/health' || req.path === '/session' || req.path.startsWith('/session/') || req.path.startsWith('/public/')) return next()
       if (mode === 'locked') return next(lockedError())
       const user = currentUser(req)
       if (!user) return next(new AppError(401, 'login_required', 'Please sign in.'))

@@ -5,7 +5,10 @@ import { now } from '../db.js'
 import { AppError, validationError } from '../errors.js'
 import { getLead, logActivity } from '../leads/service.js'
 import { requireOwnConnection } from '../integrations/service.js'
-import { ACTIONS, execute, gmailInput, prepareRun, readGmailResult, readSlackResult, serviceIdOf, slackChannels, slackInput } from '../integrations/run.js'
+import { ACTIONS, execute, gmailInput, pickOptions, prepareRun, readGmailResult, readSlackResult, serviceIdOf, slackChannels, slackInput } from '../integrations/run.js'
+import { CALENDAR_TIMEZONES } from '../time.js'
+import { noticeEndedViewings } from '../viewings/service.js'
+import { runRentChecks } from '../rent/service.js'
 import { AUTOMATIONS, automation, finishRun, getRun, getSetting, lastRun, listRuns, saveSetting, startRun, usersWithEnabled } from './store.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
@@ -68,6 +71,29 @@ async function checkChannel(db, vs, user, raw, { live, allowNone = false }) {
   return { config, problems }
 }
 
+/** One of the broker's own connections to `slug`, checked: theirs, that app, and (with `live`) active on viaSocket. */
+async function checkConnection(db, vs, user, connectionId, slug, app, live) {
+  if (connectionId == null || connectionId === '') return [`Choose your connected ${app} account (connect it on the Integrations page).`]
+  const row = db.prepare('SELECT * FROM connections WHERE id = ? AND user_id = ?').get(Number(connectionId), user.id)
+  if (!row) return [`That ${app} account is not connected to your DealSaathi account.`]
+  if (!live) return []
+  if (!vs.configured) return ['viaSocket is not configured on this server.']
+  const serviceId = await serviceIdOf(vs, slug, app)
+  if (row.service_id !== serviceId) return [`Choose a ${app} account.`]
+  const liveConn = live.connections?.find((c) => c.id === row.auth_id)
+  if (live.connections && !liveConn) return [`Your ${app} connection no longer exists on viaSocket. Reconnect it on the Integrations page.`]
+  if (liveConn?.isExpired) return [`Your ${app} connection has expired. Reconnect it on the Integrations page.`]
+  return []
+}
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
+
+function parseDays(raw) {
+  const list = (Array.isArray(raw) ? raw : String(raw ?? '').split(',')).map((x) => String(x).trim()).filter(Boolean).map(Number)
+  if (list.some((n) => !Number.isInteger(n) || n < 1 || n > 60) || list.length > 5) return null
+  return [...new Set(list)].sort((a, b) => a - b)
+}
+
 /** The settings an automation needs, checked. `live` adds viaSocket checks. */
 async function checkConfig(db, vs, user, key, raw, live, scheduler) {
   const def = automation(key)
@@ -78,6 +104,55 @@ async function checkConfig(db, vs, user, key, raw, live, scheduler) {
   if (key === 'property_recommendations') {
     const { config, problems } = await checkChannel(db, vs, user, { ...raw, channel: 'gmail', emailTo: user.email }, { live })
     return { config: { connectionId: config.connectionId }, problems }
+  }
+  if (key === 'viewing_scheduler') {
+    const problems = []
+    const config = {
+      calendarConnectionId: raw?.calendarConnectionId ? Number(raw.calendarConnectionId) : null,
+      calendarId: typeof raw?.calendarId === 'string' ? raw.calendarId.slice(0, 200) : null,
+      calendarLabel: typeof raw?.calendarLabel === 'string' ? raw.calendarLabel.slice(0, 120) : null,
+      timezone: raw?.timezone ?? 'Asia/Kolkata',
+      dayStart: raw?.dayStart ?? '09:00',
+      dayEnd: raw?.dayEnd ?? '19:00',
+      durationMinutes: Number(raw?.durationMinutes ?? 60),
+      confirmation: raw?.confirmation === 'gmail' ? 'gmail' : 'none',
+      gmailConnectionId: raw?.gmailConnectionId ? Number(raw.gmailConnectionId) : null
+    }
+    problems.push(...await checkConnection(db, vs, user, config.calendarConnectionId, 'google-calendar', 'Google Calendar', live))
+    if (!config.calendarId) problems.push('Choose which calendar to book viewings in.')
+    if (!CALENDAR_TIMEZONES.includes(config.timezone)) problems.push('Choose a time zone from the list.')
+    if (!HHMM.test(config.dayStart) || !HHMM.test(config.dayEnd) || config.dayStart >= config.dayEnd) problems.push('Working hours must be a start time before an end time (HH:MM).')
+    if (!Number.isInteger(config.durationMinutes) || config.durationMinutes < 15 || config.durationMinutes > 240 || config.durationMinutes % 15) problems.push('Default length must be 15 minutes to 4 hours, in 15-minute steps.')
+    if (config.confirmation === 'gmail') problems.push(...await checkConnection(db, vs, user, config.gmailConnectionId, 'gmail', 'Gmail', live))
+    if (live?.verifySlack && !problems.length) {
+      const calendars = await pickOptions(db, vs, user.id, config.calendarConnectionId, 'calendar_free_busy', 'calendar_id')
+      const hit = calendars.find((c) => c.value === config.calendarId)
+      if (!hit) problems.push('That calendar is not in your Google Calendar list.')
+      else config.calendarLabel = hit.label
+    }
+    return { config, problems }
+  }
+  if (key === 'viewing_feedback') {
+    const config = { gmailConnectionId: raw?.gmailConnectionId ? Number(raw.gmailConnectionId) : null, expiryDays: Number(raw?.expiryDays ?? 14) }
+    const problems = await checkConnection(db, vs, user, config.gmailConnectionId, 'gmail', 'Gmail', live)
+    if (!Number.isInteger(config.expiryDays) || config.expiryDays < 1 || config.expiryDays > 60) problems.push('The link must stay open for 1 to 60 days.')
+    return { config, problems }
+  }
+  if (key === 'rent_reminders') {
+    const afterDays = parseDays(raw?.afterDays ?? [3, 7])
+    const config = {
+      gmailConnectionId: raw?.gmailConnectionId ? Number(raw.gmailConnectionId) : null,
+      beforeDays: Number(raw?.beforeDays ?? 3),
+      onDue: raw?.onDue !== false,
+      afterDays: afterDays ?? [],
+      razorpayConnectionId: raw?.razorpayConnectionId ? Number(raw.razorpayConnectionId) : null
+    }
+    const problems = await checkConnection(db, vs, user, config.gmailConnectionId, 'gmail', 'Gmail', live)
+    if (!Number.isInteger(config.beforeDays) || config.beforeDays < 0 || config.beforeDays > 15) problems.push('Send the first reminder 0 to 15 days before the due date.')
+    if (!afterDays) problems.push('Overdue reminders: up to five numbers of days from 1 to 60, separated by commas.')
+    if (config.razorpayConnectionId) problems.push(...await checkConnection(db, vs, user, config.razorpayConnectionId, 'razorpay', 'Razorpay', live))
+    if (!scheduler.available) problems.push('The 15-minute scheduler runs only on the hosted DealSaathi (Embarko). Here you can use “Run check now”.')
+    return { config, problems, schedulerProblem: !scheduler.available }
   }
   if (key === 'followup_reminders') {
     const days = Number(raw?.inactiveDays ?? 3)
@@ -225,7 +300,7 @@ export function createAutomationEngine({ db, vs, scheduler = { available: false 
       const current = getSetting(db, user.id, key)
       const merged = { ...current.config, ...(config && typeof config === 'object' && !Array.isArray(config) ? config : {}) }
       const live = enabled ? { ...(await liveConnections(user.id)), verifySlack: true } : null
-      const usesChannel = ['new_lead_alert', 'property_recommendations'].includes(key) || (key === 'followup_reminders' && ['gmail', 'slack'].includes(merged.notify))
+      const usesChannel = ['new_lead_alert', 'property_recommendations', 'viewing_scheduler', 'viewing_feedback', 'rent_reminders'].includes(key) || (key === 'followup_reminders' && ['gmail', 'slack'].includes(merged.notify))
       if (enabled && usesChannel && live.connections === null) throw new AppError(503, 'viasocket_unavailable', live.error || 'viaSocket is not configured, so this cannot be switched on.')
       const { config: clean, problems } = await checkConfig(db, vs, user, key, merged, live, scheduler)
       if (enabled && problems.length) throw new AppError(409, 'needs_setup', 'This automation cannot be switched on yet.', { problems })
@@ -274,6 +349,30 @@ export function createAutomationEngine({ db, vs, scheduler = { available: false 
 
     /** Trigger: the scheduler (every 15 minutes on the hosted app), or "Run check now" for one broker. */
     runReminders,
+
+    /** The calendars of the broker's Google Calendar connection (Free/Busy's calendar_id picker). */
+    calendars: (user, connectionId) => {
+      requireOwnConnection(db, user.id, connectionId)
+      return pickOptions(db, vs, user.id, connectionId, 'calendar_free_busy', 'calendar_id')
+    },
+
+    /** Everything the scheduler runs, every 15 minutes. */
+    async runScheduled(trigger) {
+      const reminders = await runReminders({ trigger })
+      const viewingsEnded = noticeEndedViewings(db)
+      const rent = await runRentChecks(db, vs, { trigger })
+      return { reminders, viewingsEnded, rent }
+    },
+
+    /** "Run check now" for rent: the same check, for this broker only (also outside quiet hours). */
+    async runRentNow(user) {
+      const setting = getSetting(db, user.id, 'rent_reminders')
+      const live = await liveConnections(user.id)
+      const { config, problems, schedulerProblem } = await checkConfig(db, vs, user, 'rent_reminders', setting.config, live, scheduler)
+      const blocking = schedulerProblem ? problems.slice(0, -1) : problems
+      if (blocking.length) throw new AppError(409, 'needs_setup', 'Finish the settings first.', { problems: blocking })
+      return runRentChecks(db, vs, { trigger: 'Run check now', onlyUser: user, onlyConfig: config, force: true })
+    },
 
     async runRemindersNow(user) {
       const setting = getSetting(db, user.id, 'followup_reminders')

@@ -20,19 +20,19 @@ async function slackFor(t, user = t.user) {
 const addLead = async (t, lead = LEAD, as) => (await t.call('/api/leads', { method: 'POST', body: { lead }, as })).body.lead
 const runsOf = async (t, key) => (await t.call(`/api/automations/${key}/runs`)).body.runs
 
-test('seven cards; nothing is Enabled unless its setup is complete; unbuilt ones say why and cannot be switched on', async () => {
+test('seven cards, all built; nothing is Enabled until its setup is complete; Needs setup names the missing connection', async () => {
   const t = await startApp({ vs: fakeVs() })
   try {
     const c = await cards(t)
     assert.deepEqual(Object.keys(c), ['new_lead_alert', 'buyer_matching', 'property_recommendations', 'followup_reminders', 'viewing_scheduler', 'viewing_feedback', 'rent_reminders'])
+    assert.ok(Object.values(c).every((a) => a.available), 'every automation has a real execution path')
     assert.equal(c.buyer_matching.status, 'enabled', 'matching needs no integration and is on by default')
-    for (const key of ['new_lead_alert', 'property_recommendations', 'followup_reminders']) assert.equal(c[key].status, 'needs_setup', key)
-    for (const key of ['viewing_scheduler', 'viewing_feedback', 'rent_reminders']) {
-      assert.equal(c[key].status, 'needs_setup')
-      assert.equal(c[key].available, false)
-      assert.match(c[key].problems[0], /Not built yet/)
-      assert.equal((await put(t, key, { enabled: true })).status, 409)
-    }
+    for (const key of ['new_lead_alert', 'property_recommendations', 'followup_reminders', 'viewing_scheduler', 'viewing_feedback', 'rent_reminders']) assert.equal(c[key].status, 'needs_setup', key)
+    assert.match(c.viewing_scheduler.problems.join(' '), /Google Calendar/)
+    assert.match(c.viewing_feedback.problems.join(' '), /Gmail/)
+    assert.match(c.rent_reminders.problems.join(' '), /Gmail/)
+    assert.ok(!Object.values(c).some((a) => a.problems.some((p) => /Not built/.test(p))))
+    for (const key of ['viewing_scheduler', 'viewing_feedback', 'rent_reminders']) assert.equal((await put(t, key, { enabled: true })).status, 409)
     assert.equal(c.new_lead_alert.lastRun, null, 'no fake run history')
   } finally { await t.close() }
 })

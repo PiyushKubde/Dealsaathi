@@ -12,6 +12,9 @@ import { curatedApps, requireCuratedServiceId } from './integrations/apps.js'
 import { GMAIL, cancelFollowup, draftFollowup, draftRecommendation, followupSetup, fromOptions, listFollowups, prepareFollowup, sendFollowup } from './followups/service.js'
 import { createAutomationEngine } from './automations/engine.js'
 import { listReminders, setReminderStatus } from './automations/reminders.js'
+import { bookViewing, cancelViewing, draftViewing, freeSlots, getViewing, listViewings, rescheduleViewing, resendConfirmation, setOutcome } from './viewings/service.js'
+import { baseUrl, listFeedback, onViewingCompleted, publicFeedback, resendFeedback, submitFeedback } from './feedback/service.js'
+import { checkDueNow, createTenancy, recordManualPayment, rentOverview, tenancyDetail, updateTenancy, waiveDue } from './rent/service.js'
 import { addSampleProperties, createProperty, deleteProperty, dismissMatch, listProperties, listPropertyMatches, matchPropertiesFor, requireProperty, updateProperty } from './properties/service.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -234,6 +237,51 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   app.post('/api/automations/runs/:id/retry', async (req, res) => res.json({ run: await automations.retry(req.user, parseUuid(req.params.id, 'run')) }))
   app.post('/api/automations/followup_reminders/run', async (req, res) => res.json({ result: await automations.runRemindersNow(req.user) }))
   app.get('/api/automations/slack-channels', async (req, res) => res.json({ options: await automations.slackChannels(req.user, parseId(req.query.connectionId)) }))
+  // ---- Viewings (Property Viewing Scheduler)
+  app.get('/api/viewings', (req, res) => res.json({ viewings: listViewings(db, req.user.id, { leadId: req.query.leadId ? parseId(req.query.leadId) : null }) }))
+  app.get('/api/viewings/calendars', async (req, res) => res.json({ options: await automations.calendars(req.user, parseId(req.query.connectionId)) }))
+  app.get('/api/viewings/slots', async (req, res) => res.json(await freeSlots(db, vs, req.user, {
+    date: req.query.date, durationMinutes: req.query.durationMinutes ? Number(req.query.durationMinutes) : undefined, except: req.query.except ? parseUuid(req.query.except, 'viewing') : null
+  })))
+  app.post('/api/viewings', (req, res) => res.status(201).json(draftViewing(db, req.user, req.body)))
+  app.get('/api/viewings/:id', (req, res) => res.json({ viewing: getViewing(db, req.user.id, parseUuid(req.params.id, 'viewing')) }))
+  app.post('/api/viewings/:id/book', async (req, res) => res.json(await bookViewing(db, vs, req.user, parseUuid(req.params.id, 'viewing'), { confirmNotInCalendar: req.body?.confirmNotInCalendar === true })))
+  app.post('/api/viewings/:id/cancel', async (req, res) => res.json(await cancelViewing(db, vs, req.user, parseUuid(req.params.id, 'viewing'), { notifyLead: req.body?.notifyLead !== false })))
+  app.post('/api/viewings/:id/reschedule', async (req, res) => res.json(await rescheduleViewing(db, vs, req.user, parseUuid(req.params.id, 'viewing'), req.body || {})))
+  app.post('/api/viewings/:id/confirmation', async (req, res) => res.json(await resendConfirmation(db, vs, req.user, parseUuid(req.params.id, 'viewing'))))
+  // The broker says whether it took place; a completed viewing triggers Post-Viewing Feedback.
+  app.post('/api/viewings/:id/outcome', async (req, res) => {
+    const id = parseUuid(req.params.id, 'viewing')
+    setOutcome(db, req.user, id, req.body?.outcome)
+    const feedback = req.body?.outcome === 'completed' ? await onViewingCompleted(db, vs, req.user, id, baseUrl(req)) : null
+    res.json({ viewing: getViewing(db, req.user.id, id), feedback })
+  })
+
+  // ---- Feedback (Post-Viewing Feedback)
+  app.get('/api/feedback', (req, res) => res.json({ requests: listFeedback(db, req.user.id) }))
+  app.post('/api/feedback/:id/resend', async (req, res) => res.json(await resendFeedback(db, vs, req.user, parseUuid(req.params.id, 'feedback'), baseUrl(req), { confirm: req.body?.confirm === true })))
+
+  // The buyer's side: no sign-in, only the token. It reveals nothing but that viewing's listings.
+  const publicHits = new Map()
+  const limitPublic = (req) => {
+    const ip = req.ip || 'unknown'
+    const e = publicHits.get(ip)
+    if (!e || e.reset < Date.now()) publicHits.set(ip, { n: 1, reset: Date.now() + 15 * 60 * 1000 })
+    else if (++e.n > 60) throw new AppError(429, 'too_many_requests', 'Too many requests. Try again later.')
+  }
+  app.get('/api/public/feedback/:token', (req, res) => { limitPublic(req); res.setHeader('Referrer-Policy', 'no-referrer'); res.json(publicFeedback(db, req.params.token)) })
+  app.post('/api/public/feedback/:token', (req, res) => { limitPublic(req); res.json(submitFeedback(db, req.params.token, req.body)) })
+
+  // ---- Tenancies and rent (Rent and Payment Reminders)
+  app.get('/api/rent', (req, res) => res.json(rentOverview(db, req.user.id)))
+  app.post('/api/rent/tenancies', (req, res) => res.status(201).json(createTenancy(db, req.user, req.body?.tenancy)))
+  app.get('/api/rent/tenancies/:id', (req, res) => res.json(tenancyDetail(db, req.user.id, parseId(req.params.id))))
+  app.patch('/api/rent/tenancies/:id', (req, res) => res.json(updateTenancy(db, req.user, parseId(req.params.id), req.body?.tenancy)))
+  app.post('/api/rent/dues/:id/payments', async (req, res) => res.json(await recordManualPayment(db, vs, req.user, parseId(req.params.id), req.body)))
+  app.post('/api/rent/dues/:id/waive', async (req, res) => res.json(await waiveDue(db, vs, req.user, parseId(req.params.id), req.body?.note)))
+  app.post('/api/rent/dues/:id/check', async (req, res) => res.json(await checkDueNow(db, vs, req.user, parseId(req.params.id))))
+  app.post('/api/automations/rent_reminders/run', async (req, res) => res.json({ result: await automations.runRentNow(req.user) }))
+
   app.get('/api/reminders', (req, res) => res.json({ reminders: listReminders(db, req.user.id, req.query.status) }))
   app.post('/api/reminders/:id', (req, res) => res.json({ reminder: setReminderStatus(db, req.user.id, parseId(req.params.id), req.body?.status) }))
 
@@ -245,8 +293,15 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
     const given = Buffer.from(createHash('sha256').update(req.get('authorization') || '').digest('hex'))
     const wanted = Buffer.from(createHash('sha256').update(`Bearer ${scheduler.secret || ''}`).digest('hex'))
     if (!scheduler.secret || !timingSafeEqual(given, wanted)) return res.status(401).type('text').send('unauthorized')
-    const t = await automations.runReminders({ trigger: 'Scheduled check' })
-    res.type('text').send(`Checked ${t.brokers} broker(s): ${t.created} new reminder(s), ${t.notified} notification(s) sent, ${t.failed} failed.`)
+    const { reminders: t, viewingsEnded, rent } = await automations.runScheduled('Scheduled check')
+    res.type('text').send(`Follow-ups: ${t.brokers} broker(s), ${t.created} new reminder(s), ${t.notified} notification(s) sent, ${t.failed} failed. ` +
+      `Viewings ended: ${viewingsEnded}. Rent: ${rent.brokers} broker(s), ${rent.sent} reminder(s) sent, ${rent.failed} failed, ${rent.verified} payment(s) verified.`)
+  })
+
+  // The buyer's feedback page: a standalone page with no app code. The token in its URL is never sent on as a referrer.
+  app.get('/feedback/:token', (req, res) => {
+    res.set({ 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' })
+    res.sendFile(join(ROOT, 'public', 'feedback.html'))
   })
 
   app.get('/vendor/viasocket-apps-browser.js', (req, res) => res.type('text/javascript').sendFile(VIASOCKET_BROWSER))

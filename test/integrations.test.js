@@ -40,14 +40,14 @@ test('the Integrations list is the curated apps only, with each user’s own con
     await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: 'rowo0bqrhj5g', authId } })
     const res = await t.call('/api/integrations/apps')
     assert.equal(res.status, 200)
-    assert.deepEqual(res.body.apps.map((a) => a.slug), ['gmail', 'slack', 'google-calendar', 'whatsapp_business_cloud'])
+    assert.deepEqual(res.body.apps.map((a) => a.slug), ['gmail', 'slack', 'google-calendar', 'whatsapp_business_cloud', 'razorpay'])
     const gmail = res.body.apps[0]
     assert.equal(gmail.connections.length, 1)
     assert.equal(gmail.connections[0].status, 'active')
     assert.deepEqual(gmail.actions, ['rowogelpy0h6'], 'the popup asks only for the action DealSaathi uses')
     assert.equal(res.body.apps[1].connections.length, 0)
     assert.doesNotMatch(res.text, new RegExp(authId))
-    assert.equal((await t.call('/api/integrations/apps?q=notion')).body.apps.length, 4, 'no search: the list is fixed')
+    assert.equal((await t.call('/api/integrations/apps?q=notion')).body.apps.length, 5, 'no search: the list is fixed')
     const other = signedInUser(t.db, { name: 'Other' })
     assert.equal((await t.call('/api/integrations/apps', { as: other })).body.apps[0].connections.length, 0)
   } finally { await t.close() }

@@ -240,6 +240,148 @@ const MIGRATIONS = [
   ALTER TABLE leads ADD COLUMN follow_up_on TEXT;
   ALTER TABLE followups ADD COLUMN kind TEXT NOT NULL DEFAULT 'followup';
   ALTER TABLE followups ADD COLUMN property_ids TEXT;
+  `,
+  // 5: viewings, post-viewing feedback, tenancies and rent
+  `
+  CREATE TABLE viewings (
+    id                     TEXT PRIMARY KEY,
+    user_id                TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    lead_id                INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    property_ids           TEXT NOT NULL,
+    calendar_connection_id INTEGER REFERENCES connections(id) ON DELETE SET NULL,
+    calendar_id            TEXT,
+    start_at               TEXT NOT NULL,
+    end_at                 TEXT NOT NULL,
+    timezone               TEXT NOT NULL,
+    location               TEXT,
+    invite_lead            INTEGER NOT NULL DEFAULT 0,
+    note                   TEXT,
+    status                 TEXT NOT NULL CHECK (status IN ('draft','booking','booked','failed','unknown','completed','no_show','cancelled')),
+    event_id               TEXT,
+    event_link             TEXT,
+    error                  TEXT,
+    confirmation_status    TEXT NOT NULL DEFAULT 'not_sent' CHECK (confirmation_status IN ('not_sent','not_configured','sent','failed','unknown')),
+    confirmation_detail    TEXT,
+    ended_noticed_at       TEXT,
+    outcome_at             TEXT,
+    created_at             TEXT NOT NULL,
+    updated_at             TEXT NOT NULL
+  );
+  -- One live booking per broker per start time: two clicks or two tabs cannot book the same slot twice.
+  CREATE UNIQUE INDEX viewings_one_per_slot ON viewings(user_id, start_at) WHERE status IN ('booking','booked');
+  CREATE INDEX viewings_lead ON viewings(lead_id);
+  CREATE INDEX viewings_user_status ON viewings(user_id, status, end_at);
+
+  CREATE TABLE feedback_requests (
+    id                 TEXT PRIMARY KEY,
+    viewing_id         TEXT NOT NULL UNIQUE REFERENCES viewings(id) ON DELETE CASCADE,
+    lead_id            INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash         TEXT NOT NULL UNIQUE,
+    status             TEXT NOT NULL CHECK (status IN ('created','sent','send_failed','send_unknown','submitted','expired')),
+    send_detail        TEXT,
+    expires_at         TEXT NOT NULL,
+    response           TEXT,
+    preference_changes TEXT,
+    submitted_at       TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+  );
+
+  -- Listings a lead has said no to (from feedback): matching leaves them out from then on.
+  CREATE TABLE lead_property_exclusions (
+    lead_id     INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+    reason      TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (lead_id, property_id)
+  );
+  ALTER TABLE leads ADD COLUMN excluded_localities TEXT;
+
+  CREATE TABLE tenancies (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    property_id    INTEGER REFERENCES properties(id) ON DELETE SET NULL,
+    property_label TEXT NOT NULL,
+    tenant_lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+    tenant_name    TEXT NOT NULL,
+    tenant_email   TEXT,
+    tenant_phone   TEXT,
+    reference      TEXT,
+    rent_amount    INTEGER NOT NULL CHECK (rent_amount > 0),
+    currency       TEXT NOT NULL DEFAULT 'INR' CHECK (currency = 'INR'),
+    due_day        INTEGER NOT NULL CHECK (due_day BETWEEN 1 AND 28),
+    lease_start    TEXT NOT NULL,
+    lease_end      TEXT,
+    tracking_from  TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','ended')),
+    reminders_opt_out INTEGER NOT NULL DEFAULT 0,
+    notes          TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+  );
+  CREATE INDEX tenancies_user ON tenancies(user_id, status);
+
+  -- One obligation per tenancy per month. Paid only from a verified Razorpay status or a broker's recorded payment.
+  CREATE TABLE rent_dues (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenancy_id          INTEGER NOT NULL REFERENCES tenancies(id) ON DELETE CASCADE,
+    period              TEXT NOT NULL,
+    due_date            TEXT NOT NULL,
+    amount              INTEGER NOT NULL,
+    amount_paid         INTEGER NOT NULL DEFAULT 0,
+    status              TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','partially_paid','paid','waived','cancelled')),
+    paid_at             TEXT,
+    verification_source TEXT CHECK (verification_source IN ('razorpay','manual')),
+    link_attempt        INTEGER NOT NULL DEFAULT 0,
+    payment_link_id     TEXT,
+    payment_link_url    TEXT,
+    payment_link_status TEXT,
+    payment_link_ref    TEXT UNIQUE,
+    payment_link_error  TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    UNIQUE (tenancy_id, period)
+  );
+  CREATE INDEX rent_dues_status ON rent_dues(status, due_date);
+
+  CREATE TABLE rent_payments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    due_id      INTEGER NOT NULL REFERENCES rent_dues(id) ON DELETE CASCADE,
+    amount      INTEGER NOT NULL CHECK (amount > 0),
+    paid_on     TEXT NOT NULL,
+    source      TEXT NOT NULL CHECK (source IN ('razorpay','manual')),
+    external_id TEXT,
+    recorded_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    note        TEXT,
+    created_at  TEXT NOT NULL,
+    UNIQUE (source, external_id)
+  );
+
+  CREATE TABLE rent_reminders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    due_id     INTEGER NOT NULL REFERENCES rent_dues(id) ON DELETE CASCADE,
+    stage      TEXT NOT NULL,
+    channel    TEXT NOT NULL,
+    recipient  TEXT,
+    status     TEXT NOT NULL CHECK (status IN ('sent','failed','unknown','skipped')),
+    detail     TEXT,
+    dedupe_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX rent_reminders_due ON rent_reminders(due_id, created_at);
+
+  -- Audit trail for tenancies and rent: every payment, verification, waiver, link and status change.
+  CREATE TABLE rent_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenancy_id INTEGER NOT NULL REFERENCES tenancies(id) ON DELETE CASCADE,
+    due_id     INTEGER REFERENCES rent_dues(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL,
+    detail     TEXT NOT NULL,
+    user_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX rent_events_tenancy ON rent_events(tenancy_id, created_at);
   `
 ]
 

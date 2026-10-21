@@ -1,0 +1,365 @@
+// Property viewings booked in the broker's own Google Calendar through viaSocket (Get Free/Busy, Create Event,
+// Update Event, Delete Event), with an optional Gmail confirmation to the lead.
+//
+// Create Calendar Event V23 inputData, every key decided:
+//   calendar_id      PICK: the broker's calendar, chosen in the automation's settings
+//   summary          product data: "Property viewing: <lead> – <listing>"
+//   description      product data: the listings and their addresses
+//   attendees        the broker's choice per viewing: the lead's saved email, or "" (no invitation sent)
+//   timeZone         the broker's setting (one of the action's 20 zones)
+//   startdate/starttime/meeting_duration  the slot the broker picked, written in that zone (DD-MM-YYYY, HH:MM, HH:MM)
+//   location         product data: the listings' address, locality and city
+//   status           constant "confirmed"
+//   transparency     constant "opaque" (Busy), so the viewing blocks the slot in later free/busy checks
+//   colorId, recurrence, useDefault, visibility, guestsCanModify: left out on purpose (defaults)
+import { randomUUID } from 'node:crypto'
+import { now, transaction } from '../db.js'
+import { AppError, validationError } from '../errors.js'
+import { getLead, logActivity, requireLead } from '../leads/service.js'
+import { getProperty } from '../properties/service.js'
+import { gmailInput, readCalendarEvent, readFreeBusy, readGmailResult, runOnce } from '../integrations/run.js'
+import { finishRun, getSetting, startRun } from '../automations/store.js'
+import { addDays, describeInZone, hhmm, todayIn, utcToZoned, zonedToUtc } from '../time.js'
+
+const SLOT_STEP_MIN = 30
+const LEAD_TIME_MS = 30 * 60 * 1000 // no slot that starts in the next 30 minutes
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
+/** The viewing settings, or a 409 saying what is missing. */
+export function viewingSettings(db, userId) {
+  const s = getSetting(db, userId, 'viewing_scheduler')
+  if (!s.enabled || !s.config.calendarConnectionId || !s.config.calendarId) {
+    throw new AppError(409, 'needs_setup', 'Switch on the Property Viewing Scheduler on the Automations page first (it needs your Google Calendar).')
+  }
+  return { timezone: 'Asia/Kolkata', dayStart: '09:00', dayEnd: '19:00', durationMinutes: 60, confirmation: 'none', ...s.config }
+}
+
+function toPublic(db, row) {
+  if (!row) return null
+  const lead = getLead(db, row.lead_id)
+  const ids = JSON.parse(row.property_ids)
+  const local = utcToZoned(row.start_at, row.timezone)
+  const fb = db.prepare('SELECT status, submitted_at FROM feedback_requests WHERE viewing_id = ?').get(row.id)
+  return {
+    id: row.id, leadId: row.lead_id, leadName: lead?.full_name ?? '(deleted lead)', leadEmail: lead?.email ?? null,
+    properties: ids.map((id) => { const p = getProperty(db, id); return p ? { id, title: p.title, locality: p.locality, city: p.city } : { id, title: '(deleted listing)' } }),
+    startAt: row.start_at, endAt: row.end_at, timezone: row.timezone, localDate: local.date, localTime: local.time,
+    durationMinutes: Math.round((Date.parse(row.end_at) - Date.parse(row.start_at)) / 60000),
+    when: describeInZone(row.start_at, row.timezone), location: row.location, inviteLead: Boolean(row.invite_lead), note: row.note,
+    status: row.status, eventId: row.event_id, eventLink: row.event_link, error: row.error,
+    confirmationStatus: row.confirmation_status, confirmationDetail: row.confirmation_detail,
+    ended: Date.parse(row.end_at) <= Date.now(), outcomeAt: row.outcome_at,
+    feedback: fb ? { status: fb.status, submittedAt: fb.submitted_at } : null,
+    createdAt: row.created_at, updatedAt: row.updated_at
+  }
+}
+
+const own = (db, userId, id) => {
+  const row = db.prepare('SELECT * FROM viewings WHERE id = ? AND user_id = ?').get(id, userId)
+  if (!row) throw new AppError(404, 'viewing_not_found', 'No such viewing.')
+  return row
+}
+
+export const getViewing = (db, userId, id) => toPublic(db, own(db, userId, id))
+
+export function listViewings(db, userId, { leadId } = {}) {
+  const rows = leadId
+    ? db.prepare('SELECT * FROM viewings WHERE user_id = ? AND lead_id = ? ORDER BY start_at DESC').all(userId, leadId)
+    : db.prepare("SELECT * FROM viewings WHERE user_id = ? AND status != 'draft' ORDER BY start_at DESC LIMIT 200").all(userId)
+  return rows.map((r) => toPublic(db, r))
+}
+
+/** Asks Google Calendar for the day's busy times. Throws with the reason when it cannot. */
+async function busyTimes(db, vs, userId, cfg, date) {
+  const ran = await runOnce(db, vs, userId, cfg.calendarConnectionId, 'calendar_free_busy', { calendar_id: cfg.calendarId, date, timeZone: cfg.timezone })
+  if (ran.outcome !== 'answered') throw new AppError(502, 'calendar_unavailable', `Could not read your Google Calendar: ${ran.reason}`)
+  const fb = readFreeBusy(ran.result)
+  if (!fb.ok) throw new AppError(502, 'calendar_unavailable', fb.reason)
+  return fb
+}
+
+const overlaps = (a0, a1, b0, b1) => a0 < b1 && b0 < a1
+
+/** DealSaathi's own live bookings for this broker (they may not show in the calendar yet). */
+const localBookings = (db, userId, exceptId) =>
+  db.prepare("SELECT id, start_at, end_at FROM viewings WHERE user_id = ? AND status IN ('booking','booked') AND id != ?").all(userId, exceptId || '')
+    .map((v) => ({ start: Date.parse(v.start_at), end: Date.parse(v.end_at) }))
+
+function checkDate(date, cfg) {
+  const today = todayIn(cfg.timezone)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) throw validationError({ date: 'Choose a date.' })
+  if (date < today) throw validationError({ date: 'Choose today or a later date.' })
+  if (date > addDays(today, 90)) throw validationError({ date: 'Choose a date within the next 90 days.' })
+}
+
+function checkDuration(minutes) {
+  const n = Number(minutes)
+  if (!Number.isInteger(n) || n < 15 || n > 240 || n % 15) throw validationError({ durationMinutes: 'Choose a length from 15 minutes to 4 hours, in 15-minute steps.' })
+  return n
+}
+
+/**
+ * Free slots on one day, from the broker's real Google Calendar: inside their working hours, not in the
+ * past, not overlapping a busy time or one of their DealSaathi bookings. `except` ignores one viewing
+ * (when rescheduling it).
+ */
+export async function freeSlots(db, vs, user, { date, durationMinutes, except = null }) {
+  const cfg = viewingSettings(db, user.id)
+  checkDate(date, cfg)
+  const minutes = checkDuration(durationMinutes ?? cfg.durationMinutes)
+  const fb = await busyTimes(db, vs, user.id, cfg, date)
+  const exceptRow = except ? own(db, user.id, except) : null
+  const ownBusy = exceptRow ? { start: Date.parse(exceptRow.start_at), end: Date.parse(exceptRow.end_at) } : null
+  const busy = [
+    ...fb.busy.filter((b) => !(ownBusy && b.start === ownBusy.start && b.end === ownBusy.end)),
+    ...localBookings(db, user.id, except)
+  ]
+  const dayStart = zonedToUtc(date, cfg.dayStart, cfg.timezone).getTime()
+  const dayEnd = zonedToUtc(date, cfg.dayEnd, cfg.timezone).getTime()
+  const slots = []
+  for (let s = dayStart; s + minutes * 60000 <= dayEnd; s += SLOT_STEP_MIN * 60000) {
+    const e = s + minutes * 60000
+    if (s < Date.now() + LEAD_TIME_MS) continue
+    if (fb.timeMin != null && fb.timeMax != null && (s < fb.timeMin || e > fb.timeMax)) continue // not covered by the check
+    if (busy.some((b) => overlaps(s, e, b.start, b.end))) continue
+    slots.push({ start: new Date(s).toISOString(), end: new Date(e).toISOString(), label: utcToZoned(s, cfg.timezone).time })
+  }
+  return { date, timezone: cfg.timezone, durationMinutes: minutes, workingHours: `${cfg.dayStart}–${cfg.dayEnd}`, busyCount: fb.busy.length, slots, checkedAt: now() }
+}
+
+function checkProperties(db, propertyIds) {
+  if (!Array.isArray(propertyIds) || !propertyIds.length) throw validationError({ properties: 'Choose at least one property.' })
+  if (propertyIds.length > 5) throw validationError({ properties: 'Choose up to 5 properties for one viewing.' })
+  return [...new Set(propertyIds.map(Number))].map((id) => {
+    const p = Number.isInteger(id) && getProperty(db, id)
+    if (!p) throw validationError({ properties: 'One of the properties no longer exists.' })
+    if (p.is_sample) throw validationError({ properties: `${p.title} is a sample listing, not a real property, so it cannot be viewed.` })
+    return p
+  })
+}
+
+const locationOf = (props) => props.map((p) => [p.address, p.locality, p.city].filter(Boolean).join(', ')).join(' | ').slice(0, 300)
+
+/** A viewing to review before booking. Nothing is sent to Google Calendar yet. */
+export function draftViewing(db, user, input) {
+  const cfg = viewingSettings(db, user.id)
+  const lead = requireLead(db, Number(input?.leadId))
+  const props = checkProperties(db, input?.propertyIds)
+  const minutes = checkDuration(input?.durationMinutes ?? cfg.durationMinutes)
+  const start = Date.parse(input?.start)
+  if (!Number.isFinite(start)) throw validationError({ start: 'Choose a time slot.' })
+  if (start < Date.now() + LEAD_TIME_MS) throw validationError({ start: 'Choose a slot at least 30 minutes from now.' })
+  const inviteLead = input?.inviteLead === true
+  if (inviteLead && !(lead.email && EMAIL_RE.test(lead.email))) throw validationError({ inviteLead: 'This lead has no email address to invite.' })
+  const note = typeof input?.note === 'string' ? input.note.trim().slice(0, 500) : null
+  const id = randomUUID()
+  const ts = now()
+  db.prepare(`INSERT INTO viewings (id, user_id, lead_id, property_ids, calendar_connection_id, calendar_id, start_at, end_at, timezone, location, invite_lead, note, status, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`)
+    .run(id, user.id, lead.id, JSON.stringify(props.map((p) => p.id)), cfg.calendarConnectionId, cfg.calendarId, new Date(start).toISOString(),
+      new Date(start + minutes * 60000).toISOString(), cfg.timezone, locationOf(props), inviteLead ? 1 : 0, note || null, ts, ts)
+  return { viewing: getViewing(db, user.id, id), confirmationWillBeSent: cfg.confirmation === 'gmail' && Boolean(lead.email) }
+}
+
+function eventInput(db, row) {
+  const lead = getLead(db, row.lead_id)
+  const props = JSON.parse(row.property_ids).map((id) => getProperty(db, id)).filter(Boolean)
+  const local = utcToZoned(row.start_at, row.timezone)
+  const minutes = Math.round((Date.parse(row.end_at) - Date.parse(row.start_at)) / 60000)
+  return {
+    calendar_id: row.calendar_id,
+    summary: `Property viewing: ${lead.full_name} – ${props.map((p) => p.title).join(', ')}`.slice(0, 250),
+    description: [`Viewing with ${lead.full_name}.`, '', 'Properties:', ...props.map((p) => `• ${p.title} (${[p.address, p.locality, p.city].filter(Boolean).join(', ')})`),
+      ...(row.note ? ['', `Note: ${row.note}`] : []), '', 'Booked with DealSaathi.'].join('\n'),
+    attendees: row.invite_lead && lead.email ? lead.email : '',
+    timeZone: row.timezone,
+    startdate: local.dmy,
+    starttime: local.time,
+    meeting_duration: hhmm(minutes),
+    location: row.location || '',
+    status: 'confirmed',
+    transparency: 'opaque'
+  }
+}
+
+/** Gmail confirmation (or update/cancellation) to the lead, when the broker set Gmail as the channel. */
+async function notifyLead(db, vs, user, row, cfg, kind) {
+  const lead = getLead(db, row.lead_id)
+  if (cfg.confirmation !== 'gmail' || !cfg.gmailConnectionId) return { status: 'not_configured', detail: 'No confirmation channel is set (Automations → Property Viewing Scheduler).' }
+  if (!lead?.email || !EMAIL_RE.test(lead.email)) return { status: 'not_configured', detail: 'The lead has no email address, so no confirmation was sent.' }
+  const props = JSON.parse(row.property_ids).map((id) => getProperty(db, id)).filter(Boolean)
+  const when = describeInZone(row.start_at, row.timezone)
+  const minutes = Math.round((Date.parse(row.end_at) - Date.parse(row.start_at)) / 60000)
+  const subject = kind === 'cancelled' ? `Viewing cancelled: ${when}` : kind === 'rescheduled' ? `Viewing moved to ${when}` : `Your property viewing: ${when}`
+  const lines = props.map((p) => `• ${p.title}, ${[p.address, p.locality, p.city].filter(Boolean).join(', ')}`)
+  const body = kind === 'cancelled'
+    ? `Hi ${lead.full_name.split(' ')[0]},\n\nThe viewing planned for ${when} has been cancelled:\n\n${lines.join('\n')}\n\nReply to this email if you would like a new time.\n\nBest regards,\n${user.name}`
+    : `Hi ${lead.full_name.split(' ')[0]},\n\n${kind === 'rescheduled' ? 'Your viewing has moved. The new time is' : 'Your property viewing is booked for'} ${when} (about ${minutes} minutes):\n\n${lines.join('\n')}\n\nReply to this email if you need to change the time.\n\nBest regards,\n${user.name}`
+  const ran = await runOnce(db, vs, user.id, cfg.gmailConnectionId, 'gmail_send_email', gmailInput({ to: lead.email, subject, body, fromName: user.name }))
+  if (ran.outcome !== 'answered') return { status: ran.outcome === 'unknown' ? 'unknown' : 'failed', detail: ran.reason }
+  const read = readGmailResult(ran.result)
+  if (!read.ok) return { status: read.unknown ? 'unknown' : 'failed', detail: read.reason }
+  return { status: 'sent', detail: `Emailed ${lead.email} (Gmail message id ${read.messageId})` }
+}
+
+async function recheck(db, vs, user, row, cfg, except = null) {
+  const date = utcToZoned(row.start_at, row.timezone).date
+  const fb = await busyTimes(db, vs, user.id, cfg, date)
+  const s = Date.parse(row.start_at)
+  const e = Date.parse(row.end_at)
+  const ownBusy = except ? { start: Date.parse(except.start_at), end: Date.parse(except.end_at) } : null
+  const conflict = fb.busy.filter((b) => !(ownBusy && b.start === ownBusy.start && b.end === ownBusy.end)).some((b) => overlaps(s, e, b.start, b.end))
+    || localBookings(db, user.id, except?.id ?? row.id).some((b) => overlaps(s, e, b.start, b.end))
+  if (conflict) throw new AppError(409, 'slot_taken', 'That time is no longer free in your calendar. Choose another slot.')
+}
+
+/**
+ * Books a reviewed viewing: re-checks the calendar for that slot, then creates the event. It is booked only
+ * when Google Calendar returns an event id. A failed booking can be retried; an unknown one only after the
+ * broker confirms it is not in their calendar (so it is never created twice).
+ */
+export async function bookViewing(db, vs, user, id, { confirmNotInCalendar = false } = {}) {
+  const cfg = viewingSettings(db, user.id)
+  const row = own(db, user.id, id)
+  if (row.status === 'booked') return { alreadyBooked: true, viewing: toPublic(db, row) }
+  if (row.status === 'unknown' && !confirmNotInCalendar) throw new AppError(409, 'outcome_unknown', 'The last booking attempt got no answer. Check your Google Calendar first; if the viewing is not there, confirm and book again.')
+  if (!['draft', 'failed', 'unknown'].includes(row.status)) throw new AppError(409, 'viewing_closed', `This viewing is ${row.status}.`)
+  if (Date.parse(row.start_at) < Date.now() + LEAD_TIME_MS) throw new AppError(409, 'slot_past', 'This slot is too soon or has passed. Choose another time.')
+
+  await recheck(db, vs, user, row, cfg)
+  try {
+    const claimed = db.prepare("UPDATE viewings SET status = 'booking', error = NULL, updated_at = ? WHERE id = ? AND status IN ('draft','failed','unknown')").run(now(), id)
+    if (claimed.changes !== 1) throw new AppError(409, 'viewing_busy', 'This viewing is already being booked.')
+  } catch (error) {
+    if (error instanceof AppError) throw error
+    throw new AppError(409, 'slot_taken', 'You already have a viewing booked at this time.')
+  }
+
+  const runId = startRun(db, { userId: user.id, key: 'viewing_scheduler', trigger: 'Broker confirmed a viewing', subjectType: 'viewing', subjectId: id })
+  const ran = await runOnce(db, vs, user.id, row.calendar_connection_id, 'calendar_create_event', eventInput(db, row))
+  const read = ran.outcome === 'answered' ? readCalendarEvent(ran.result) : { ok: false, unknown: ran.outcome === 'unknown', reason: ran.reason }
+  const lead = getLead(db, row.lead_id)
+  if (!read.ok) {
+    const status = read.unknown && !ran.notSent ? 'unknown' : 'failed'
+    transaction(db, () => {
+      db.prepare('UPDATE viewings SET status = ?, error = ?, updated_at = ? WHERE id = ?').run(status, read.reason, now(), id)
+      logActivity(db, row.lead_id, `viewing_${status}`, `Viewing on ${describeInZone(row.start_at, row.timezone)} ${status === 'failed' ? 'was not booked' : 'may not be booked'}: ${read.reason}`, { viewingId: id }, 'calendar', user.id)
+      finishRun(db, runId, { status, summary: `Viewing with ${lead.full_name} not booked`, error: read.reason })
+    })
+    return { viewing: getViewing(db, user.id, id) }
+  }
+  transaction(db, () => {
+    db.prepare("UPDATE viewings SET status = 'booked', event_id = ?, event_link = ?, error = NULL, updated_at = ? WHERE id = ?").run(read.eventId, read.link, now(), id)
+    logActivity(db, row.lead_id, 'viewing_booked', `Viewing booked in Google Calendar for ${describeInZone(row.start_at, row.timezone)}`, { viewingId: id, eventId: read.eventId }, 'calendar', user.id)
+  })
+  console.log(`[viewing] ${id} booked calendar_event=${read.eventId}`)
+  const note = await notifyLead(db, vs, user, row, cfg, 'booked')
+  db.prepare('UPDATE viewings SET confirmation_status = ?, confirmation_detail = ?, updated_at = ? WHERE id = ?').run(note.status, note.detail, now(), id)
+  if (note.status === 'sent') logActivity(db, row.lead_id, 'viewing_confirmation_sent', `Viewing confirmation emailed to ${lead.email}`, { viewingId: id }, 'gmail', user.id)
+  finishRun(db, runId, { status: 'succeeded', summary: `Booked ${lead.full_name} for ${describeInZone(row.start_at, row.timezone)} (event ${read.eventId}); confirmation: ${note.status.replace('_', ' ')}` })
+  return { viewing: getViewing(db, user.id, id) }
+}
+
+/** Retries a confirmation that failed (never one whose outcome is unknown). */
+export async function resendConfirmation(db, vs, user, id) {
+  const cfg = viewingSettings(db, user.id)
+  const row = own(db, user.id, id)
+  if (row.status !== 'booked') throw new AppError(409, 'viewing_not_booked', 'Only a booked viewing has a confirmation to send.')
+  if (row.confirmation_status === 'sent') throw new AppError(409, 'already_sent', 'The confirmation was already sent.')
+  if (row.confirmation_status === 'unknown') throw new AppError(409, 'outcome_unknown', 'The last confirmation got no answer; check your Gmail Sent folder instead of sending it again.')
+  const note = await notifyLead(db, vs, user, row, cfg, 'booked')
+  db.prepare('UPDATE viewings SET confirmation_status = ?, confirmation_detail = ?, updated_at = ? WHERE id = ?').run(note.status, note.detail, now(), id)
+  return { viewing: getViewing(db, user.id, id) }
+}
+
+/** Cancels: deletes the calendar event first (if there is one); the viewing is cancelled only when that works. */
+export async function cancelViewing(db, vs, user, id, { notifyLead: tell = true } = {}) {
+  const row = own(db, user.id, id)
+  if (row.status === 'cancelled') return { viewing: toPublic(db, row) }
+  if (['completed', 'no_show'].includes(row.status)) throw new AppError(409, 'viewing_closed', 'This viewing already took place (or was missed).')
+  if (row.status === 'booking') throw new AppError(409, 'viewing_busy', 'This viewing is being booked right now.')
+  const cfg = getSetting(db, user.id, 'viewing_scheduler').config
+  const runId = startRun(db, { userId: user.id, key: 'viewing_scheduler', trigger: 'Broker cancelled a viewing', subjectType: 'viewing', subjectId: id })
+  if (row.status === 'booked' && row.event_id) {
+    const ran = await runOnce(db, vs, user.id, row.calendar_connection_id, 'calendar_delete_event', { calendarId: row.calendar_id, eventId: row.event_id, sendUpdates: row.invite_lead ? 'all' : 'none' })
+    const failed = ran.outcome === 'failed' || (ran.outcome === 'answered' && (ran.result?.success === false || ran.result?.error))
+    if (ran.outcome !== 'answered' || failed) {
+      const reason = ran.reason || String(ran.result?.message || ran.result?.error || 'Google Calendar refused')
+      db.prepare('UPDATE viewings SET error = ?, updated_at = ? WHERE id = ?').run(`Cancel failed: ${reason}`, now(), id)
+      finishRun(db, runId, { status: ran.outcome === 'unknown' ? 'unknown' : 'failed', summary: 'Viewing not cancelled in Google Calendar', error: reason })
+      throw new AppError(502, 'cancel_failed', `The calendar event could not be removed, so the viewing is still booked: ${reason}`)
+    }
+  }
+  const wasBooked = row.status === 'booked'
+  transaction(db, () => {
+    db.prepare("UPDATE viewings SET status = 'cancelled', outcome_at = ?, updated_at = ? WHERE id = ?").run(now(), now(), id)
+    logActivity(db, row.lead_id, 'viewing_cancelled', `Viewing on ${describeInZone(row.start_at, row.timezone)} cancelled${wasBooked ? ' and removed from Google Calendar' : ''}`, { viewingId: id }, 'calendar', user.id)
+  })
+  let note = null
+  if (wasBooked && tell && row.confirmation_status === 'sent') note = await notifyLead(db, vs, user, row, { timezone: 'Asia/Kolkata', ...cfg }, 'cancelled')
+  finishRun(db, runId, { status: 'succeeded', summary: `Viewing cancelled${note ? `; lead notified: ${note.status.replace('_', ' ')}` : ''}` })
+  return { viewing: getViewing(db, user.id, id), leadNotified: note?.status ?? null }
+}
+
+/** Moves a booked viewing: re-checks the new slot, then updates the calendar event; saved only when that works. */
+export async function rescheduleViewing(db, vs, user, id, { start, durationMinutes }) {
+  const cfg = viewingSettings(db, user.id)
+  const row = own(db, user.id, id)
+  if (row.status !== 'booked' || !row.event_id) throw new AppError(409, 'viewing_not_booked', 'Only a booked viewing can be moved.')
+  const s = Date.parse(start)
+  if (!Number.isFinite(s) || s < Date.now() + LEAD_TIME_MS) throw validationError({ start: 'Choose a slot at least 30 minutes from now.' })
+  const minutes = checkDuration(durationMinutes ?? Math.round((Date.parse(row.end_at) - Date.parse(row.start_at)) / 60000))
+  const moved = { ...row, start_at: new Date(s).toISOString(), end_at: new Date(s + minutes * 60000).toISOString() }
+  await recheck(db, vs, user, moved, cfg, row)
+  const local = utcToZoned(moved.start_at, row.timezone)
+  const runId = startRun(db, { userId: user.id, key: 'viewing_scheduler', trigger: 'Broker moved a viewing', subjectType: 'viewing', subjectId: id })
+  const ran = await runOnce(db, vs, user.id, row.calendar_connection_id, 'calendar_update_event', {
+    calendar_id: row.calendar_id, eventId: row.event_id, startdate: local.dmy, starttime: local.time, meeting_duration: hhmm(minutes), timeZone: row.timezone
+  })
+  const read = ran.outcome === 'answered' ? readCalendarEvent(ran.result) : { ok: false, unknown: ran.outcome === 'unknown', reason: ran.reason }
+  if (!read.ok) {
+    finishRun(db, runId, { status: read.unknown ? 'unknown' : 'failed', summary: 'Viewing not moved', error: read.reason })
+    throw new AppError(502, 'reschedule_failed', `The calendar event was not moved, so the viewing keeps its old time: ${read.reason}`)
+  }
+  try {
+    transaction(db, () => {
+      db.prepare("UPDATE viewings SET start_at = ?, end_at = ?, ended_noticed_at = NULL, updated_at = ? WHERE id = ?").run(moved.start_at, moved.end_at, now(), id)
+      logActivity(db, row.lead_id, 'viewing_rescheduled', `Viewing moved to ${describeInZone(moved.start_at, row.timezone)}`, { viewingId: id }, 'calendar', user.id)
+    })
+  } catch {
+    throw new AppError(409, 'slot_taken', 'You already have another viewing at that time.')
+  }
+  const note = row.confirmation_status === 'sent' ? await notifyLead(db, vs, user, moved, cfg, 'rescheduled') : null
+  finishRun(db, runId, { status: 'succeeded', summary: `Viewing moved to ${describeInZone(moved.start_at, row.timezone)}${note ? `; lead notified: ${note.status.replace('_', ' ')}` : ''}` })
+  return { viewing: getViewing(db, user.id, id), leadNotified: note?.status ?? null }
+}
+
+/** The broker says whether a viewing took place. The clock alone never decides. */
+export function setOutcome(db, user, id, outcome) {
+  if (!['completed', 'no_show'].includes(outcome)) throw validationError({ outcome: 'Choose completed or no-show.' })
+  const row = own(db, user.id, id)
+  if (row.status !== 'booked') throw new AppError(409, 'viewing_not_booked', `This viewing is ${row.status}.`)
+  if (Date.parse(row.start_at) > Date.now()) throw new AppError(409, 'not_started', 'This viewing has not started yet.')
+  transaction(db, () => {
+    db.prepare('UPDATE viewings SET status = ?, outcome_at = ?, updated_at = ? WHERE id = ?').run(outcome, now(), now(), id)
+    db.prepare("UPDATE reminders SET status = 'done', updated_at = ? WHERE dedupe_key = ?").run(now(), `viewing:${id}`)
+    logActivity(db, row.lead_id, `viewing_${outcome}`, `Viewing on ${describeInZone(row.start_at, row.timezone)} ${outcome === 'completed' ? 'took place' : 'did not happen (no-show)'}`, { viewingId: id }, 'calendar', user.id)
+  })
+  return own(db, user.id, id)
+}
+
+/**
+ * Scheduler: booked viewings whose end time has passed get one reminder for the broker to say whether they
+ * took place. Nothing is marked completed here.
+ */
+export function noticeEndedViewings(db) {
+  const rows = db.prepare("SELECT * FROM viewings WHERE status = 'booked' AND end_at <= ? AND ended_noticed_at IS NULL").all(now())
+  for (const v of rows) {
+    transaction(db, () => {
+      db.prepare('UPDATE viewings SET ended_noticed_at = ? WHERE id = ?').run(now(), v.id)
+      db.prepare(`INSERT INTO reminders (user_id, lead_id, reason, detail, status, dedupe_key, created_at, updated_at) VALUES (?, ?, 'viewing_outcome', ?, 'open', ?, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING`)
+        .run(v.user_id, v.lead_id, `The viewing on ${describeInZone(v.start_at, v.timezone)} has ended: mark whether it took place`, `viewing:${v.id}`, now(), now())
+    })
+  }
+  return rows.length
+}
