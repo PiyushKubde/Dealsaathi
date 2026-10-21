@@ -18,8 +18,14 @@ function addMessage(db, conversationId, role, content, payload = null) {
     .run(conversationId, role, content, payload ? json(payload) : null, now())
 }
 
-function getConversation(db, id) {
-  return db.prepare('SELECT * FROM conversations WHERE id = ?').get(id)
+/** A conversation, only if it belongs to this user. */
+function getConversation(db, id, userId) {
+  return db.prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?').get(id, userId)
+}
+
+/** An action, only if its conversation belongs to this user. */
+function getOwnAction(db, actionId, userId) {
+  return db.prepare('SELECT a.* FROM actions a JOIN conversations c ON c.id = a.conversation_id WHERE a.id = ? AND c.user_id = ?').get(actionId, userId)
 }
 
 function pendingAction(db, conversationId) {
@@ -51,18 +57,18 @@ function spokenText(db, conversationId) {
  * One broker message. Returns { conversationId, status, reply, action? } where status is
  * needs_info | ready_for_review | cancelled | unsupported.
  */
-export async function handleMessage(db, ai, { conversationId, message }) {
+export async function handleMessage(db, ai, { conversationId, message, userId }) {
   if (typeof message !== 'string' || !message.trim()) throw new AppError(400, 'validation_failed', 'Type a message first.')
   if (message.length > MAX_MESSAGE) throw new AppError(400, 'validation_failed', `Messages must be ${MAX_MESSAGE} characters or fewer.`)
   if (!ai.configured) throw new AppError(503, 'ai_not_configured', 'AI is not configured: add the viaSocket values to .env and restart. You can still add leads with the form.')
 
-  let conversation = conversationId ? getConversation(db, conversationId) : null
+  let conversation = conversationId ? getConversation(db, conversationId, userId) : null
   if (conversationId && !conversation) throw new AppError(404, 'conversation_not_found', 'That conversation no longer exists. Start a new one.')
   if (!conversation) {
     const id = randomUUID()
     const ts = now()
-    db.prepare('INSERT INTO conversations (id, thread_id, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run(id, `lead-${id}`, 'open', ts, ts)
-    conversation = getConversation(db, id)
+    db.prepare('INSERT INTO conversations (id, thread_id, state, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, `lead-${id}`, 'open', userId, ts, ts)
+    conversation = getConversation(db, id, userId)
   }
   const cid = conversation.id
   addMessage(db, cid, 'user', message.trim())
@@ -76,7 +82,7 @@ export async function handleMessage(db, ai, { conversationId, message }) {
       prompt: EXTRACTION_PROMPT,
       responseType: 'json_schema',
       jsonSchema: EXTRACTION_SCHEMA
-    })
+    }, { userId })
     extraction = parseExtraction(reply?.content)
   } catch (error) {
     const appError = describeAiError(error)
@@ -145,9 +151,9 @@ export async function handleMessage(db, ai, { conversationId, message }) {
  * Saves the reviewed lead. `fields` is what the broker left on the review card; it is validated again here.
  * Safe to call twice: a completed action answers with the lead it already saved.
  */
-export function confirmAction(db, actionId, { fields, allowSameName = false } = {}) {
+export function confirmAction(db, actionId, { fields, allowSameName = false, userId } = {}) {
   if (!fields || typeof fields !== 'object' || Array.isArray(fields)) throw new AppError(400, 'validation_failed', 'Send the reviewed fields.')
-  const row = db.prepare('SELECT * FROM actions WHERE id = ?').get(actionId)
+  const row = getOwnAction(db, actionId, userId)
   if (!row) throw new AppError(404, 'action_not_found', 'That request no longer exists.')
   if (row.status === 'completed') {
     const { lead_id } = parse(row.result)
@@ -158,7 +164,7 @@ export function confirmAction(db, actionId, { fields, allowSameName = false } = 
 
   try {
     return transaction(db, () => {
-      const lead = createLead(db, fields, { via: 'assistant', allowSameName })
+      const lead = createLead(db, fields, { via: 'assistant', allowSameName, userId })
       const done = db.prepare("UPDATE actions SET status = 'completed', result = ?, error = NULL, updated_at = ? WHERE id = ? AND status = 'awaiting_confirmation'")
         .run(json({ lead_id: lead.id }), now(), actionId)
       if (done.changes !== 1) throw new AppError(409, 'action_changed', 'This draft changed while saving. Reload and try again.')
@@ -172,8 +178,8 @@ export function confirmAction(db, actionId, { fields, allowSameName = false } = 
   }
 }
 
-export function cancelAction(db, actionId) {
-  const row = db.prepare('SELECT * FROM actions WHERE id = ?').get(actionId)
+export function cancelAction(db, actionId, userId) {
+  const row = getOwnAction(db, actionId, userId)
   if (!row) throw new AppError(404, 'action_not_found', 'That request no longer exists.')
   if (row.status === 'completed') throw new AppError(409, 'already_saved', 'This lead was already saved. Delete it from the Leads page if you no longer want it.')
   if (row.status === 'awaiting_confirmation') {
@@ -186,8 +192,8 @@ export function cancelAction(db, actionId) {
 }
 
 /** A conversation as the chat screen shows it after a reload. */
-export function loadConversation(db, id) {
-  const conversation = getConversation(db, id)
+export function loadConversation(db, id, userId) {
+  const conversation = getConversation(db, id, userId)
   if (!conversation) throw new AppError(404, 'conversation_not_found', 'That conversation no longer exists.')
   const messages = db.prepare('SELECT role, content, payload, created_at FROM messages WHERE conversation_id = ? ORDER BY id').all(id)
     .map((m) => ({ ...m, payload: parse(m.payload) }))

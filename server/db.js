@@ -78,6 +78,116 @@ const MIGRATIONS = [
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
   );
+  `,
+  // 2: accounts, viaSocket connections, follow-ups and automations
+  `
+  CREATE TABLE users (
+    id            TEXT PRIMARY KEY,
+    email         TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+  );
+
+  CREATE TABLE sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX sessions_user ON sessions(user_id);
+
+  ALTER TABLE conversations ADD COLUMN user_id TEXT REFERENCES users(id) ON DELETE CASCADE;
+  ALTER TABLE lead_activities ADD COLUMN user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+
+  -- A user's connected app account. auth_id stays on the server.
+  CREATE TABLE connections (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service_id TEXT NOT NULL,
+    app_name   TEXT NOT NULL,
+    icon_url   TEXT,
+    auth_id    TEXT NOT NULL,
+    label      TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (user_id, auth_id)
+  );
+
+  -- An enabled app (viaSocket's run endpoint for one connection). script_id is a credential: server only.
+  CREATE TABLE enabled_apps (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    auth_id    TEXT NOT NULL,
+    service_id TEXT NOT NULL,
+    script_id  TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, auth_id)
+  );
+
+  CREATE TABLE followups (
+    id            TEXT PRIMARY KEY,
+    lead_id       INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    connection_id INTEGER REFERENCES connections(id) ON DELETE SET NULL,
+    channel       TEXT NOT NULL,
+    recipient     TEXT NOT NULL,
+    from_address  TEXT,
+    subject       TEXT NOT NULL,
+    body          TEXT NOT NULL,
+    status        TEXT NOT NULL CHECK (status IN ('awaiting_confirmation','sending','sent','failed','unknown','cancelled')),
+    result        TEXT,
+    error         TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    sent_at       TEXT
+  );
+  CREATE INDEX followups_lead ON followups(lead_id, created_at);
+
+  -- Flows a user built in the prebuilt UI, as last read back from viaSocket.
+  CREATE TABLE automation_flows (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    flow_id    TEXT NOT NULL,
+    title      TEXT,
+    status     TEXT,
+    last_event TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, flow_id)
+  );
+  `,
+  // 3: property listings and property ↔ buyer matches
+  `
+  CREATE TABLE properties (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    title         TEXT    NOT NULL,
+    listing_type  TEXT    NOT NULL CHECK (listing_type IN ('sale','rent')),
+    property_type TEXT    NOT NULL CHECK (property_type IN ('apartment','independent_house','villa','plot','commercial','other')),
+    bedrooms      INTEGER,
+    price         INTEGER NOT NULL CHECK (price > 0),
+    city          TEXT    NOT NULL,
+    locality      TEXT,
+    address       TEXT,
+    area_sqft     INTEGER,
+    amenities     TEXT,
+    status        TEXT    NOT NULL DEFAULT 'available' CHECK (status IN ('available','under_offer','sold','rented','off_market')),
+    is_sample     INTEGER NOT NULL DEFAULT 0,
+    notes         TEXT,
+    created_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TEXT    NOT NULL,
+    updated_at    TEXT    NOT NULL
+  );
+  CREATE INDEX properties_status ON properties(status, listing_type);
+
+  CREATE TABLE property_matches (
+    property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+    lead_id     INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    score       INTEGER NOT NULL,
+    reasons     TEXT    NOT NULL,
+    status      TEXT    NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested','dismissed')),
+    created_at  TEXT    NOT NULL,
+    updated_at  TEXT    NOT NULL,
+    PRIMARY KEY (property_id, lead_id)
+  );
+  CREATE INDEX property_matches_lead ON property_matches(lead_id);
   `
 ]
 

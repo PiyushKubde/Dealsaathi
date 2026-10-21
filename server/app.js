@@ -6,8 +6,14 @@ import { AppError } from './errors.js'
 import { createLead, deleteLead, leadStats, listActivities, listLeads, requireLead, updateLead } from './leads/service.js'
 import { cancelAction, confirmAction, handleMessage, loadConversation } from './assistant/service.js'
 import { createAuth } from './auth.js'
+import { appDetails, disconnect, listUserConnections, reconnectDetails, requireViasocket, saveConnection, searchApps, viasocketError } from './integrations/service.js'
+import { GMAIL, cancelFollowup, draftFollowup, followupSetup, fromOptions, listFollowups, prepareFollowup, sendFollowup } from './followups/service.js'
+import { listAutomationFlows, recentFlowEvents, recordFlowEvent, setAutomationStatus } from './automations/service.js'
+import { addSampleProperties, createProperty, deleteProperty, dismissMatch, listProperties, listPropertyMatches, matchPropertiesFor, requireProperty, updateProperty } from './properties/service.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
+// The official browser half of viasocket-apps (connect()), served as-is from the installed package.
+const VIASOCKET_BROWSER = fileURLToPath(import.meta.resolve('viasocket-apps/browser'))
 
 const parseId = (value) => {
   const id = Number(value)
@@ -29,11 +35,11 @@ const sameHost = (origin, host) => {
 }
 
 /**
- * The app, with its database, AI client and access control passed in so tests can supply their own.
- * `ai` is { configured: boolean, send(params): Promise<AiReply> }; `auth` comes from createAuth().
+ * The app, with its database, AI, viaSocket gateway and access control passed in so tests can supply their own.
+ * `ai` is { configured, send(params, { userId }) }; `vs` comes from createViasocketGateway(); `auth` from createAuth().
  * `behindProxy`: hosted behind a TLS proxy, so trust its X-Forwarded-* headers.
  */
-export function createApp({ db, ai, auth = createAuth({ hosted: false }), behindProxy = false }) {
+export function createApp({ db, ai, vs = { configured: false }, auth = createAuth({ db }), behindProxy = false }) {
   const app = express()
   app.disable('x-powered-by')
   if (behindProxy) app.set('trust proxy', 1)
@@ -49,7 +55,9 @@ export function createApp({ db, ai, auth = createAuth({ hosted: false }), behind
     next()
   })
 
+  app.use('/api', (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next() })
   app.get('/api/session', (req, res) => res.json(auth.status(req)))
+  app.post('/api/session/register', (req, res) => auth.register(req, res))
   app.post('/api/session/login', (req, res) => auth.login(req, res))
   app.post('/api/session/logout', (req, res) => auth.logout(req, res))
   app.use('/api', (req, res, next) => auth.guard(req, res, next))
@@ -61,7 +69,7 @@ export function createApp({ db, ai, auth = createAuth({ hosted: false }), behind
     } catch {
       database = 'error'
     }
-    res.status(database === 'ok' ? 200 : 503).json({ ok: database === 'ok', database, ai: ai.configured ? 'configured' : 'not_configured', access: auth.mode, time: now() })
+    res.status(database === 'ok' ? 200 : 503).json({ ok: database === 'ok', database, ai: ai.configured ? 'configured' : 'not_configured', viasocket: vs.configured ? 'configured' : 'not_configured', access: auth.mode, time: now() })
   })
 
   app.get('/api/dashboard', (req, res) => res.json(leadStats(db)))
@@ -80,7 +88,7 @@ export function createApp({ db, ai, auth = createAuth({ hosted: false }), behind
       if (seen) return res.status(seen.status).json({ ...JSON.parse(seen.response), replayed: true })
     }
     const { lead: fields, allowSameName } = req.body || {}
-    const lead = createLead(db, fields, { via: 'form', allowSameName: allowSameName === true })
+    const lead = createLead(db, fields, { via: 'form', allowSameName: allowSameName === true, userId: req.user.id })
     const body = { lead }
     if (key) db.prepare('INSERT INTO idempotency_keys (key, scope, status, response, created_at) VALUES (?, ?, 201, ?, ?)').run(key, 'create_lead', JSON.stringify(body), now())
     res.status(201).json(body)
@@ -93,7 +101,7 @@ export function createApp({ db, ai, auth = createAuth({ hosted: false }), behind
 
   app.patch('/api/leads/:id', (req, res) => {
     const { lead: fields, allowSameName } = req.body || {}
-    res.json(updateLead(db, parseId(req.params.id), fields, { via: 'form', allowSameName: allowSameName === true }))
+    res.json(updateLead(db, parseId(req.params.id), fields, { via: 'form', allowSameName: allowSameName === true, userId: req.user.id }))
   })
 
   app.delete('/api/leads/:id', (req, res) => {
@@ -104,24 +112,106 @@ export function createApp({ db, ai, auth = createAuth({ hosted: false }), behind
   app.post('/api/assistant/messages', async (req, res) => {
     const { conversationId, message } = req.body || {}
     const cid = conversationId == null ? null : parseUuid(conversationId, 'conversation')
-    res.json(await handleMessage(db, ai, { conversationId: cid, message }))
+    res.json(await handleMessage(db, ai, { conversationId: cid, message, userId: req.user.id }))
   })
 
   app.get('/api/assistant/conversations/:id', (req, res) => {
-    res.json(loadConversation(db, parseUuid(req.params.id, 'conversation')))
+    res.json(loadConversation(db, parseUuid(req.params.id, 'conversation'), req.user.id))
   })
 
   app.post('/api/assistant/actions/:id/confirm', (req, res) => {
     const { fields, allowSameName } = req.body || {}
-    res.json(confirmAction(db, parseUuid(req.params.id, 'action'), { fields, allowSameName: allowSameName === true }))
+    res.json(confirmAction(db, parseUuid(req.params.id, 'action'), { fields, allowSameName: allowSameName === true, userId: req.user.id }))
   })
 
   app.post('/api/assistant/actions/:id/cancel', (req, res) => {
-    res.json(cancelAction(db, parseUuid(req.params.id, 'action')))
+    res.json(cancelAction(db, parseUuid(req.params.id, 'action'), req.user.id))
   })
+
+  // ---- Properties and matching. Saving a property recomputes its buyer matches in the same transaction.
+  app.get('/api/properties', (req, res) => {
+    const { q, listing_type, city, status } = req.query
+    res.json({ properties: listProperties(db, { q, listing_type, city, status }) })
+  })
+  app.post('/api/properties', (req, res) => res.status(201).json(createProperty(db, req.body?.property, { userId: req.user.id })))
+  app.post('/api/properties/samples', (req, res) => res.status(201).json({ properties: addSampleProperties(db, req.user.id) }))
+  app.get('/api/properties/:id', (req, res) => {
+    const id = parseId(req.params.id)
+    res.json({ property: requireProperty(db, id), matches: listPropertyMatches(db, id) })
+  })
+  app.patch('/api/properties/:id', (req, res) => res.json(updateProperty(db, parseId(req.params.id), req.body?.property, { userId: req.user.id })))
+  app.delete('/api/properties/:id', (req, res) => res.json({ deleted: true, property: deleteProperty(db, parseId(req.params.id)) }))
+  app.post('/api/properties/:id/matches/:leadId/dismiss', (req, res) => res.json(dismissMatch(db, parseId(req.params.id), parseId(req.params.leadId))))
+  app.get('/api/leads/:id/matches', (req, res) => {
+    const lead = requireLead(db, parseId(req.params.id))
+    res.json({ matches: matchPropertiesFor(db, lead).map(({ property, match }) => ({ property, ...match })) })
+  })
+
+  // ---- Integrations: the Apps API and the Connect popup (https://flow.viasocket.com/documentation/skill/connect.md)
+  app.get('/api/integrations/apps', async (req, res) => res.json({ apps: await searchApps(vs, req.query.q) }))
+  app.get('/api/integrations/apps/:serviceId', async (req, res) => res.json(await appDetails(vs, req.params.serviceId)))
+
+  // The signed-in user's embed token, for the Connect popup and the prebuilt UI only (the documented
+  // exceptions to "tokens stay on the server"). Signed per request for this user; never stored or logged.
+  app.get('/api/integrations/token', async (req, res) => {
+    requireViasocket(vs)
+    try {
+      res.json({ embedToken: await vs.token(req.user.id) })
+    } catch (error) {
+      throw viasocketError(error, 'sign your token')
+    }
+  })
+
+  // Gmail as DealSaathi uses it: its service id and the one action follow-ups need, for connect()'s `actions`.
+  app.get('/api/integrations/gmail', async (req, res) => {
+    requireViasocket(vs)
+    let serviceId
+    try {
+      serviceId = await vs.serviceIdFor(GMAIL.slug)
+    } catch (error) {
+      throw viasocketError(error, 'find Gmail in the catalog')
+    }
+    res.json({ serviceId, actions: [GMAIL.actionId], name: GMAIL.name, event: GMAIL.event })
+  })
+
+  app.get('/api/integrations/connections', async (req, res) => res.json(await listUserConnections(db, vs, req.user.id)))
+  app.post('/api/integrations/connections', async (req, res) => {
+    const { serviceId, authId } = req.body || {}
+    res.status(201).json({ connection: await saveConnection(db, vs, req.user.id, { serviceId, authId }) })
+  })
+  app.post('/api/integrations/connections/:id/reconnect', async (req, res) => res.json(await reconnectDetails(db, vs, req.user.id, parseId(req.params.id))))
+  app.delete('/api/integrations/connections/:id', async (req, res) => res.json(await disconnect(db, vs, req.user.id, parseId(req.params.id))))
+
+  // ---- Lead follow-up through the broker's Gmail
+  const gmailId = async () => {
+    if (!vs.configured) return null
+    try {
+      return await vs.serviceIdFor(GMAIL.slug)
+    } catch {
+      return null
+    }
+  }
+  app.get('/api/leads/:id/followups', async (req, res) => {
+    const id = parseId(req.params.id)
+    res.json({ ...followupSetup(db, req.user.id, id, await gmailId()), viasocket: vs.configured, ai: ai.configured, followups: listFollowups(db, id) })
+  })
+  app.get('/api/followups/from-options', async (req, res) => res.json({ options: await fromOptions(db, vs, req.user.id, parseId(req.query.connectionId)) }))
+  app.post('/api/leads/:id/followups/draft', async (req, res) => res.json(await draftFollowup(db, ai, req.user, parseId(req.params.id))))
+  app.post('/api/leads/:id/followups', async (req, res) => res.status(201).json(await prepareFollowup(db, vs, req.user, parseId(req.params.id), req.body)))
+  app.post('/api/followups/:id/send', async (req, res) => res.json(await sendFollowup(db, vs, req.user, parseUuid(req.params.id, 'followup'))))
+  app.post('/api/followups/:id/cancel', (req, res) => res.json(cancelFollowup(db, req.user, parseUuid(req.params.id, 'followup'))))
+
+  // ---- Automations: the user's flows (built in the prebuilt UI) and their events
+  app.get('/api/automations/flows', async (req, res) => res.json({ flows: await listAutomationFlows(db, vs, req.user.id), events: recentFlowEvents(db, req.user.id) }))
+  app.post('/api/automations/flows/:ref/status', async (req, res) => {
+    if (!/^[0-9a-f]{20}$/.test(req.params.ref)) throw new AppError(404, 'flow_not_found', 'No such automation.')
+    res.json(await setAutomationStatus(db, vs, req.user.id, req.params.ref, req.body?.status))
+  })
+  app.post('/api/automations/flow-events', async (req, res) => res.json(await recordFlowEvent(db, vs, req.user.id, { flowId: req.body?.flowId, action: req.body?.action })))
 
   app.use('/api', (req, res, next) => next(new AppError(404, 'not_found', 'No such endpoint.')))
 
+  app.get('/vendor/viasocket-apps-browser.js', (req, res) => res.type('text/javascript').sendFile(VIASOCKET_BROWSER))
   app.use(express.static(join(ROOT, 'public'), { index: 'index.html' }))
 
   // Answers carry a code and a plain message; internals (stack, SQL, secrets) stay out of the response.

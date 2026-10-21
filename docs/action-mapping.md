@@ -1,70 +1,69 @@
 # DealSaathi action mapping
 
-What the assistant may do, who picks it, and where every value comes from.
-Phase 2 has **one** action, and it is local: no viaSocket app action, CRM, email or calendar is called.
+Every external action DealSaathi can take, how it is chosen, where each input comes from, and its real status.
+All viaSocket calls run on the server through `viasocket-apps` 0.7.0 (`server/viasocket.js`).
 
 ## Who picks the action
 
-**The developer, in code.** The AI only labels the broker's message with one intent from a fixed list
-(`create_lead`, `add_details`, `cancel`, `other`); `server/assistant/service.js` maps that label to what
-happens. The AI is given no tools, so it cannot call anything. An unknown label is refused as a malformed
-answer. Only a **Confirm and save** click on the review card runs the action; typing "yes" in the chat does not.
+**The developer, in code, from a fixed allowlist.** The AI never names an app, action or id:
 
-| AI intent     | What the code does                                                       | Needs confirmation |
-| ------------- | ------------------------------------------------------------------------ | ------------------ |
-| `create_lead` | Starts a draft (or adds to the open draft if the name matches)           | Yes, to save       |
-| `add_details` | Adds the new details to the open draft (starts one if there is none)     | Yes, to save       |
-| `cancel`      | Cancels the open draft; nothing is saved                                 | No (nothing saved) |
-| `other`       | Declines: "Right now I can only add new leads"                           | n/a                |
+- Lead entry: the AI labels a message `create_lead | add_details | cancel | other`; code maps that to the one local
+  action "save a lead", run only by a **Confirm and save** click.
+- Follow-up email: the broker opens a lead and chooses **Follow-up email**; code runs exactly one action,
+  Gmail · Send Email, after a **Send now** click.
+- Automations: the broker builds them in viaSocket's own prebuilt UI; DealSaathi only lists, pauses and resumes them.
 
-## The AI call (viaSocket)
+## Identity, tokens and secrets
 
-| What            | Value                                                                                   |
-| --------------- | --------------------------------------------------------------------------------------- |
-| Package call    | `viasocket.user(userId).ai.send({ threadId, message, prompt, responseType, jsonSchema })` from `viasocket-apps` 0.7.0 |
-| Docs            | https://flow.viasocket.com/documentation/ai.md                                          |
-| Runs where      | Server only (`server/index.js`). The browser never sees the secret or any token          |
-| `userId`        | Code: `DEALSAATHI_USER_ID`, default `local-broker-1` (one local broker; a stable id, not an email) |
-| `threadId`      | Code: `lead-<conversation uuid>`, one per chat conversation                              |
-| `message`       | Code wraps the **broker's words** (fenced and marked as data) plus the open draft        |
-| `prompt`        | Code: `EXTRACTION_PROMPT` in `server/assistant/extract.js`                               |
-| `responseType`  | Code: `json_schema`                                                                      |
-| `jsonSchema`    | Code: `EXTRACTION_SCHEMA` (strict; every field nullable)                                  |
-| `model`/`service` | Left out on purpose: viaSocket's default model                                         |
-| `tools`         | Left out on purpose: the AI may not act                                                  |
+| Thing | Where it lives |
+| --- | --- |
+| `VIASOCKET_EMBED_SECRET` | Server env only. Never in a response, file in Git, or log |
+| Embed token | Signed per request for the signed-in broker (`viasocket.user(usr_…).token()`); sent to the browser only for the Connect popup and the prebuilt UI, as the skill allows |
+| `userId` / `unique_identifier` | The broker's own `usr_…` id: random, stable, never the email |
+| `auth_id` (a connection) | `connections` table, per broker; the browser sees a row id. Checked against `listConnections()` before it is stored. Sent to the browser only to reconnect that broker's own expired connection (`connect({ authId })`) |
+| `script_id` (an enabled app or a flow) | `enabled_apps` table, server only. The Automations list gives the browser an opaque ref |
 
-Result handling: `content` is checked by hand (`parseExtraction`) even though the schema is strict.
-A wrong shape gives **502 `ai_malformed`**; a failed call gives 503 with `ai_auth`, `ai_busy`,
-`ai_unreachable` or `ai_failed`. Nothing is prepared or saved in either case.
+## Gmail · Send Email (lead follow-up)
 
-## Action `create_lead` → local SQLite insert
+| | |
+| --- | --- |
+| App | Gmail, slug `gmail`, service `rowo0bqrhj5g` (resolved at run time) |
+| Action | `rowogelpy0h6`, version `V55` (`catalog.versionIdFor` at run time) |
+| Connection | The broker's own Gmail, connected in DealSaathi with `connect({ actions: ['rowogelpy0h6'] })` |
+| Order | `listConnections` (live check) → `listFlows` / `enable` (once per connection) → `versionIdFor` → `runAction` |
 
-| Field                | Required | Supplied by                                       | Validation                                      |
-| -------------------- | -------- | ------------------------------------------------- | ----------------------------------------------- |
-| `full_name`          | Yes      | AI from the message → broker confirms/edits       | 2–100 chars; every word must appear in what the broker typed, or it is left unknown |
-| `customer_type`      | Yes      | AI → broker                                       | buyer / seller / tenant / landlord; left unknown and flagged when unclear |
-| `phone` *or* `email` | One of them | AI → broker                                    | Must literally appear in the broker's messages (else left unknown); phone 10–15 digits; email format |
-| `preferred_location` | No       | AI → broker                                       | ≤ 120 chars                                     |
-| `property_type`      | No       | AI (only when stated) → broker                    | apartment / independent_house / villa / plot / commercial / other |
-| `property_interest`  | No       | AI → broker                                       | ≤ 200 chars                                     |
-| `bedrooms`           | No       | AI → broker                                       | Whole number 0–20                               |
-| `budget_min`, `budget_max` | No | AI (lakh/crore → rupees) → broker               | Whole rupees ≥ 0; min ≤ max; "around X" is flagged |
-| `source`             | No       | AI (only when stated) → broker                    | walk_in / referral / website / phone_call / social_media / property_portal / other |
-| `notes`              | No       | AI (only when stated) → broker                    | ≤ 2000 chars                                    |
-| `status`             | No       | Code default `new` → broker may change            | One of the status list                          |
-| `assigned_broker`    | No       | Broker only                                       | ≤ 100 chars                                     |
-| `id`, `created_at`, `updated_at` | — | Code (SQLite autoincrement, ISO timestamps) | Shown as `L-0001`                                |
+| `inputData` key | Source | Rule |
+| --- | --- | --- |
+| `to` | Saved data: the lead's email | Never typed and never AI. A lead without a valid email cannot be followed up |
+| `subject` | The broker, on screen (optionally an AI draft they edit) | 1–200 characters, one line (no header injection) |
+| `messageBody` | The broker, on screen (optionally an AI draft they edit) | 1–10,000 characters; sent as escaped HTML paragraphs, so nothing typed becomes markup |
+| `from` | `PICK`: the broker picks from `listOptions('from')`, or leaves it out for the account default | Re-checked against the live options before saving |
+| `fromName` | Saved data: the signed-in broker's name | |
+| `cc`, `bcc`, `replyTo`, `attachments`, `labelIds` | Left out on purpose | One-to-one follow-up; replies go to the sending account; Gmail adds the SENT label itself |
 
-Anything not stated stays **unknown** (`null`), never guessed.
+The AI draft uses the lead's saved preferences only (no phone or email is sent to the AI) and is never sent without review.
 
-**Confirmation:** the review card shows every field, tags AI-filled ones, highlights missing ones, lists the
-AI's doubts and any duplicates. The broker edits and presses **Confirm and save**. The server validates the
-edited values again before inserting.
+**Confirmation:** the broker reviews To, From, Subject and Message, then presses **Send now**. Only one request can
+move a follow-up from *awaiting confirmation* to *sending*, so a double click sends once.
 
-**Duplicates:** the same phone or email as an existing lead is blocked. The same name only is a warning the
-broker can override with **Save anyway**.
+**Result handling:**
+- **Sent:** only when Gmail returns a message id. It is shown with its labels, and logged on the lead's activity history.
+- **Failed:** viaSocket or Gmail refused the send. The reason is shown and logged, and the follow-up is never resent automatically.
+- **Unknown:** no answer, or an answer without a message id. The broker is told to check the Gmail Sent folder before resending.
+- **Back to review:** a failure before the action runs (connection gone, enable failed), so nothing was sent.
+- **Refused:** a paused Gmail flow is reported, not silently resumed.
 
-**Result handling:** the insert and the "draft completed" mark happen in one transaction. Success returns the
-row read back from the database. A second Confirm returns that same lead (`alreadySaved: true`), so no second
-row is made. A database error rolls back, answers 500 "nothing was saved" and keeps the draft open to retry.
-The saved lead is labelled **local database**; it is never described as a CRM record.
+**Live status:** built and tested with a fake viaSocket. Not yet run against a real Gmail, because no Gmail test connection exists in project `projm6Hpqgvs`.
+
+## Catalog actions checked for the next workflows (not built yet)
+
+| Workflow | App · action (live catalog) | Ids | Blocker |
+| --- | --- | --- | --- |
+| Send listings on WhatsApp | WhatsApp Business Cloud (Meta) · Send Template Message | slug `whatsapp_business_cloud`, service `row3icnwu2su`; WABA, phone and template are pickers | A Meta WhatsApp Business account with an **approved template** for property messages, connected by the broker |
+| (rejected) | Built-in WhatsApp · Send WhatsApp Message (NoAuth) | `rowax61bwd33` V18 | Its 97 templates belong to viaSocket's own business account (support, webinars, billing). Using them would send from viaSocket's number with viaSocket's text |
+| Reply tracking | WhatsApp Business Cloud (Meta) · Message Notification trigger | | Same account; replies only, never "opened" |
+| Slack alerts and summaries | Slack · Send Message | slug `slack`, `rowbu58rc`, V107; channel is a picker | A Slack workspace connected by the broker |
+| Viewings | Google Calendar · Get Free/Busy Information, Create Calendar Event; New Upcoming Event trigger | slug `google-calendar`, `rowkhibv5efp` | A Google Calendar connected by the broker; the client's availability from a real reply |
+| Itinerary travel times | Google Map · Get a Distance Matrix | slug `Google-Map`, `rowa0ibichgc` (Basic sign-in) | A Google Maps API key, connected by the broker; otherwise ordering is labelled approximate |
+| Rent payment status | Razorpay · Create Payment Link; Any Payment Link Gets Paid trigger | slug `razorpay`, `row2n5tu2hd9` | A Razorpay account connected by the property manager; otherwise payments are verified manually |
+| Scheduled checks (follow-up due, inactivity, rent) | A viaSocket automation with a `cron` trigger calling a DealSaathi endpoint, or an Embarko schedule | automations.md | Needs a public URL (the Embarko app) and a per-schedule secret; not built |

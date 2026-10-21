@@ -155,3 +155,20 @@ dialog::backdrop { background: rgba(0, 0, 0, .4); }
   dl.details dd { margin-bottom: .5rem; }
 }
 @media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }
+
+/* accounts, integrations, automations, follow-ups */
+.account { display: flex; flex-direction: column; gap: .4rem; padding-top: .75rem; border-top: 1px solid var(--border); margin-top: auto; }
+.account + .sidebar-foot { margin-top: 0; }
+.btn.small { padding: .3rem .65rem; font-size: .82rem; }
+.badge.danger-badge { background: var(--danger-soft); color: var(--danger); }
+.conn-row { display: flex; align-items: center; gap: .75rem; }
+.app-icon { width: 28px; height: 28px; border-radius: 6px; object-fit: contain; background: #fff; flex: none; }
+.app-icon-fallback { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--muted); font-weight: 700; }
+.app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: .5rem; margin-top: .75rem; }
+.app-tile { display: flex; align-items: center; gap: .5rem; padding: .5rem .65rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: .88rem; cursor: pointer; text-align: left; }
+.app-tile:hover { background: var(--surface-2); }
+.app-detail { margin-top: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; gap: .5rem; }
+.connect-btn .app-icon { width: 20px; height: 20px; }
+.review-box { border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; margin-top: .5rem; }
+.timeline li li { border-bottom: 0; padding: .1rem 0; }
+.timeline ul { margin: .25rem 0; padding-left: 1.1rem; }

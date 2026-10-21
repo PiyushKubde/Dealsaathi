@@ -58,16 +58,17 @@ export function findDuplicates(db, { full_name, email, phone }, excludeId = null
   return [...found.values()]
 }
 
-function logActivity(db, leadId, type, summary, details, via) {
-  db.prepare('INSERT INTO lead_activities (lead_id, type, summary, details, via, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(leadId, type, summary, details ? JSON.stringify(details) : null, via, now())
+/** One entry in a lead's history: what happened, through what (form, assistant, gmail) and by whom. */
+export function logActivity(db, leadId, type, summary, details, via, userId = null) {
+  db.prepare('INSERT INTO lead_activities (lead_id, type, summary, details, via, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(leadId, type, summary, details ? JSON.stringify(details) : null, via, userId, now())
 }
 
 /**
  * Validates and saves a new lead. Throws 400 for invalid fields, 409 for a duplicate
  * (a name-only match passes when allowSameName is true).
  */
-export function createLead(db, input, { via = 'form', allowSameName = false } = {}) {
+export function createLead(db, input, { via = 'form', allowSameName = false, userId = null } = {}) {
   const { value, errors } = cleanLeadFields(input)
   const lead = { status: 'new', ...value }
   Object.assign(errors, checkCompleteLead(lead))
@@ -88,7 +89,7 @@ export function createLead(db, input, { via = 'form', allowSameName = false } = 
       .prepare(`INSERT INTO leads (${names.join(', ')}) VALUES (${names.map(() => '?').join(', ')})`)
       .run(...values)
     const id = Number(lastInsertRowid)
-    logActivity(db, id, 'created', 'Lead created', { fields: row }, via)
+    logActivity(db, id, 'created', 'Lead created', { fields: row }, via, userId)
     return getLead(db, id)
   })
 }
@@ -96,7 +97,7 @@ export function createLead(db, input, { via = 'form', allowSameName = false } = 
 const display = (v) => (v == null || v === '' ? '—' : String(v))
 
 /** Applies the given changes. Returns { lead, changed } where changed lists the fields that differ. */
-export function updateLead(db, id, input, { via = 'form', allowSameName = false } = {}) {
+export function updateLead(db, id, input, { via = 'form', allowSameName = false, userId = null } = {}) {
   const { value, errors } = cleanLeadFields(input)
   if (Object.keys(errors).length) throw validationError(errors)
 
@@ -133,7 +134,7 @@ export function updateLead(db, id, input, { via = 'form', allowSameName = false 
     const summary = statusChange && diff.length === 1
       ? `Status changed: ${display(statusChange.from)} → ${display(statusChange.to)}`
       : `Updated ${diff.map((d) => FIELD_LABELS[d.field]).join(', ')}`
-    logActivity(db, id, statusChange ? 'status_changed' : 'updated', summary, { changes: diff }, via)
+    logActivity(db, id, statusChange ? 'status_changed' : 'updated', summary, { changes: diff }, via, userId)
     return { lead: getLead(db, id), changed: diff }
   })
 }
@@ -148,7 +149,7 @@ export function deleteLead(db, id) {
 }
 
 export function listActivities(db, id) {
-  return db.prepare('SELECT * FROM lead_activities WHERE lead_id = ? ORDER BY created_at DESC, id DESC').all(id)
+  return db.prepare('SELECT a.*, u.name AS user_name FROM lead_activities a LEFT JOIN users u ON u.id = a.user_id WHERE a.lead_id = ? ORDER BY a.created_at DESC, a.id DESC').all(id)
     .map((a) => ({ ...a, details: a.details ? JSON.parse(a.details) : null }))
 }
 
