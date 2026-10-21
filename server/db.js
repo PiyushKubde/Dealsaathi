@@ -188,6 +188,58 @@ const MIGRATIONS = [
     PRIMARY KEY (property_id, lead_id)
   );
   CREATE INDEX property_matches_lead ON property_matches(lead_id);
+  `,
+  // 4: curated automations, their runs, follow-up reminders, recommendation emails
+  `
+  CREATE TABLE automation_settings (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key        TEXT NOT NULL,
+    enabled    INTEGER NOT NULL DEFAULT 0,
+    config     TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
+  );
+
+  CREATE TABLE automation_runs (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key          TEXT NOT NULL,
+    trigger      TEXT NOT NULL,
+    subject_type TEXT,
+    subject_id   TEXT,
+    status       TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','skipped','unknown')),
+    summary      TEXT,
+    error        TEXT,
+    details      TEXT,
+    dedupe_key   TEXT UNIQUE,
+    started_at   TEXT NOT NULL,
+    finished_at  TEXT
+  );
+  CREATE INDEX automation_runs_user ON automation_runs(user_id, key, started_at);
+
+  CREATE TABLE reminders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    lead_id    INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    reason     TEXT NOT NULL,
+    detail     TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done','dismissed')),
+    dedupe_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX reminders_user ON reminders(user_id, status);
+
+  -- Small facts the server must remember between runs (e.g. when the scheduler last checked).
+  CREATE TABLE app_state (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  ALTER TABLE leads ADD COLUMN follow_up_on TEXT;
+  ALTER TABLE followups ADD COLUMN kind TEXT NOT NULL DEFAULT 'followup';
+  ALTER TABLE followups ADD COLUMN property_ids TEXT;
   `
 ]
 

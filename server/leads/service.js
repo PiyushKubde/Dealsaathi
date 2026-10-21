@@ -10,7 +10,7 @@ const FIELD_LABELS = {
   full_name: 'Name', email: 'Email', phone: 'Phone', source: 'Source', customer_type: 'Customer type',
   property_type: 'Property type', property_interest: 'Interested in', bedrooms: 'Bedrooms',
   preferred_location: 'Location', budget_min: 'Min budget', budget_max: 'Max budget', status: 'Status',
-  assigned_broker: 'Assigned broker', notes: 'Notes'
+  assigned_broker: 'Assigned broker', notes: 'Notes', follow_up_on: 'Follow-up date'
 }
 
 /** Leads following up needs: still New or Contacted and untouched for this many days. */

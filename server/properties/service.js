@@ -161,7 +161,7 @@ export function listPropertyMatches(db, propertyId) {
     .map((r) => ({ leadId: r.lead_id, leadCode: `L-${String(r.lead_id).padStart(4, '0')}`, name: r.full_name, customerType: r.customer_type, hasPhone: Boolean(r.phone), hasEmail: Boolean(r.email), score: r.score, status: r.status, ...JSON.parse(r.reasons) }))
 }
 
-export function createProperty(db, input, { userId = null, isSample = false } = {}) {
+export function createProperty(db, input, { userId = null, isSample = false, match = true } = {}) {
   const { value, errors } = cleanPropertyFields(input)
   const p = { status: 'available', ...value }
   Object.assign(errors, checkComplete(p))
@@ -175,11 +175,11 @@ export function createProperty(db, input, { userId = null, isSample = false } = 
     const { lastInsertRowid } = db.prepare(`INSERT INTO properties (${[...cols, 'is_sample', 'created_by', 'created_at', 'updated_at'].join(', ')}) VALUES (${[...cols, 1, 2, 3, 4].map(() => '?').join(', ')})`)
       .run(...values, isSample ? 1 : 0, userId, ts, ts)
     const property = getProperty(db, Number(lastInsertRowid))
-    return { property, matching: refreshMatches(db, property, userId) }
+    return { property, matching: match ? refreshMatches(db, property, userId) : null }
   })
 }
 
-export function updateProperty(db, id, input, { userId = null } = {}) {
+export function updateProperty(db, id, input, { userId = null, match = true } = {}) {
   const { value, errors } = cleanPropertyFields(input)
   if (Object.keys(errors).length) throw validationError(errors)
   return transaction(db, () => {
@@ -193,7 +193,7 @@ export function updateProperty(db, id, input, { userId = null } = {}) {
         .run(...changes.map(([f, v]) => (f === 'amenities' && v ? JSON.stringify(v) : v)), now(), id)
     }
     const property = getProperty(db, id)
-    return { property, matching: refreshMatches(db, property, userId) }
+    return { property, matching: match ? refreshMatches(db, property, userId) : null }
   })
 }
 

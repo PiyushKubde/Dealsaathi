@@ -6,9 +6,12 @@ import { AppError } from './errors.js'
 import { createLead, deleteLead, leadStats, listActivities, listLeads, requireLead, updateLead } from './leads/service.js'
 import { cancelAction, confirmAction, handleMessage, loadConversation } from './assistant/service.js'
 import { createAuth } from './auth.js'
-import { appDetails, disconnect, listUserConnections, reconnectDetails, requireViasocket, saveConnection, searchApps, viasocketError } from './integrations/service.js'
-import { GMAIL, cancelFollowup, draftFollowup, followupSetup, fromOptions, listFollowups, prepareFollowup, sendFollowup } from './followups/service.js'
-import { listAutomationFlows, recentFlowEvents, recordFlowEvent, setAutomationStatus } from './automations/service.js'
+import { createHash, timingSafeEqual } from 'node:crypto'
+import { disconnect, listUserConnections, reconnectDetails, requireViasocket, saveConnection, viasocketError } from './integrations/service.js'
+import { curatedApps, requireCuratedServiceId } from './integrations/apps.js'
+import { GMAIL, cancelFollowup, draftFollowup, draftRecommendation, followupSetup, fromOptions, listFollowups, prepareFollowup, sendFollowup } from './followups/service.js'
+import { createAutomationEngine } from './automations/engine.js'
+import { listReminders, setReminderStatus } from './automations/reminders.js'
 import { addSampleProperties, createProperty, deleteProperty, dismissMatch, listProperties, listPropertyMatches, matchPropertiesFor, requireProperty, updateProperty } from './properties/service.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -38,9 +41,12 @@ const sameHost = (origin, host) => {
  * The app, with its database, AI, viaSocket gateway and access control passed in so tests can supply their own.
  * `ai` is { configured, send(params, { userId }) }; `vs` comes from createViasocketGateway(); `auth` from createAuth().
  * `behindProxy`: hosted behind a TLS proxy, so trust its X-Forwarded-* headers.
+ * `scheduler` is { available, secret }: the host's scheduler (Embarko) calls /tasks/automations with the secret.
  */
-export function createApp({ db, ai, vs = { configured: false }, auth = createAuth({ db }), behindProxy = false }) {
+export function createApp({ db, ai, vs = { configured: false }, auth = createAuth({ db }), behindProxy = false, scheduler = { available: false, secret: null } }) {
+  const automations = createAutomationEngine({ db, vs, scheduler })
   const app = express()
+  app.locals.automations = automations
   app.disable('x-powered-by')
   if (behindProxy) app.set('trust proxy', 1)
   app.use(express.json({ limit: '50kb' }))
@@ -89,6 +95,7 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
     }
     const { lead: fields, allowSameName } = req.body || {}
     const lead = createLead(db, fields, { via: 'form', allowSameName: allowSameName === true, userId: req.user.id })
+    automations.onLeadCreated(lead, req.user, 'form') // trigger: New Lead Alert (runs after the save, in the background)
     const body = { lead }
     if (key) db.prepare('INSERT INTO idempotency_keys (key, scope, status, response, created_at) VALUES (?, ?, 201, ?, ?)').run(key, 'create_lead', JSON.stringify(body), now())
     res.status(201).json(body)
@@ -121,7 +128,9 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
 
   app.post('/api/assistant/actions/:id/confirm', (req, res) => {
     const { fields, allowSameName } = req.body || {}
-    res.json(confirmAction(db, parseUuid(req.params.id, 'action'), { fields, allowSameName: allowSameName === true, userId: req.user.id }))
+    const result = confirmAction(db, parseUuid(req.params.id, 'action'), { fields, allowSameName: allowSameName === true, userId: req.user.id })
+    if (!result.alreadySaved && result.lead) automations.onLeadCreated(result.lead, req.user, 'assistant')
+    res.json(result)
   })
 
   app.post('/api/assistant/actions/:id/cancel', (req, res) => {
@@ -133,13 +142,24 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
     const { q, listing_type, city, status } = req.query
     res.json({ properties: listProperties(db, { q, listing_type, city, status }) })
   })
-  app.post('/api/properties', (req, res) => res.status(201).json(createProperty(db, req.body?.property, { userId: req.user.id })))
+  // Trigger: New Property → Buyer Matching, in the same transaction as the save (unless the broker turned it off).
+  app.post('/api/properties', (req, res) => {
+    const match = automations.matchingEnabledFor(req.user.id)
+    const out = createProperty(db, req.body?.property, { userId: req.user.id, match })
+    automations.recordMatching(req.user.id, out.property, out.matching)
+    res.status(201).json(out)
+  })
   app.post('/api/properties/samples', (req, res) => res.status(201).json({ properties: addSampleProperties(db, req.user.id) }))
   app.get('/api/properties/:id', (req, res) => {
     const id = parseId(req.params.id)
     res.json({ property: requireProperty(db, id), matches: listPropertyMatches(db, id) })
   })
-  app.patch('/api/properties/:id', (req, res) => res.json(updateProperty(db, parseId(req.params.id), req.body?.property, { userId: req.user.id })))
+  app.patch('/api/properties/:id', (req, res) => {
+    const match = automations.matchingEnabledFor(req.user.id)
+    const out = updateProperty(db, parseId(req.params.id), req.body?.property, { userId: req.user.id, match })
+    automations.recordMatching(req.user.id, out.property, out.matching)
+    res.json(out)
+  })
   app.delete('/api/properties/:id', (req, res) => res.json({ deleted: true, property: deleteProperty(db, parseId(req.params.id)) }))
   app.post('/api/properties/:id/matches/:leadId/dismiss', (req, res) => res.json(dismissMatch(db, parseId(req.params.id), parseId(req.params.leadId))))
   app.get('/api/leads/:id/matches', (req, res) => {
@@ -147,12 +167,23 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
     res.json({ matches: matchPropertiesFor(db, lead).map(({ property, match }) => ({ property, ...match })) })
   })
 
-  // ---- Integrations: the Apps API and the Connect popup (https://flow.viasocket.com/documentation/skill/connect.md)
-  app.get('/api/integrations/apps', async (req, res) => res.json({ apps: await searchApps(vs, req.query.q) }))
-  app.get('/api/integrations/apps/:serviceId', async (req, res) => res.json(await appDetails(vs, req.params.serviceId)))
+  // ---- Integrations: only the curated apps, each connected through the official Connect popup
+  // (https://flow.viasocket.com/documentation/skill/connect.md). There is no open app catalog.
+  app.get('/api/integrations/apps', async (req, res) => {
+    requireViasocket(vs)
+    const [apps, { connections, live, error }] = await Promise.all([curatedApps(vs), listUserConnections(db, vs, req.user.id)])
+    res.json({
+      apps: apps.map(({ slug, name, purpose, usedBy, inUse, serviceId, iconUrl, actions, error: appError }) => ({
+        slug, name, purpose, usedBy, inUse, serviceId, iconUrl, actions, error: appError,
+        connections: connections.filter((c) => serviceId && c.serviceId === serviceId)
+      })),
+      live,
+      error: error ?? null
+    })
+  })
 
-  // The signed-in user's embed token, for the Connect popup and the prebuilt UI only (the documented
-  // exceptions to "tokens stay on the server"). Signed per request for this user; never stored or logged.
+  // The signed-in user's embed token, for the Connect popup only (the documented exception to "tokens stay
+  // on the server"). Signed per request for this user; never stored or logged.
   app.get('/api/integrations/token', async (req, res) => {
     requireViasocket(vs)
     try {
@@ -162,27 +193,17 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
     }
   })
 
-  // Gmail as DealSaathi uses it: its service id and the one action follow-ups need, for connect()'s `actions`.
-  app.get('/api/integrations/gmail', async (req, res) => {
-    requireViasocket(vs)
-    let serviceId
-    try {
-      serviceId = await vs.serviceIdFor(GMAIL.slug)
-    } catch (error) {
-      throw viasocketError(error, 'find Gmail in the catalog')
-    }
-    res.json({ serviceId, actions: [GMAIL.actionId], name: GMAIL.name, event: GMAIL.event })
-  })
-
   app.get('/api/integrations/connections', async (req, res) => res.json(await listUserConnections(db, vs, req.user.id)))
   app.post('/api/integrations/connections', async (req, res) => {
     const { serviceId, authId } = req.body || {}
+    requireViasocket(vs)
+    await requireCuratedServiceId(vs, serviceId)
     res.status(201).json({ connection: await saveConnection(db, vs, req.user.id, { serviceId, authId }) })
   })
   app.post('/api/integrations/connections/:id/reconnect', async (req, res) => res.json(await reconnectDetails(db, vs, req.user.id, parseId(req.params.id))))
   app.delete('/api/integrations/connections/:id', async (req, res) => res.json(await disconnect(db, vs, req.user.id, parseId(req.params.id))))
 
-  // ---- Lead follow-up through the broker's Gmail
+  // ---- Emails to a lead through the broker's Gmail: follow-ups and property recommendations
   const gmailId = async () => {
     if (!vs.configured) return null
     try {
@@ -197,19 +218,36 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   })
   app.get('/api/followups/from-options', async (req, res) => res.json({ options: await fromOptions(db, vs, req.user.id, parseId(req.query.connectionId)) }))
   app.post('/api/leads/:id/followups/draft', async (req, res) => res.json(await draftFollowup(db, ai, req.user, parseId(req.params.id))))
+  app.post('/api/leads/:id/recommendations/draft', (req, res) => res.json(draftRecommendation(db, req.user, parseId(req.params.id), req.body?.propertyIds)))
   app.post('/api/leads/:id/followups', async (req, res) => res.status(201).json(await prepareFollowup(db, vs, req.user, parseId(req.params.id), req.body)))
   app.post('/api/followups/:id/send', async (req, res) => res.json(await sendFollowup(db, vs, req.user, parseUuid(req.params.id, 'followup'))))
   app.post('/api/followups/:id/cancel', (req, res) => res.json(cancelFollowup(db, req.user, parseUuid(req.params.id, 'followup'))))
 
-  // ---- Automations: the user's flows (built in the prebuilt UI) and their events
-  app.get('/api/automations/flows', async (req, res) => res.json({ flows: await listAutomationFlows(db, vs, req.user.id), events: recentFlowEvents(db, req.user.id) }))
-  app.post('/api/automations/flows/:ref/status', async (req, res) => {
-    if (!/^[0-9a-f]{20}$/.test(req.params.ref)) throw new AppError(404, 'flow_not_found', 'No such automation.')
-    res.json(await setAutomationStatus(db, vs, req.user.id, req.params.ref, req.body?.status))
-  })
-  app.post('/api/automations/flow-events', async (req, res) => res.json(await recordFlowEvent(db, vs, req.user.id, { flowId: req.body?.flowId, action: req.body?.action })))
+  // ---- Real estate automations: DealSaathi's own seven, configured here and run by this server
+  const automationKey = (key) => {
+    if (!/^[a-z_]{3,40}$/.test(key)) throw new AppError(404, 'automation_not_found', 'No such automation.')
+    return key
+  }
+  app.get('/api/automations', async (req, res) => res.json({ automations: await automations.cards(req.user) }))
+  app.put('/api/automations/:key', async (req, res) => res.json({ automation: await automations.configure(req.user, automationKey(req.params.key), req.body || {}) }))
+  app.get('/api/automations/:key/runs', (req, res) => res.json({ runs: automations.runs(req.user, automationKey(req.params.key)) }))
+  app.post('/api/automations/runs/:id/retry', async (req, res) => res.json({ run: await automations.retry(req.user, parseUuid(req.params.id, 'run')) }))
+  app.post('/api/automations/followup_reminders/run', async (req, res) => res.json({ result: await automations.runRemindersNow(req.user) }))
+  app.get('/api/automations/slack-channels', async (req, res) => res.json({ options: await automations.slackChannels(req.user, parseId(req.query.connectionId)) }))
+  app.get('/api/reminders', (req, res) => res.json({ reminders: listReminders(db, req.user.id, req.query.status) }))
+  app.post('/api/reminders/:id', (req, res) => res.json({ reminder: setReminderStatus(db, req.user.id, parseId(req.params.id), req.body?.status) }))
 
   app.use('/api', (req, res, next) => next(new AppError(404, 'not_found', 'No such endpoint.')))
+
+  // The host's scheduler (Embarko schedules, every 15 minutes): runs Buyer Follow-Up Reminders for every broker
+  // who switched them on. Only a caller holding the scheduler's secret gets in.
+  app.get('/tasks/automations', async (req, res) => {
+    const given = Buffer.from(createHash('sha256').update(req.get('authorization') || '').digest('hex'))
+    const wanted = Buffer.from(createHash('sha256').update(`Bearer ${scheduler.secret || ''}`).digest('hex'))
+    if (!scheduler.secret || !timingSafeEqual(given, wanted)) return res.status(401).type('text').send('unauthorized')
+    const t = await automations.runReminders({ trigger: 'Scheduled check' })
+    res.type('text').send(`Checked ${t.brokers} broker(s): ${t.created} new reminder(s), ${t.notified} notification(s) sent, ${t.failed} failed.`)
+  })
 
   app.get('/vendor/viasocket-apps-browser.js', (req, res) => res.type('text/javascript').sendFile(VIASOCKET_BROWSER))
   app.use(express.static(join(ROOT, 'public'), { index: 'index.html' }))

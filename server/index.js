@@ -1,5 +1,6 @@
 // Starts DealSaathi: npm start
 import { openDatabase, databaseFile } from './db.js'
+import { markInterruptedRuns } from './automations/store.js'
 import { createApp } from './app.js'
 import { createAuth } from './auth.js'
 import { createViasocketGateway, viasocket, viasocketConfigured } from './viasocket.js'
@@ -14,9 +15,13 @@ const ai = {
   send: (params, { userId }) => viasocket.user(String(userId)).ai.send(params)
 }
 
+// Embarko creates CRON_SECRET for an app with schedules (embarko.json) and calls /tasks/automations with it.
+const scheduler = { available: Boolean(process.env.CRON_SECRET), secret: process.env.CRON_SECRET || null }
+
 const db = openDatabase()
+const interrupted = markInterruptedRuns(db)
 const auth = createAuth({ db, accessCode: process.env.APP_PASSWORD, hosted })
-const app = createApp({ db, ai, vs: createViasocketGateway(), auth, behindProxy: hosted })
+const app = createApp({ db, ai, vs: createViasocketGateway(), auth, behindProxy: hosted, scheduler })
 const port = Number(process.env.PORT) || 3000
 const host = process.env.HOST || (hosted ? '0.0.0.0' : '127.0.0.1') // locally: this computer only
 
@@ -25,5 +30,6 @@ app.listen(port, host, () => {
   console.log(`DealSaathi is running at ${hosted ? `port ${port}` : `http://localhost:${port}`}`)
   console.log(`Database: ${hosted ? 'DATA_DIR/dealsaathi.db' : databaseFile()} (${count('users')} users, ${count('leads')} leads, ${count('connections')} connections)`)
   console.log(viasocketConfigured ? 'viaSocket: configured (AI, integrations, automations).' : 'viaSocket: not configured (add the viaSocket values). Leads still work.')
+  console.log(`Scheduler: ${scheduler.available ? 'on (/tasks/automations, every 15 minutes)' : 'off (no CRON_SECRET; reminders run only with "Run check now")'}${interrupted ? `; ${interrupted} interrupted run(s) marked unknown` : ''}`)
   console.log(`Access: ${auth.mode === 'locked' ? 'LOCKED until APP_PASSWORD is set' : hosted ? 'accounts; new accounts need the team access code' : 'accounts (this computer only)'}`)
 })

@@ -32,19 +32,36 @@ test('the browser never receives the signing secret, and the official browser SD
   } finally { await t.close() }
 })
 
-test('app search and app details come from the catalog, with input checked', async () => {
+test('the Integrations list is the curated apps only, with each user’s own connections', async () => {
   const vs = fakeVs()
   const t = await startApp({ vs })
   try {
-    assert.deepEqual((await t.call('/api/integrations/apps?q=g')).body.apps, [], 'one letter searches nothing')
-    const found = await t.call('/api/integrations/apps?q=gmail')
-    assert.equal(found.body.apps[0].name, 'Gmail')
-    const details = await t.call('/api/integrations/apps/rowo0bqrhj5g')
-    assert.equal(details.body.requiresAuth, true)
-    assert.equal(details.body.actions[0].name, 'Send Email')
-    assert.equal(details.body.actions[0].action_version_id, undefined, 'version ids are not sent to the browser')
-    assert.equal((await t.call('/api/integrations/apps/not-an-id!')).status, 400)
-    assert.equal((await t.call('/api/integrations/apps/rowunknown1')).status, 404)
+    const authId = vs.connectGmail(t.user.id)
+    await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: 'rowo0bqrhj5g', authId } })
+    const res = await t.call('/api/integrations/apps')
+    assert.equal(res.status, 200)
+    assert.deepEqual(res.body.apps.map((a) => a.slug), ['gmail', 'slack', 'google-calendar', 'whatsapp_business_cloud'])
+    const gmail = res.body.apps[0]
+    assert.equal(gmail.connections.length, 1)
+    assert.equal(gmail.connections[0].status, 'active')
+    assert.deepEqual(gmail.actions, ['rowogelpy0h6'], 'the popup asks only for the action DealSaathi uses')
+    assert.equal(res.body.apps[1].connections.length, 0)
+    assert.doesNotMatch(res.text, new RegExp(authId))
+    assert.equal((await t.call('/api/integrations/apps?q=notion')).body.apps.length, 4, 'no search: the list is fixed')
+    const other = signedInUser(t.db, { name: 'Other' })
+    assert.equal((await t.call('/api/integrations/apps', { as: other })).body.apps[0].connections.length, 0)
+  } finally { await t.close() }
+})
+
+test('an app outside the curated list cannot be connected', async () => {
+  const vs = fakeVs()
+  const t = await startApp({ vs })
+  try {
+    vs.state.connections[t.user.id] = [{ id: 'authX_rownotion1', service_id: 'rownotion1', service_name: 'Notion', isExpired: false }]
+    const res = await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: 'rownotion1', authId: 'authX_rownotion1' } })
+    assert.equal(res.status, 400)
+    assert.equal(res.body.error.code, 'app_not_supported')
+    assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM connections').get().n, 0)
   } finally { await t.close() }
 })
 
@@ -161,11 +178,12 @@ test('viaSocket errors reach the user without credentials in them', async () => 
   const vs = fakeVs()
   const t = await startApp({ vs })
   try {
-    vs.fail.search = vsError('failed calling https://flow.sokt.io/func/scriAbC123xyz with token eyJhbGciOiJIUzI1NiJ9.payload.sig', 500)
-    const res = await t.call('/api/integrations/apps?q=gmail')
+    const authId = vs.connectGmail(t.user.id)
+    vs.fail.listConnections = vsError('failed calling https://flow.sokt.io/func/scriAbC123xyz with token eyJhbGciOiJIUzI1NiJ9.payload.sig', 500)
+    const res = await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: 'rowo0bqrhj5g', authId } })
     assert.equal(res.status, 502)
     assert.doesNotMatch(res.text, /sokt\.io|scriAbC123xyz|eyJhbGci/)
-    vs.fail.search = vsError('fetch failed', null)
-    assert.equal((await t.call('/api/integrations/apps?q=gmail')).body.error.code, 'viasocket_unreachable')
+    vs.fail.listConnections = vsError('fetch failed', null)
+    assert.equal((await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: 'rowo0bqrhj5g', authId } })).body.error.code, 'viasocket_unreachable')
   } finally { await t.close() }
 })

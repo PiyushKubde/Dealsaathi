@@ -199,16 +199,15 @@ test('a failure before the action runs puts the follow-up back for review: nothi
   } finally { await t.close() }
 })
 
-test('a paused Gmail app is reported, not silently resumed', async () => {
+test('a paused enabled app is resumed with setFlowStatus(1), never enabled twice', async () => {
   const { t, vs, lead, connection } = await setup()
   try {
     await send(t, (await prepare(t, lead.id, { connectionId: connection.id, ...DRAFT })).body.followup.id)
     vs.state.flows[t.user.id][0].status = 'paused'
-    const prep = await prepare(t, lead.id, { connectionId: connection.id, ...DRAFT })
-    const res = await send(t, prep.body.followup.id)
-    assert.equal(res.status, 409)
-    assert.equal(res.body.error.code, 'sending_paused')
-    assert.ok(!vs.calls.some((c) => c.name === 'setFlowStatus'))
+    const res = await send(t, (await prepare(t, lead.id, { connectionId: connection.id, ...DRAFT })).body.followup.id)
+    assert.equal(res.body.followup.status, 'sent')
+    assert.deepEqual(vs.calls.find((c) => c.name === 'setFlowStatus').args.slice(2), [1])
+    assert.equal(vs.calls.filter((c) => c.name === 'enable').length, 1)
   } finally { await t.close() }
 })
 

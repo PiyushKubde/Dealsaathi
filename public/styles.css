@@ -172,3 +172,29 @@ dialog::backdrop { background: rgba(0, 0, 0, .4); }
 .review-box { border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; margin-top: .5rem; }
 .timeline li li { border-bottom: 0; padding: .1rem 0; }
 .timeline ul { margin: .25rem 0; padding-left: 1.1rem; }
+
+/* curated integrations and real estate automations */
+.int-grid, .auto-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+.int-card, .auto-card { display: flex; flex-direction: column; gap: .5rem; }
+.auto-card .card-foot { margin-top: auto; justify-content: space-between; padding-top: .5rem; border-top: 1px solid var(--border); }
+.pill { font-size: .75rem; font-weight: 700; padding: .15rem .6rem; border-radius: 999px; white-space: nowrap; }
+.pill-on { background: var(--ok-soft); color: var(--ok); }
+.pill-off { background: var(--surface-2); color: var(--muted); }
+.pill-setup { background: var(--warn-soft); color: var(--warn); }
+dl.mini { display: grid; grid-template-columns: 4.5rem 1fr; gap: .2rem .5rem; margin: 0; font-size: .85rem; }
+dl.mini dt { color: var(--muted); }
+dl.mini dd { margin: 0; }
+.switch { display: inline-flex; align-items: center; gap: .5rem; font-size: .88rem; font-weight: 600; margin: 0; cursor: pointer; }
+.switch input { appearance: none; width: 2.4rem; height: 1.35rem; border-radius: 999px; background: var(--border); position: relative; cursor: pointer; padding: 0; border: 0; transition: background .15s; }
+.switch input::after { content: ''; position: absolute; top: .15rem; left: .15rem; width: 1.05rem; height: 1.05rem; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: var(--shadow); }
+.switch input:checked { background: var(--primary); }
+.switch input:checked::after { transform: translateX(1.05rem); }
+.switch input:disabled { opacity: .45; cursor: not-allowed; }
+.radio { display: inline-flex; align-items: center; gap: .35rem; font-weight: 500; font-size: .88rem; margin: 0 .75rem 0 0; }
+.radio input { width: auto; }
+.run-succeeded { color: var(--ok); font-weight: 600; }
+.run-failed { color: var(--danger); font-weight: 600; }
+.run-unknown, .run-running, .run-skipped { color: var(--warn); font-weight: 600; }
+dialog.wide-dialog { max-width: 560px; width: calc(100% - 2rem); max-height: 85vh; overflow-y: auto; }
+.pick { width: auto; margin-top: .3rem; }
+.pick-gap { width: 13px; flex: none; }

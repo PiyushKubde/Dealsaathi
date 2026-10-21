@@ -7,7 +7,7 @@ export const PROPERTY_TYPES = ['apartment', 'independent_house', 'villa', 'plot'
 /** Every field a caller may set, in display order. */
 export const LEAD_FIELDS = [
   'full_name', 'email', 'phone', 'source', 'customer_type', 'property_type', 'property_interest',
-  'bedrooms', 'preferred_location', 'budget_min', 'budget_max', 'status', 'assigned_broker', 'notes'
+  'bedrooms', 'preferred_location', 'budget_min', 'budget_max', 'status', 'assigned_broker', 'notes', 'follow_up_on'
 ]
 
 const TEXT_LIMITS = { full_name: 100, property_interest: 200, preferred_location: 120, assigned_broker: 100, notes: 2000 }
@@ -71,6 +71,12 @@ export function cleanLeadFields(input) {
     if (field === 'email') {
       if (raw.length > 200 || !EMAIL_RE.test(raw)) errors.email = 'Enter a valid email address.'
       else value.email = raw
+      continue
+    }
+    if (field === 'follow_up_on') {
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T00:00:00Z`) : null
+      if (!d || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== raw) errors.follow_up_on = 'Use a real date (YYYY-MM-DD).'
+      else value.follow_up_on = raw
       continue
     }
     if (field === 'phone') {

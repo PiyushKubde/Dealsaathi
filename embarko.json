@@ -1,0 +1,11 @@
+{
+  "$schema": "https://embarko.ai/schema/embarko.json",
+  "schedules": [
+    {
+      "cron": "*/15 * * * *",
+      "path": "/tasks/automations",
+      "timezone": "Asia/Kolkata",
+      "name": "DealSaathi automations (follow-up reminders)"
+    }
+  ]
+}

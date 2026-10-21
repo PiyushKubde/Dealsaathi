@@ -40,8 +40,8 @@ export function signedInUser(db, { name = 'Asha Broker', email = `asha${Math.ran
  * The real app on a random port. By default every call is made as a signed-in user;
  * pass { as: otherUser } or { as: null } (no session) per call.
  */
-export async function startApp({ ai = fakeAi(), vs = { configured: false }, db = openDatabase(':memory:'), auth, withUser = true } = {}) {
-  const app = createApp({ db, ai, vs, auth: auth || createAuth({ db }) })
+export async function startApp({ ai = fakeAi(), vs = { configured: false }, db = openDatabase(':memory:'), auth, withUser = true, scheduler } = {}) {
+  const app = createApp({ db, ai, vs, auth: auth || createAuth({ db }), scheduler })
   const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)) })
   const base = `http://127.0.0.1:${server.address().port}`
   const user = withUser ? signedInUser(db) : null
@@ -55,7 +55,8 @@ export async function startApp({ ai = fakeAi(), vs = { configured: false }, db =
     const text = await res.text()
     return { status: res.status, body: text ? JSON.parse(text) : null, text, headers: res.headers }
   }
-  return { db, ai, vs, user, base, call, close: () => new Promise((r) => server.close(r)) }
+  const idle = () => app.locals.automations.idle()
+  return { db, ai, vs, user, base, call, idle, engine: app.locals.automations, close: async () => { await idle(); await new Promise((r) => server.close(r)) } }
 }
 
 /** An error shaped like viasocket-apps' ViaSocketError. */
@@ -65,8 +66,17 @@ export const vsError = (message, status) => Object.assign(new Error(message), { 
  * A stand-in for the viaSocket gateway. `state.connections[userId]` and `state.flows[userId]` play
  * viaSocket's records; `calls` logs every call; `fail[method]` makes the next call to it throw.
  */
+const SERVICES = { gmail: 'rowo0bqrhj5g', slack: 'rowbu58rc', 'google-calendar': 'rowkhibv5efp', whatsapp_business_cloud: 'row3icnwu2su' }
+const VERSIONS = { rowogelpy0h6: 'rowwj0sfmhub', row1jrbor: 'rowslackv107' }
+
 export function fakeVs({ gmailServiceId = 'rowo0bqrhj5g' } = {}) {
-  const state = { connections: {}, flows: {}, options: [{ label: 'me@example.com', value: 'me@example.com' }], runResult: { id: 'msg_123', threadId: 'thr_1', labelIds: ['SENT'] } }
+  const state = {
+    connections: {}, flows: {},
+    options: [{ label: 'me@example.com', value: 'me@example.com' }],
+    slackChannels: [{ label: '#leads', value: 'C0LEADS' }, { label: '#team', value: 'C0TEAM' }],
+    runResult: { id: 'msg_123', threadId: 'thr_1', labelIds: ['SENT'] },
+    slackResult: { ok: true, channel: 'C0LEADS', ts: '1761000000.000100' }
+  }
   const calls = []
   const fail = {}
   const step = (name, args) => {
@@ -76,14 +86,13 @@ export function fakeVs({ gmailServiceId = 'rowo0bqrhj5g' } = {}) {
   let scripts = 0
   const vs = {
     configured: true, state, calls, fail,
-    async search(text) { step('search', [text]); return [{ serviceId: gmailServiceId, name: 'Gmail', iconUrl: 'https://icons.example/gmail.svg', description: 'Email by Google' }] },
     async versions(serviceId) {
       step('versions', [serviceId])
-      if (serviceId !== gmailServiceId) return null
-      return { service: { service_id: gmailServiceId, name: 'Gmail', description: 'Email', icon_url: 'https://icons.example/gmail.svg', auth_type: 'Auth2.0', requires_auth: true }, actions: [{ name: 'Send Email', description: 'send a new email message.', action_id: 'rowogelpy0h6', action_version_id: 'rowwj0sfmhub' }], triggers: [] }
+      const slug = Object.keys(SERVICES).find((k) => SERVICES[k] === serviceId)
+      return slug ? { service: { service_id: serviceId, name: slug, description: '', icon_url: `https://icons.example/${slug}.svg`, auth_type: 'Auth2.0', requires_auth: true }, actions: [], triggers: [] } : null
     },
-    async serviceIdFor(slug) { step('serviceIdFor', [slug]); if (slug !== 'gmail') throw vsError('unknown slug', null); return gmailServiceId },
-    async versionIdFor(serviceId, event, version) { step('versionIdFor', [serviceId, event, version]); return 'rowwj0sfmhub' },
+    async serviceIdFor(slug) { step('serviceIdFor', [slug]); if (!SERVICES[slug]) throw vsError('unknown slug', null); return slug === 'gmail' ? gmailServiceId : SERVICES[slug] },
+    async versionIdFor(serviceId, event, version) { step('versionIdFor', [serviceId, event, version]); return VERSIONS[event] || 'rowunknownv' },
     async token(userId) { step('token', [userId]); return `signed-token-for-${userId}` },
     async listConnections(userId) { step('listConnections', [userId]); return state.connections[userId] || [] },
     async revokeConnection(userId, authId) { step('revokeConnection', [userId, authId]); state.connections[userId] = (state.connections[userId] || []).filter((c) => c.id !== authId) },
@@ -100,12 +109,20 @@ export function fakeVs({ gmailServiceId = 'rowo0bqrhj5g' } = {}) {
       if (f) f.status = status === 1 ? 'active' : status === 2 ? 'paused' : 'deleted'
       return { id: scriptId, status: f?.status }
     },
-    async listOptions(userId, actionVersionId, params) { step('listOptions', [userId, actionVersionId, params]); return { options: state.options, offset: null } },
-    async runAction(scriptId, actionVersionId, inputData) { step('runAction', [scriptId, actionVersionId, inputData]); return state.runResult }
+    async listOptions(userId, actionVersionId, params) {
+      step('listOptions', [userId, actionVersionId, params])
+      return { options: params.fieldKey === 'destination.channel_id' ? state.slackChannels : state.options, offset: null }
+    },
+    async runAction(scriptId, actionVersionId, inputData) { step('runAction', [scriptId, actionVersionId, inputData]); return actionVersionId === VERSIONS.row1jrbor ? state.slackResult : state.runResult }
   }
   /** Pretend the user finished the Connect popup for Gmail. */
   vs.connectGmail = (userId, authId = `auth${Math.random().toString(36).slice(2, 8)}_${gmailServiceId}`, extra = {}) => {
     state.connections[userId] = [...(state.connections[userId] || []), { id: authId, service_id: gmailServiceId, service_name: 'Gmail', iconUrl: 'https://icons.example/gmail.svg', connection_label: '{"Email":"me@example.com"}', isExpired: false, ...extra }]
+    return authId
+  }
+  /** Pretend the user finished the Connect popup for Slack. */
+  vs.connectSlack = (userId, authId = `auth${Math.random().toString(36).slice(2, 8)}_rowbu58rc`) => {
+    state.connections[userId] = [...(state.connections[userId] || []), { id: authId, service_id: 'rowbu58rc', service_name: 'Slack', connection_label: '{"team":"acme"}', isExpired: false }]
     return authId
   }
   return vs

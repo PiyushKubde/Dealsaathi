@@ -5,12 +5,20 @@ An AI assistant for real estate brokers, built on viaSocket.
 | Area | What works | Status |
 | --- | --- | --- |
 | Accounts | Each broker signs up with their own login and gets a stable id (`usr_…`), which is also their identity on viaSocket | Working |
-| Leads | Add with AI (viaSocket AI) or a form, review, confirm, edit, delete, duplicate checks, activity history | Working |
-| Properties | Listings with automatic buyer matching when a listing is saved; clearly labelled sample listings | Working (local data) |
-| Integrations | App search from viaSocket's catalog, the official **Connect** popup (`viasocket-apps/browser` `connect()`), live connection status, reconnect, disconnect | Working; each broker signs in to their own apps |
-| Follow-up email | Draft (optionally with AI), review, confirm, send from the broker's own Gmail through viaSocket (Gmail · Send Email), result recorded on the lead | Built; needs a connected Gmail to send |
-| Automations | viaSocket's prebuilt workflow builder inside DealSaathi; the broker's flows listed, paused and resumed | Working; flows run on viaSocket |
-| WhatsApp, Slack, Calendar, rent | Not built yet: see `docs/action-mapping.md` for what each needs | Not built |
+| Leads | Add with AI (viaSocket AI) or a form, review, confirm, edit, delete, duplicate checks, follow-up date, activity history | Working |
+| Properties | Listings with buyer matching on save; clearly labelled sample listings | Working (local data) |
+| Integrations | A fixed list of the apps DealSaathi uses (Gmail, Slack, Google Calendar, WhatsApp Business), connected through the official **Connect** popup (`viasocket-apps/browser` `connect()`), live status, reconnect, disconnect | Working; each broker signs in to their own apps |
+| Real Estate Automations | Seven DealSaathi automations with native settings, on/off, run history and retry. No viaSocket builder or app catalog is shown | 4 built, 3 marked *Needs setup* (see below) |
+
+| Automation | Trigger | Acts through | Status |
+| --- | --- | --- | --- |
+| New Lead Alert | A lead is saved | Gmail · Send Email or Slack · Send Message | Built; needs Gmail or Slack connected |
+| New Property → Buyer Matching | A property is saved | DealSaathi | Working |
+| Property Recommendations | The broker picks listings on a lead's page | Gmail · Send Email, after approval | Built; needs Gmail connected |
+| Buyer Follow-Up Reminders | Embarko scheduler, every 15 minutes (`/tasks/automations`) | DealSaathi reminders; optional Gmail or Slack | Built; scheduler only on the hosted app |
+| Property Viewing Scheduler | | Google Calendar | Not built |
+| Post-Viewing Feedback | | | Not built |
+| Rent and Payment Reminders | | | Not built |
 
 ## Run it on your computer
 
@@ -39,6 +47,11 @@ their own email and password.
 
 Set in the app's **App setup** page on https://embarko.ai/app (never in the upload):
 `APP_PASSWORD`, `VIASOCKET_ORG_ID`, `VIASOCKET_PROJECT_ID`, `VIASOCKET_EMBED_SECRET`.
+
+`embarko.json` declares one schedule: `GET /tasks/automations` every 15 minutes (Asia/Kolkata). Embarko creates
+`CRON_SECRET` for the app and sends it as `Authorization: Bearer …`; the route refuses any other caller. Without
+`CRON_SECRET` (for example on your own computer) the scheduler is off and Follow-Up Reminders run only with
+**Run check now**.
 
 ## Checks
 
@@ -70,7 +83,12 @@ The skill's test-connection step, for proving Gmail · Send Email works before a
 | `server/viasocket.js` | The viaSocket client and the one gateway every viaSocket call goes through (server only) |
 | `server/integrations/service.js` | Catalog search, connection save (checked against viaSocket), status, reconnect, disconnect |
 | `server/followups/service.js` | Gmail · Send Email follow-ups: validation, confirmation, sending, result recording |
-| `server/automations/service.js` | The broker's flows (list, pause, resume) and prebuilt-UI flow events |
+| `server/automations/store.js` | The seven automations, each broker's settings, run history |
+| `server/automations/engine.js` | Triggers, settings checks and execution for each automation |
+| `server/automations/reminders.js` | Follow-up reminders |
+| `server/integrations/apps.js` | The curated list of apps on the Integrations page |
+| `server/integrations/run.js` | Runs one allowlisted viaSocket action on a broker's own connection |
+| `embarko.json` | The hosted app's schedule |
 | `server/properties/service.js` | Listings and buyer matching |
 | `server/leads/` | Lead rules, storage, duplicates, activity |
 | `server/assistant/` | AI lead extraction and the confirm/cancel flow |

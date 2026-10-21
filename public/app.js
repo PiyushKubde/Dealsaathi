@@ -21,6 +21,7 @@ const FIELDS = [
   { key: 'source', label: 'Lead source', type: 'select', options: LABELS.source },
   { key: 'status', label: 'Status', type: 'select', options: LABELS.status, noEmpty: true },
   { key: 'assigned_broker', label: 'Assigned broker', type: 'text' },
+  { key: 'follow_up_on', label: 'Follow-up date', type: 'date', hint: 'Buyer Follow-Up Reminders reminds you on this date.' },
   { key: 'notes', label: 'Notes', type: 'textarea', wide: true }
 ]
 
@@ -50,7 +51,7 @@ function lookingFor(l) {
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '')
 const typeBadge = (t) => (t ? `<span class="badge ${esc(t)}">${esc(label('customer_type', t))}</span>` : '')
-const VIA_LABELS = { form: 'form', assistant: 'AI assistant (confirmed by you)', gmail: 'Gmail via viaSocket', matching: 'automatic matching' }
+const VIA_LABELS = { form: 'form', assistant: 'AI assistant (confirmed by you)', gmail: 'Gmail via viaSocket', matching: 'automatic matching', automation: 'Buyer Follow-Up Reminders' }
 const dash = (v) => (v == null || v === '' ? '<span class="muted">Unknown</span>' : esc(v))
 
 class ApiError extends Error {
@@ -190,7 +191,25 @@ async function renderDashboard() {
       <section class="card"><h2>Recent leads</h2>${list(d.recent, 'No leads yet. Add your first one with AI or the form.')}</section>
       <section class="card"><h2>Need follow-up</h2><p class="small muted">Status New or Contacted, and not updated for ${d.followUpAfterDays}+ days.</p>
         ${list(d.followUp.leads, 'Nothing to follow up right now.')}${d.followUp.total > 5 ? `<a href="#/leads?follow_up=1">See all ${d.followUp.total}</a>` : ''}</section>
-    </div>`
+    </div>
+    <section class="card" style="margin-top:1rem"><h2>Your follow-up reminders</h2>
+      <p class="small muted">Created by the Buyer Follow-Up Reminders automation (<a href="#/automations">Automations</a>).</p><div id="reminders"><p class="muted">Loading…</p></div></section>`
+  const box = document.getElementById('reminders')
+  const loadReminders = async () => {
+    try {
+      const { reminders } = await api('/api/reminders')
+      box.innerHTML = reminders.length ? `<ul class="timeline">${reminders.map((r) => `<li class="conn-row"><div style="flex:1;min-width:0"><a href="#/leads/${r.leadId}"><strong>${esc(r.leadName)}</strong></a> ${typeBadge(r.customerType)}
+          <div class="small muted">${esc(r.detail)} · ${esc(fmtDateTime(r.createdAt))}</div></div>
+          <button class="btn ghost small" data-rem="${r.id}" data-to="done">Done</button><button class="btn ghost small" data-rem="${r.id}" data-to="dismissed">Dismiss</button></li>`).join('')}</ul>`
+        : '<p class="muted">No open reminders.</p>'
+      box.querySelectorAll('[data-rem]').forEach((b) => b.addEventListener('click', async () => {
+        try { await api(`/api/reminders/${b.dataset.rem}`, { method: 'POST', body: { status: b.dataset.to } }); loadReminders() } catch (error) { toast(error.message) }
+      }))
+    } catch (error) {
+      box.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+    }
+  }
+  loadReminders()
 }
 
 async function renderLeads(params) {
@@ -257,7 +276,7 @@ async function renderLeadDetail(id) {
     ['Lead ID', `<span class="code">${esc(l.code)}</span>`], ['Customer type', typeBadge(l.customer_type)], ['Phone', dash(l.phone)], ['Email', dash(l.email)],
     ['Preferred location', dash(l.preferred_location)], ['Property type', dash(label('property_type', l.property_type))], ['Interested in', dash(l.property_interest)],
     ['Bedrooms', dash(l.bedrooms)], ['Budget', dash(budgetText(l))], ['Lead source', dash(label('source', l.source))], ['Status', esc(label('status', l.status))],
-    ['Assigned broker', dash(l.assigned_broker)], ['Notes', dash(l.notes)], ['Created', esc(fmtDateTime(l.created_at))], ['Last updated', esc(fmtDateTime(l.updated_at))],
+    ['Assigned broker', dash(l.assigned_broker)], ['Follow-up date', dash(l.follow_up_on)], ['Notes', dash(l.notes)], ['Created', esc(fmtDateTime(l.created_at))], ['Last updated', esc(fmtDateTime(l.updated_at))],
     ['Stored in', esc(storedIn())]
   ]
   main.innerHTML = `
@@ -269,11 +288,12 @@ async function renderLeadDetail(id) {
         <div class="small muted">${esc(fmtDateTime(a.created_at))} · via ${esc(VIA_LABELS[a.via] || a.via)}${a.user_name ? ` · by ${esc(a.user_name)}` : ''}</div></li>`).join('')}</ul></section>
     </div>
     <section class="card" style="margin-top:1rem"><h2>Matching properties</h2><div id="lead-matches"><p class="muted">Loading…</p></div></section>
-    <section class="card" style="margin-top:1rem"><h2>Follow-up email</h2>
-      <p class="small muted">Sent from your own connected Gmail through viaSocket (Gmail · Send Email). You review it before anything is sent.</p>
+    <section class="card" style="margin-top:1rem"><h2>Email this lead</h2>
+      <p class="small muted">A follow-up or property recommendation, sent from your own connected Gmail through viaSocket (Gmail · Send Email). You review it before anything is sent.</p>
       <div id="followup"><p class="muted">Loading…</p></div></section>`
-  renderLeadMatches(l, document.getElementById('lead-matches'))
-  renderFollowupPanel(l, document.getElementById('followup'))
+  const followupBox = document.getElementById('followup')
+  renderLeadMatches(l, document.getElementById('lead-matches'), (preset) => renderFollowupPanel(l, followupBox, preset))
+  renderFollowupPanel(l, followupBox)
   document.getElementById('delete').addEventListener('click', async () => {
     const ok = await confirmDialog(`Delete ${l.full_name}?`, 'This permanently removes the lead and its activity history from DealSaathi\'s database. It cannot be undone.', 'Delete permanently')
     if (!ok) return
@@ -668,204 +688,280 @@ const STATUS_BADGE = {
   missing: '<span class="badge danger-badge">Removed on viaSocket</span>',
   unknown: '<span class="badge">Status unknown</span>'
 }
-const appIcon = (url, name) => (url ? `<img class="app-icon" src="${esc(url)}" alt="" width="28" height="28" referrerpolicy="no-referrer">` : `<span class="app-icon app-icon-fallback" aria-hidden="true">${esc((name || '?')[0])}</span>`)
+const appIcon = (url, name) => (url ? `<img class="app-icon" src="${esc(url)}" alt="" width="28" height="28" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">` : `<span class="app-icon app-icon-fallback" aria-hidden="true">${esc((name || '?')[0])}</span>`)
+
+const PILL = {
+  enabled: '<span class="pill pill-on">Enabled</span>',
+  disabled: '<span class="pill pill-off">Disabled</span>',
+  needs_setup: '<span class="pill pill-setup">Needs setup</span>'
+}
+const RUN_STATUS = { running: 'Running', succeeded: 'Succeeded', failed: 'Failed', skipped: 'Skipped', unknown: 'Outcome unknown' }
+
+/** The broker's connections per curated app, from /api/integrations/apps (live-checked on the server). */
+async function loadApps() {
+  const { apps, live, error } = await api('/api/integrations/apps')
+  return { apps, live, error, bySlug: Object.fromEntries(apps.map((a) => [a.slug, a])) }
+}
 
 async function renderIntegrations() {
   main.innerHTML = `
     <div class="page-head"><div><h1>Integrations</h1>
-      <p>Connect your own app accounts through viaSocket. You sign in on the app’s own page; viaSocket keeps the access, and DealSaathi stores only a reference to the connection.</p></div></div>
-    <div id="int-notice"></div>
-    <div class="grid two-col">
-      <section class="card"><h2>Your connections</h2><div id="conn-list"><p class="muted">Loading…</p></div></section>
-      <section class="card"><h2>Gmail for follow-ups</h2>
-        <p class="small muted">Lead follow-up emails are sent from your own Gmail through viaSocket’s <em>Gmail · Send Email</em> action. Connecting asks only for that action’s permissions.</p>
-        <div id="gmail-box"><p class="muted">Loading…</p></div></section>
-    </div>
-    <section class="card" style="margin-top:1rem"><h2>Find another app</h2>
-      <div class="field"><label for="app-q">Search viaSocket’s catalog</label><input id="app-q" type="search" placeholder="e.g. Google Calendar, HubSpot, WhatsApp" autocomplete="off"></div>
-      <div id="app-results" class="app-grid"></div>
-      <div id="app-detail"></div>
-    </section>`
+      <p>The apps DealSaathi works with. You sign in on each app’s own page; viaSocket keeps the access, and DealSaathi stores only a reference to your connection.</p></div></div>
+    <div id="int-notice"></div><div class="int-grid" id="int-grid"><p class="muted">Loading…</p></div>`
   const notice = document.getElementById('int-notice')
-  let ready
+  let ready = null
   try {
     ready = await prepareConnect()
   } catch (error) {
     notice.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
   }
 
-  const loadList = async () => {
-    const box = document.getElementById('conn-list')
+  const draw = async () => {
+    const grid = document.getElementById('int-grid')
+    if (!grid) return
+    let data
     try {
-      const { connections, live, error } = await api('/api/integrations/connections')
-      box.innerHTML = (error ? `<div class="notice warn">${esc(error)}</div>` : '') + (connections.length
-        ? `<ul class="timeline">${connections.map((c) => `<li class="conn-row">${appIcon(c.iconUrl, c.appName)}
-            <div style="flex:1;min-width:0"><strong>${esc(c.appName)}</strong> ${STATUS_BADGE[c.status] || ''}
-              <div class="small muted">${esc(c.label || 'Account')} · connected ${esc(fmtDate(c.createdAt))}${live ? '' : ' · live status not checked'}</div></div>
-            <div class="row">${c.status === 'expired' ? `<button class="btn ghost small" data-reconnect="${c.id}">Reconnect</button>` : ''}
-              <button class="btn ghost small" data-disconnect="${c.id}" data-name="${esc(c.appName)}">Disconnect</button></div></li>`).join('')}</ul>`
-        : '<p class="muted">Nothing connected yet.</p>')
-      box.querySelectorAll('[data-disconnect]').forEach((b) => b.addEventListener('click', async () => {
-        const ok = await confirmDialog(`Disconnect ${b.dataset.name}?`, 'DealSaathi pauses anything it runs on this account, then revokes the connection on viaSocket. You can connect again later.', 'Disconnect')
-        if (!ok) return
-        try {
-          await api(`/api/integrations/connections/${b.dataset.disconnect}`, { method: 'DELETE' })
-          toast(`${b.dataset.name} disconnected.`)
-          loadList(); loadGmail()
-        } catch (error) { toast(error.message) }
-      }))
-      box.querySelectorAll('[data-reconnect]').forEach((b) => b.addEventListener('click', async () => {
-        try {
-          const r = await api(`/api/integrations/connections/${b.dataset.reconnect}/reconnect`, { method: 'POST', body: {} })
-          const out = await runConnect({ ...ready, token: r.embedToken }, { serviceId: r.serviceId, authId: r.authId }, () => loadList())
-          if (!out.ok) notice.innerHTML = `<div class="notice ${out.code === 'closed' ? 'warn' : 'err'}">${esc(out.message)}</div>`
-        } catch (error) { toast(error.message) }
-      }))
+      data = await loadApps()
     } catch (error) {
-      box.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+      grid.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+      return
     }
-  }
-
-  const loadGmail = async () => {
-    const box = document.getElementById('gmail-box')
-    try {
-      const [gmail, { connections }] = await Promise.all([api('/api/integrations/gmail'), api('/api/integrations/connections')])
-      const mine = connections.filter((c) => c.serviceId === gmail.serviceId && c.status === 'active')
-      box.innerHTML = `${mine.length ? `<div class="notice ok">Connected: ${mine.map((c) => esc(c.label || 'Gmail')).join(', ')}</div>` : ''}
-        <button class="btn primary connect-btn" id="connect-gmail" ${ready ? '' : 'disabled'}>${appIcon('https://stuff.thingsofbrand.com/gmail.com/images/imge_idrA5FDGTH_1763454052978.svg', 'Gmail')} ${mine.length ? 'Connect another Gmail' : 'Connect Gmail'}</button>
-        <div id="gmail-msg"></div>`
-      document.getElementById('connect-gmail').addEventListener('click', async () => {
-        const out = await runConnect(ready, { serviceId: gmail.serviceId, actions: gmail.actions, appName: 'Gmail' }, () => { loadList(); loadGmail() })
-        if (!out.ok) document.getElementById('gmail-msg').innerHTML = `<div class="notice ${out.code === 'closed' ? 'warn' : 'err'}" style="margin-top:.75rem">${esc(out.message)}</div>`
-      })
-    } catch (error) {
-      box.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
-    }
-  }
-
-  const q = document.getElementById('app-q')
-  const results = document.getElementById('app-results')
-  const detail = document.getElementById('app-detail')
-  let timer, seq = 0
-  q.addEventListener('input', () => {
-    clearTimeout(timer)
-    timer = setTimeout(async () => {
-      const mine = ++seq
-      detail.innerHTML = ''
-      if (q.value.trim().length < 2) { results.innerHTML = ''; return }
+    if (data.error) notice.innerHTML = `<div class="notice warn">${esc(data.error)}</div>`
+    grid.innerHTML = data.apps.map((a) => {
+      const active = a.connections.filter((c) => c.status === 'active')
+      const pill = !data.live && a.connections.length ? '<span class="pill pill-off">Status unknown</span>'
+        : active.length ? '<span class="pill pill-on">Connected</span>'
+          : a.connections.some((c) => c.status === 'expired') ? '<span class="pill pill-setup">Expired</span>' : '<span class="pill pill-off">Not connected</span>'
+      return `<section class="card int-card">
+        <div class="row">${appIcon(a.iconUrl, a.name)}<h2 style="margin:0;flex:1">${esc(a.name)}</h2>${pill}</div>
+        <p class="small">${esc(a.purpose)}</p>
+        <p class="small muted">Used by: ${esc(a.usedBy.join(', '))}</p>
+        ${a.inUse ? '' : '<div class="notice info small">DealSaathi does not use this app yet. You can connect it now; nothing will run on it until that feature is built.</div>'}
+        ${a.error ? `<div class="notice err small">${esc(a.error)}</div>` : ''}
+        ${a.connections.length ? `<ul class="timeline">${a.connections.map((c) => `<li class="conn-row"><div style="flex:1;min-width:0"><strong>${esc(c.label || a.name)}</strong> ${STATUS_BADGE[c.status] || ''}
+            <div class="small muted">connected ${esc(fmtDate(c.createdAt))}</div></div>
+            ${c.status === 'expired' ? `<button class="btn ghost small" data-reconnect="${c.id}">Reconnect</button>` : ''}
+            <button class="btn ghost small" data-disconnect="${c.id}" data-name="${esc(a.name)}">Disconnect</button></li>`).join('')}</ul>` : ''}
+        <div><button class="btn ${active.length || !a.inUse ? 'ghost' : 'primary'} connect-btn" data-connect="${esc(a.slug)}" ${ready && a.serviceId ? '' : 'disabled'}>${appIcon(a.iconUrl, a.name)} ${active.length ? `Connect another ${esc(a.name)} account` : `Connect ${esc(a.name)}`}</button></div>
+        <div data-msg="${esc(a.slug)}"></div>
+      </section>`
+    }).join('')
+    grid.querySelectorAll('[data-connect]').forEach((b) => b.addEventListener('click', async () => {
+      const a = data.bySlug[b.dataset.connect]
+      const out = await runConnect(ready, { serviceId: a.serviceId, actions: a.actions, appName: a.name }, () => draw())
+      if (!out.ok) grid.querySelector(`[data-msg="${a.slug}"]`).innerHTML = `<div class="notice ${out.code === 'closed' ? 'warn' : 'err'} small">${esc(out.message)}</div>`
+    }))
+    grid.querySelectorAll('[data-disconnect]').forEach((b) => b.addEventListener('click', async () => {
+      const ok = await confirmDialog(`Disconnect ${b.dataset.name}?`, 'DealSaathi pauses what it runs on this account, then revokes the connection on viaSocket. Automations that use it will show Needs setup until you connect again.', 'Disconnect')
+      if (!ok) return
       try {
-        const { apps } = await api(`/api/integrations/apps?q=${encodeURIComponent(q.value.trim())}`)
-        if (mine !== seq) return
-        results.innerHTML = apps.length ? apps.map((a) => `<button class="app-tile" data-service="${esc(a.serviceId)}">${appIcon(a.iconUrl, a.name)}<span>${esc(a.name)}</span></button>`).join('') : '<p class="muted">No apps match.</p>'
-        results.querySelectorAll('[data-service]').forEach((b) => b.addEventListener('click', () => showApp(b.dataset.service)))
-      } catch (error) {
-        results.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
-      }
-    }, 300)
-  })
-
-  const showApp = async (serviceId) => {
-    detail.innerHTML = '<p class="muted">Loading…</p>'
-    try {
-      const a = await api(`/api/integrations/apps/${encodeURIComponent(serviceId)}`)
-      const events = (list, kind) => list.length ? `<h3>${list.length} ${kind}</h3><ul class="small">${list.slice(0, 8).map((e) => `<li>${esc(e.name)}</li>`).join('')}${list.length > 8 ? `<li class="muted">and ${list.length - 8} more</li>` : ''}</ul>` : ''
-      detail.innerHTML = `<div class="app-detail">
-        <div class="row">${appIcon(a.iconUrl, a.name)}<h2 style="margin:0">${esc(a.name)}</h2>${a.authType ? `<span class="badge">${esc(a.authType)}</span>` : ''}</div>
-        <p class="small muted">${esc(a.description)}</p>
-        <div class="grid two-col">${events(a.actions, 'actions') || '<p class="small muted">No published actions.</p>'}${events(a.triggers, 'triggers')}</div>
-        ${a.requiresAuth ? `<button class="btn primary connect-btn" id="connect-app" ${ready ? '' : 'disabled'}>${appIcon(a.iconUrl, a.name)} Connect ${esc(a.name)}</button>` : '<div class="notice info">This app needs no sign-in, so there is nothing to connect.</div>'}
-        <div id="app-msg"></div>
-        <p class="small muted">Connecting makes the account available to DealSaathi. Only Gmail is used by a DealSaathi feature today; any connected app can be used in your own automations.</p></div>`
-      document.getElementById('connect-app')?.addEventListener('click', async () => {
-        const out = await runConnect(ready, { serviceId: a.serviceId, appName: a.name }, () => loadList())
-        if (!out.ok) document.getElementById('app-msg').innerHTML = `<div class="notice ${out.code === 'closed' ? 'warn' : 'err'}">${esc(out.message)}</div>`
-      })
-    } catch (error) {
-      detail.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
-    }
+        await api(`/api/integrations/connections/${b.dataset.disconnect}`, { method: 'DELETE' })
+        toast(`${b.dataset.name} disconnected.`)
+        draw()
+      } catch (error) { toast(error.message) }
+    }))
+    grid.querySelectorAll('[data-reconnect]').forEach((b) => b.addEventListener('click', async () => {
+      try {
+        const r = await api(`/api/integrations/connections/${b.dataset.reconnect}/reconnect`, { method: 'POST', body: {} })
+        const out = await runConnect({ ...ready, token: r.embedToken }, { serviceId: r.serviceId, authId: r.authId }, () => draw())
+        if (!out.ok) notice.innerHTML = `<div class="notice ${out.code === 'closed' ? 'warn' : 'err'}">${esc(out.message)}</div>`
+      } catch (error) { toast(error.message) }
+    }))
   }
-
-  loadList()
-  loadGmail()
+  draw()
 }
 
-// ---------- automations: viaSocket's prebuilt UI (https://flow.viasocket.com/documentation/embed.md) ----------
-let currentEmbed = null
-let embedScript = null
-function loadEmbedScript() {
-  embedScript ||= new Promise((resolve, reject) => {
-    if (window.viaSocket?.mount) return resolve()
-    const tag = document.createElement('script')
-    tag.src = 'https://embed.viasocket.com/prod-embedcomponent.js'
-    tag.onload = () => (window.viaSocket?.mount ? resolve() : reject(new Error('The viaSocket workflow builder did not start.')))
-    tag.onerror = () => { embedScript = null; reject(new Error('The viaSocket workflow builder could not load. Check your internet connection or ad blocker.')) }
-    document.head.append(tag)
-  })
-  return embedScript
-}
-
-// Flow events from the prebuilt UI, through the SDK's own embed.on('flow'). Only the flow id and the event
-// go to the server, which reads the flow back from viaSocket itself; nothing else in the event (such as its
-// run URL) is used or stored.
-const FLOW_EVENTS = ['initiated', 'published', 'updated', 'paused', 'deleted']
-function onFlowEvent(flow) {
-  if (!flow?.id || !FLOW_EVENTS.includes(flow.action)) return
-  api('/api/automations/flow-events', { method: 'POST', body: { flowId: String(flow.id), action: flow.action } })
-    .then((r) => { toast(`Automation “${r.title}”: ${r.event}.`); document.dispatchEvent(new CustomEvent('ds-flows-changed')) })
-    .catch(() => {})
+// ---------- real estate automations: DealSaathi's own, run by its server ----------
+function runLine(run) {
+  if (!run) return '<span class="muted">Not run yet</span>'
+  return `<span class="run-${run.status}">${esc(RUN_STATUS[run.status])}</span> · ${esc(fmtDateTime(run.finishedAt || run.startedAt))}${run.summary || run.error ? ` · ${esc(run.summary || run.error)}` : ''}`
 }
 
 async function renderAutomations() {
   main.innerHTML = `
-    <div class="page-head"><div><h1>Automations</h1>
-      <p>Build automations across your connected apps with viaSocket’s workflow builder, below. Published automations run on viaSocket, under your own account.</p></div></div>
-    <section class="card"><h2>Your automations</h2><div id="flow-list"><p class="muted">Loading…</p></div></section>
-    <section class="card" style="margin-top:1rem;padding:0;overflow:hidden">
-      <div style="padding:1rem 1.25rem .5rem"><h2 style="margin:0">Workflow builder</h2><p class="small muted" style="margin:.25rem 0 0">viaSocket’s own screens, signed in as you.</p></div>
-      <div id="embed-msg" style="padding:0 1.25rem"></div>
-      <div id="vs-embed" style="height:680px"></div>
-    </section>`
-
-  const loadFlows = async () => {
-    const box = document.getElementById('flow-list')
-    if (!box) return
+    <div class="page-head"><div><h1>Real Estate Automations</h1>
+      <p>Ready-made automations for your brokerage. DealSaathi runs them for you, and each one acts only through the accounts you connect on the Integrations page.</p></div></div>
+    <div id="auto-notice"></div><div class="auto-grid" id="auto-grid"><p class="muted">Loading…</p></div>
+    <dialog id="auto-dialog" class="wide-dialog" aria-labelledby="auto-title"><div id="auto-panel"></div></dialog>`
+  const draw = async () => {
+    const grid = document.getElementById('auto-grid')
+    if (!grid) return
+    let list
     try {
-      const { flows, events } = await api('/api/automations/flows')
-      box.innerHTML = (flows.length ? `<ul class="timeline">${flows.map((f) => `<li class="conn-row"><div style="flex:1;min-width:0"><strong>${esc(f.title)}</strong>
-          <span class="badge ${f.status === 'active' ? 'saved' : 'draft'}">${esc(f.status)}</span>${f.kind === 'dealsaathi' ? ' <span class="badge ai">Used by DealSaathi</span>' : ''}
-          <div class="small muted">${esc(f.description || '')}</div></div>
-          <button class="btn ghost small" data-ref="${f.ref}" data-to="${f.status === 'active' ? 'paused' : 'active'}">${f.status === 'active' ? 'Pause' : 'Resume'}</button></li>`).join('')}</ul>`
-        : '<p class="muted">No automations yet. Build one below.</p>') +
-        (events.length ? `<h3 style="margin-top:1rem">Recent changes</h3><ul class="small">${events.slice(0, 5).map((e) => `<li>${esc(e.title)}: ${esc(e.event)} · ${esc(fmtDateTime(e.at))}</li>`).join('')}</ul>` : '')
-      box.querySelectorAll('[data-ref]').forEach((b) => b.addEventListener('click', async () => {
-        b.disabled = true
-        try {
-          await api(`/api/automations/flows/${b.dataset.ref}/status`, { method: 'POST', body: { status: b.dataset.to } })
-          toast(b.dataset.to === 'paused' ? 'Automation paused.' : 'Automation resumed.')
-          loadFlows()
-        } catch (error) { toast(error.message); b.disabled = false }
-      }))
+      ({ automations: list } = await api('/api/automations'))
     } catch (error) {
-      box.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+      grid.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+      return
     }
+    const warning = list.find((a) => a.warning)?.warning
+    document.getElementById('auto-notice').innerHTML = warning ? `<div class="notice warn">${esc(warning)}</div>` : ''
+    grid.innerHTML = list.map((a) => `<section class="card auto-card">
+      <div class="row" style="align-items:flex-start"><h2 style="margin:0;flex:1">${esc(a.name)}</h2>${PILL[a.status]}</div>
+      <p class="small">${esc(a.description)}</p>
+      <dl class="mini"><dt>Trigger</dt><dd>${esc(a.trigger)}</dd><dt>Action</dt><dd>${esc(a.action)}</dd></dl>
+      ${a.status === 'needs_setup' && a.problems.length ? `<div class="notice ${a.available ? 'warn' : 'info'} small"><ul>${a.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
+      <div class="small">${a.available ? `Last run: ${runLine(a.lastRun)}` : ''}</div>
+      <div class="row card-foot">
+        <label class="switch"><input type="checkbox" role="switch" data-toggle="${a.key}" ${a.enabled ? 'checked' : ''} ${a.available ? '' : 'disabled'}><span>${a.enabled ? 'On' : 'Off'}</span></label>
+        <button class="btn ghost small" data-configure="${a.key}">${a.available ? 'Configure' : 'What’s needed'}</button>
+      </div></section>`).join('')
+    grid.querySelectorAll('[data-toggle]').forEach((el) => el.addEventListener('change', async () => {
+      const a = list.find((x) => x.key === el.dataset.toggle)
+      el.disabled = true
+      try {
+        await api(`/api/automations/${a.key}`, { method: 'PUT', body: { enabled: el.checked, config: a.config } })
+        toast(`${a.name} ${el.checked ? 'switched on' : 'switched off'}.`)
+      } catch (error) {
+        toast(error.details?.problems ? `${error.message} ${error.details.problems[0]}` : error.message)
+        if (error.code === 'needs_setup') openConfigure(a)
+      }
+      draw()
+    }))
+    grid.querySelectorAll('[data-configure]').forEach((b) => b.addEventListener('click', () => openConfigure(list.find((x) => x.key === b.dataset.configure))))
   }
-  document.addEventListener('ds-flows-changed', loadFlows)
-  loadFlows()
 
-  const msg = document.getElementById('embed-msg')
-  try {
-    const [{ embedToken }] = await Promise.all([api('/api/integrations/token'), loadEmbedScript()])
-    if (!document.getElementById('vs-embed')) return
-    currentEmbed = window.viaSocket.mount({
-      embedToken,
-      parent: '#vs-embed',
-      config: { pageheading: 'Automation', pagesubheading: 'Connect DealSaathi with the other apps you use.', showEnabled: true }
+  async function openConfigure(a) {
+    const dialog = document.getElementById('auto-dialog')
+    const panel = document.getElementById('auto-panel')
+    panel.innerHTML = '<p class="muted">Loading…</p>'
+    dialog.showModal()
+    if (!a.available) {
+      panel.innerHTML = `<h2 id="auto-title">${esc(a.name)}</h2><p>${esc(a.description)}</p><div class="notice info">${esc(a.problems[0])}</div>
+        <div class="row end"><button class="btn primary" id="auto-close">Close</button></div>`
+      document.getElementById('auto-close').addEventListener('click', () => dialog.close())
+      return
+    }
+    let apps = { bySlug: {} }
+    let runs = []
+    try {
+      [apps, { runs }] = await Promise.all([a.channels.length ? loadApps() : Promise.resolve({ bySlug: {} }), api(`/api/automations/${a.key}/runs`)])
+    } catch (error) {
+      panel.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+      return
+    }
+    const cfg = a.config || {}
+    const accounts = (slug) => (apps.bySlug[slug]?.connections || []).filter((c) => c.status === 'active')
+    const accountSelect = (slug, name, selected) => {
+      const list = accounts(slug)
+      return list.length
+        ? `<select name="${name}">${list.map((c) => `<option value="${c.id}" ${String(c.id) === String(selected) ? 'selected' : ''}>${esc(c.label || apps.bySlug[slug].name)}</option>`).join('')}</select>`
+        : `<div class="notice info small">No ${esc(apps.bySlug[slug]?.name || slug)} account connected. <a href="#/integrations">Connect one on Integrations</a>.</div>`
+    }
+    const channelFields = (prefix, channel, allowNone) => `
+      <div class="field"><label>${prefix === 'notify' ? 'Notify me' : 'Send through'}</label>
+        <div class="row">${allowNone ? `<label class="radio"><input type="radio" name="ch" value="none" ${channel === 'none' || !channel ? 'checked' : ''}> Don’t notify (reminders appear in DealSaathi)</label>` : ''}
+          <label class="radio"><input type="radio" name="ch" value="gmail" ${channel === 'gmail' ? 'checked' : ''}> Email (Gmail)</label>
+          <label class="radio"><input type="radio" name="ch" value="slack" ${channel === 'slack' ? 'checked' : ''}> Slack</label></div></div>
+      <div data-ch="gmail" class="stack">
+        <div class="field"><label>Gmail account</label>${accountSelect('gmail', 'gmailConnectionId', cfg.channel === 'gmail' || cfg.notify === 'gmail' ? cfg.connectionId : null)}</div>
+        <div class="field"><label for="emailTo">Send to</label><input id="emailTo" name="emailTo" value="${esc(cfg.emailTo || session.user.email)}"><div class="hint">One to five addresses, separated by commas.</div></div>
+      </div>
+      <div data-ch="slack" class="stack">
+        <div class="field"><label>Slack workspace</label>${accountSelect('slack', 'slackConnectionId', cfg.channel === 'slack' || cfg.notify === 'slack' ? cfg.connectionId : null)}</div>
+        <div class="field"><label for="slackChannelId">Channel</label><select id="slackChannelId" name="slackChannelId"><option value="">Loading channels…</option></select></div>
+      </div>`
+
+    let body = ''
+    if (a.key === 'new_lead_alert') body = channelFields('send', cfg.channel || 'gmail', false) + '<p class="small muted">The message includes the lead’s name, phone, email, source, budget, location and requirements as saved. Anything not on record says “not given”.</p>'
+    if (a.key === 'buyer_matching') body = `<p>When you save a property, DealSaathi checks every saved buyer and tenant against its location, price, bedrooms and type, and lists who fits on the property page with the reasons.</p>
+      <label class="radio muted"><input type="checkbox" disabled> Also send the match to buyers automatically</label>
+      <div class="notice info small">Not available: sending to buyers needs WhatsApp Business with an approved message template, which DealSaathi does not support yet. You can email a buyer recommendations from their lead page instead.</div>`
+    if (a.key === 'property_recommendations') body = `<div class="field"><label>Send from Gmail account</label>${accountSelect('gmail', 'gmailConnectionId', cfg.connectionId)}</div>
+      <div class="notice info small">You always review and approve each recommendation before it is sent. This cannot be turned off.</div>
+      <p class="small muted">Open a lead, tick the matching listings, and choose “Email these to the lead”. Sample listings can never be sent.</p>`
+    if (a.key === 'followup_reminders') body = `<div class="field"><label for="inactiveDays">Remind me when a buyer or tenant has no recorded activity for</label>
+        <div class="row"><input id="inactiveDays" name="inactiveDays" type="number" min="1" max="90" value="${esc(cfg.inactiveDays ?? 3)}" style="width:6rem"> days</div>
+        <div class="hint">DealSaathi cannot see whether a buyer opened or replied to anything, so this counts activity recorded in DealSaathi. A lead’s follow-up date (on its edit page) also creates a reminder when it arrives.</div></div>
+      ${channelFields('notify', cfg.notify || 'none', true)}
+      <div class="notice ${a.scheduler ? 'ok' : 'warn'} small">${a.scheduler ? 'The scheduler checks every 15 minutes (India time).' : 'The 15-minute scheduler runs only on the hosted DealSaathi. Here, use Run check now.'}
+        ${a.lastCheck ? `<br>Last check: ${esc(fmtDateTime(a.lastCheck.at))} (${esc(a.lastCheck.trigger)}): ${a.lastCheck.created} new reminder(s).` : ''}</div>
+      <div class="row"><button class="btn ghost small" type="button" id="run-now">Run check now</button><span id="run-now-out" class="small"></span></div>`
+
+    panel.innerHTML = `<h2 id="auto-title">${esc(a.name)}</h2><p class="small muted">${esc(a.description)}</p>
+      <form id="auto-form" class="stack" novalidate>${body}
+        <label class="switch"><input type="checkbox" name="enabled" ${a.enabled ? 'checked' : ''}><span>Automation on</span></label>
+        <div id="auto-problems"></div>
+        <div class="row end"><button class="btn ghost" type="button" id="auto-cancel">Close</button><button class="btn primary" type="submit">Save</button></div>
+      </form>
+      <h3 style="margin-top:1rem">Recent runs</h3>
+      ${runs.length ? `<ul class="timeline">${runs.map((r) => `<li class="small">${runLine(r)}${r.retryable ? ` <button class="btn ghost small" data-retry="${r.id}">Retry</button>` : ''}</li>`).join('')}</ul>` : '<p class="small muted">No runs yet.</p>'}`
+    const form = document.getElementById('auto-form')
+    document.getElementById('auto-cancel').addEventListener('click', () => dialog.close())
+
+    const showChannel = () => {
+      const ch = form.querySelector('input[name="ch"]:checked')?.value
+      form.querySelectorAll('[data-ch]').forEach((el) => { el.hidden = el.dataset.ch !== ch })
+      if (ch === 'slack') loadChannels()
+    }
+    const loadChannels = async () => {
+      const sel = form.elements.slackChannelId
+      const conn = form.elements.slackConnectionId?.value
+      if (!sel) return
+      if (!conn) { sel.innerHTML = '<option value="">Connect Slack first</option>'; return }
+      try {
+        const { options } = await api(`/api/automations/slack-channels?connectionId=${encodeURIComponent(conn)}`)
+        sel.innerHTML = '<option value="">Choose a channel</option>' + options.map((o) => `<option value="${esc(o.value)}" ${o.value === cfg.slackChannelId ? 'selected' : ''}>${esc(o.label)}</option>`).join('')
+      } catch (error) {
+        sel.innerHTML = `<option value="">${esc(error.message)}</option>`
+      }
+    }
+    form.querySelectorAll('input[name="ch"]').forEach((r) => r.addEventListener('change', showChannel))
+    form.elements.slackConnectionId?.addEventListener('change', loadChannels)
+    if (form.querySelector('input[name="ch"]')) showChannel()
+
+    const collect = () => {
+      const ch = form.querySelector('input[name="ch"]:checked')?.value
+      const config = {}
+      if (a.key === 'property_recommendations') config.connectionId = form.elements.gmailConnectionId?.value || null
+      if (a.key === 'followup_reminders') config.inactiveDays = Number(form.elements.inactiveDays.value)
+      if (ch) {
+        config[a.key === 'followup_reminders' ? 'notify' : 'channel'] = ch
+        if (ch === 'gmail') Object.assign(config, { connectionId: form.elements.gmailConnectionId?.value || null, emailTo: form.elements.emailTo.value })
+        if (ch === 'slack') {
+          const sel = form.elements.slackChannelId
+          Object.assign(config, { connectionId: form.elements.slackConnectionId?.value || null, slackChannelId: sel.value, slackChannelLabel: sel.selectedOptions[0]?.textContent || '' })
+        }
+      }
+      return config
+    }
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const box = document.getElementById('auto-problems')
+      box.innerHTML = ''
+      try {
+        await api(`/api/automations/${a.key}`, { method: 'PUT', body: { enabled: form.elements.enabled.checked, config: collect() } })
+        toast(`${a.name} saved.`)
+        dialog.close()
+        draw()
+      } catch (error) {
+        box.innerHTML = `<div class="notice err">${esc(error.message)}${error.details?.problems ? `<ul>${error.details.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}</div>`
+      }
     })
-    currentEmbed.on('flow', onFlowEvent)
-    currentEmbed.on('error', (e) => { msg.innerHTML = `<div class="notice err">The workflow builder reported a problem: ${esc(e?.message || String(e))}</div>` })
-  } catch (error) {
-    msg.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+    document.getElementById('run-now')?.addEventListener('click', async (e) => {
+      const out = document.getElementById('run-now-out')
+      e.target.disabled = true
+      try {
+        await api(`/api/automations/${a.key}`, { method: 'PUT', body: { enabled: a.enabled, config: collect() } })
+        const { result } = await api('/api/automations/followup_reminders/run', { method: 'POST', body: {} })
+        out.textContent = `Checked: ${result.created} new reminder(s)${result.notified ? ', notification sent' : ''}${result.failed ? ', notification failed (see runs)' : ''}.`
+        draw()
+      } catch (error) {
+        out.textContent = error.details?.problems ? error.details.problems.join(' ') : error.message
+      } finally {
+        e.target.disabled = false
+      }
+    })
+    panel.querySelectorAll('[data-retry]').forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true
+      try {
+        const { run } = await api(`/api/automations/runs/${b.dataset.retry}/retry`, { method: 'POST', body: {} })
+        toast(`Retry: ${RUN_STATUS[run.status]}${run.error ? `: ${run.error}` : ''}.`)
+        dialog.close()
+        draw()
+      } catch (error) { toast(error.message); b.disabled = false }
+    }))
   }
+  draw()
 }
 
 // ---------- properties and matching ----------
@@ -1013,14 +1109,31 @@ async function renderPropertyForm(id) {
   })
 }
 
-async function renderLeadMatches(lead, box) {
+async function renderLeadMatches(lead, box, onRecommend) {
   try {
     const { matches } = await api(`/api/leads/${lead.id}/matches`)
-    box.innerHTML = matches.length
-      ? `<ul class="timeline">${matches.slice(0, 5).map((m) => `<li><a href="#/properties/${m.property.id}"><strong>${esc(m.property.title)}</strong></a>${sampleBadge(m.property)} <span class="badge">${m.score}/100</span>
-          <div class="small">${esc(priceText(m.property))} · ${esc([m.property.locality, m.property.city].filter(Boolean).join(', '))}</div>
-          <ul class="small">${m.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}${m.gaps.map((g) => `<li class="muted">Unknown: ${esc(g)}</li>`).join('')}</ul></li>`).join('')}</ul>`
-      : `<p class="muted">${['buyer', 'tenant'].includes(lead.customer_type) ? 'No available listing fits this lead’s saved needs.' : 'Matching applies to buyers and tenants.'}</p>`
+    if (!matches.length) {
+      box.innerHTML = `<p class="muted">${['buyer', 'tenant'].includes(lead.customer_type) ? 'No available listing fits this lead’s saved needs.' : 'Matching applies to buyers and tenants.'}</p>`
+      return
+    }
+    const top = matches.slice(0, 5)
+    box.innerHTML = `<ul class="timeline">${top.map((m) => `<li class="conn-row" style="align-items:flex-start">
+        ${m.property.is_sample ? '<span class="pick-gap" title="Sample listings cannot be sent"></span>' : `<input type="checkbox" class="pick" value="${m.property.id}" aria-label="Recommend ${esc(m.property.title)}">`}
+        <div style="flex:1;min-width:0"><a href="#/properties/${m.property.id}"><strong>${esc(m.property.title)}</strong></a>${sampleBadge(m.property)} <span class="badge">${m.score}/100</span>
+        <div class="small">${esc(priceText(m.property))} · ${esc([m.property.locality, m.property.city].filter(Boolean).join(', '))}</div>
+        <ul class="small">${m.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}${m.gaps.map((g) => `<li class="muted">Unknown: ${esc(g)}</li>`).join('')}</ul></div></li>`).join('')}</ul>
+      <div class="row"><button class="btn ghost" id="recommend" disabled>Email these to the lead</button><span class="small muted" id="rec-msg">Tick listings to recommend. You review the email before it is sent.</span></div>`
+    const btn = document.getElementById('recommend')
+    box.querySelectorAll('.pick').forEach((c) => c.addEventListener('change', () => { btn.disabled = !box.querySelector('.pick:checked') }))
+    btn.addEventListener('click', async () => {
+      const propertyIds = [...box.querySelectorAll('.pick:checked')].map((c) => Number(c.value))
+      try {
+        const draft = await api(`/api/leads/${lead.id}/recommendations/draft`, { method: 'POST', body: { propertyIds } })
+        onRecommend({ kind: 'recommendation', ...draft })
+      } catch (error) {
+        document.getElementById('rec-msg').textContent = error.details?.fields?.properties || error.message
+      }
+    })
   } catch (error) {
     box.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
   }
@@ -1036,7 +1149,7 @@ const FOLLOWUP_STATUS = {
   cancelled: '<span class="badge">Cancelled</span>'
 }
 
-async function renderFollowupPanel(lead, box) {
+async function renderFollowupPanel(lead, box, preset = null) {
   let data
   try {
     data = await api(`/api/leads/${lead.id}/followups`)
@@ -1044,7 +1157,7 @@ async function renderFollowupPanel(lead, box) {
     box.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
     return
   }
-  const history = data.followups.length ? `<h3 style="margin-top:1rem">Sent and attempted</h3><ul class="timeline">${data.followups.map((f) => `<li>${FOLLOWUP_STATUS[f.status] || esc(f.status)} <strong>${esc(f.subject)}</strong>
+  const history = data.followups.length ? `<h3 style="margin-top:1rem">Sent and attempted</h3><ul class="timeline">${data.followups.map((f) => `<li>${FOLLOWUP_STATUS[f.status] || esc(f.status)} ${f.kind === 'recommendation' ? '<span class="badge ai">Recommendation</span> ' : ''}<strong>${esc(f.subject)}</strong>
       <div class="small muted">to ${esc(f.recipient)} · ${esc(fmtDateTime(f.sentAt || f.createdAt))}${f.userName ? ` · by ${esc(f.userName)}` : ''}</div>
       ${f.status === 'sent' && f.result ? `<div class="small">Gmail message id <span class="code">${esc(f.result.messageId)}</span>${f.result.labelIds?.length ? ` · labels ${esc(f.result.labelIds.join(', '))}` : ''}</div>` : ''}
       ${f.error ? `<div class="small" style="color:var(--danger)">${esc(f.error)}</div>` : ''}</li>`).join('')}</ul>` : ''
@@ -1052,12 +1165,18 @@ async function renderFollowupPanel(lead, box) {
   if (!data.viasocket) { box.innerHTML = `<div class="notice warn">viaSocket is not configured on this server, so emails cannot be sent.</div>${history}`; return }
   if (!data.recipient) { box.innerHTML = `<div class="notice info">This lead has no email address. <a href="#/leads/${lead.id}/edit">Add one</a> to send a follow-up.</div>${history}`; return }
   if (!data.connections.length) { box.innerHTML = `<div class="notice info">Connect your Gmail first: <a href="#/integrations">Integrations → Connect Gmail</a>.</div>${history}`; return }
+  if (preset && !data.recommendations.enabled) {
+    box.innerHTML = `<div class="notice info">Turn on <strong>Property Recommendations</strong> on the <a href="#/automations">Automations</a> page to email listings to leads.</div>${history}`
+    box.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    return
+  }
 
   box.innerHTML = `
     <form id="fu-form" class="stack" novalidate>
+      ${preset ? `<div class="notice info small">Property recommendation: ${preset.propertyIds.length} listing${preset.propertyIds.length === 1 ? '' : 's'}, written from the saved listing details. Edit it as you like.</div>` : ''}
       <div class="field"><label>To</label><input value="${esc(data.recipient)}" readonly aria-readonly="true"><div class="hint">From the lead’s saved email. Edit the lead to change it.</div></div>
       <div class="form-grid">
-        <div class="field"><label for="fu-conn">Send with</label><select id="fu-conn" name="connectionId">${data.connections.map((c) => `<option value="${c.id}">${esc(c.label || c.appName)}</option>`).join('')}</select></div>
+        <div class="field"><label for="fu-conn">Send with</label><select id="fu-conn" name="connectionId">${data.connections.map((c) => `<option value="${c.id}" ${preset && c.id === data.recommendations.connectionId ? 'selected' : ''}>${esc(c.label || c.appName)}</option>`).join('')}</select></div>
         <div class="field" data-field="from"><label for="fu-from">From address</label><select id="fu-from" name="from"><option value="">Account’s default address</option></select><div class="err"></div></div>
       </div>
       <div class="field" data-field="subject"><label for="fu-subject">Subject</label><input id="fu-subject" name="subject" maxlength="200"><div class="err"></div></div>
@@ -1069,6 +1188,11 @@ async function renderFollowupPanel(lead, box) {
   const form = document.getElementById('fu-form')
   const msg = document.getElementById('fu-msg')
   const fromSel = document.getElementById('fu-from')
+  if (preset) {
+    form.elements.subject.value = preset.subject
+    form.elements.body.value = preset.body
+    box.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
 
   const loadFrom = async () => {
     fromSel.innerHTML = '<option value="">Account’s default address</option>'
@@ -1101,7 +1225,7 @@ async function renderFollowupPanel(lead, box) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
     msg.innerHTML = ''
-    const body = { connectionId: Number(form.elements.connectionId.value), from: form.elements.from.value || null, subject: form.elements.subject.value, body: form.elements.body.value }
+    const body = { connectionId: Number(form.elements.connectionId.value), from: form.elements.from.value || null, subject: form.elements.subject.value, body: form.elements.body.value, ...(preset ? { kind: 'recommendation', propertyIds: preset.propertyIds } : {}) }
     let prep
     try {
       prep = await api(`/api/leads/${lead.id}/followups`, { method: 'POST', body })
@@ -1148,7 +1272,6 @@ async function renderFollowupPanel(lead, box) {
 
 // ---------- router ----------
 async function route() {
-  if (currentEmbed) { try { currentEmbed.destroy() } catch { /* already gone */ } currentEmbed = null }
   if (session.mode === 'locked') return renderLocked()
   if (!session.user) return renderLogin()
   const [path, query = ''] = location.hash.replace(/^#/, '').split('?')
