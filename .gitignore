@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.db-journal
+*.sqlite
+viasocket-integrations/viasocket-skill.md
+viasocket-check.mjs
+.DS_Store
