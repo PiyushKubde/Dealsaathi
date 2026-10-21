@@ -9,6 +9,8 @@ and rent reminders. AI, Gmail and Google Calendar go through [viaSocket](https:/
 
 ## Run it
 
+Needs Node.js 22 or newer (the SQLite driver requires it).
+
 ```bash
 cp .env.example .env      # then fill in the values (see below)
 npm install
@@ -25,6 +27,7 @@ npm run lint
 | `VIASOCKET_AI_SERVICE`, `VIASOCKET_AI_MODEL` | Optional model choice (names from viaSocket's `ai.md`, e.g. `anthropic` / `claude-sonnet-4-6`). Empty uses viaSocket's default model. |
 | `DEALSAATHI_TIMEZONE` | Default viewing time zone (`Asia/Kolkata`). |
 | `DATA_DIR`, `PORT` | Set by the host on Embarko; default `./data` and `3000` locally. |
+| `HOST` | Interface to listen on. Default `0.0.0.0`; `.env.example` sets `127.0.0.1` so a local copy is reachable only from your own computer. |
 
 Get the viaSocket values from **viaSocket → Integrations → the embed → Install Code**.
 

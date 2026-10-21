@@ -17,6 +17,8 @@ export function readConfig(env = process.env) {
   const production = env.NODE_ENV === 'production' || Boolean(env.APP_NAME)
   return {
     port: Number(env.PORT) || 3000,
+    // 0.0.0.0 is what hosts such as Embarko need; set HOST=127.0.0.1 to keep a local copy private to this computer.
+    host: env.HOST || '0.0.0.0',
     dataDir: path.resolve(env.DATA_DIR || './data'),
     production,
     timeZone: env.DEALSAATHI_TIMEZONE || 'Asia/Kolkata',
