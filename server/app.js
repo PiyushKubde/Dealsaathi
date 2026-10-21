@@ -5,6 +5,7 @@ import { now } from './db.js'
 import { AppError } from './errors.js'
 import { createLead, deleteLead, leadStats, listActivities, listLeads, requireLead, updateLead } from './leads/service.js'
 import { cancelAction, confirmAction, handleMessage, loadConversation } from './assistant/service.js'
+import { createAuth } from './auth.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -19,24 +20,39 @@ const parseUuid = (value, what) => {
   return String(value)
 }
 
+const sameHost = (origin, host) => {
+  try {
+    return new URL(origin).host === host
+  } catch {
+    return false
+  }
+}
+
 /**
- * The app, with its database and AI client passed in so tests can supply their own.
- * `ai` is { configured: boolean, send(params): Promise<AiReply> }.
+ * The app, with its database, AI client and access control passed in so tests can supply their own.
+ * `ai` is { configured: boolean, send(params): Promise<AiReply> }; `auth` comes from createAuth().
+ * `behindProxy`: hosted behind a TLS proxy, so trust its X-Forwarded-* headers.
  */
-export function createApp({ db, ai }) {
+export function createApp({ db, ai, auth = createAuth({ hosted: false }), behindProxy = false }) {
   const app = express()
   app.disable('x-powered-by')
+  if (behindProxy) app.set('trust proxy', 1)
   app.use(express.json({ limit: '50kb' }))
 
   // Writes only from this app's own pages: a JSON body (forms on other sites cannot send one) and a same-site Origin.
   app.use('/api', (req, res, next) => {
     if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) {
       const origin = req.get('origin')
-      if (origin && new URL(origin).host !== req.get('host')) return next(new AppError(403, 'forbidden_origin', 'Requests from other sites are not allowed.'))
+      if (origin && !sameHost(origin, req.get('host'))) return next(new AppError(403, 'forbidden_origin', 'Requests from other sites are not allowed.'))
       if (req.method !== 'DELETE' && !req.is('application/json')) return next(new AppError(415, 'json_required', 'Send JSON.'))
     }
     next()
   })
+
+  app.get('/api/session', (req, res) => res.json(auth.status(req)))
+  app.post('/api/session/login', (req, res) => auth.login(req, res))
+  app.post('/api/session/logout', (req, res) => auth.logout(req, res))
+  app.use('/api', (req, res, next) => auth.guard(req, res, next))
 
   app.get('/api/health', (req, res) => {
     let database = 'ok'
@@ -45,7 +61,7 @@ export function createApp({ db, ai }) {
     } catch {
       database = 'error'
     }
-    res.status(database === 'ok' ? 200 : 503).json({ ok: database === 'ok', database, ai: ai.configured ? 'configured' : 'not_configured', time: now() })
+    res.status(database === 'ok' ? 200 : 503).json({ ok: database === 'ok', database, ai: ai.configured ? 'configured' : 'not_configured', access: auth.mode, time: now() })
   })
 
   app.get('/api/dashboard', (req, res) => res.json(leadStats(db)))

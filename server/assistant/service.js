@@ -1,5 +1,5 @@
 // The assistant: AI reads the broker's words, this code decides what happens. The only action it can
-// prepare is "create a lead in the local database", and only a Confirm click from the review card runs it.
+// prepare is "create a lead in DealSaathi's own SQLite database", and only a Confirm click from the review card runs it.
 import { randomUUID } from 'node:crypto'
 import { now, transaction } from '../db.js'
 import { AppError } from '../errors.js'
@@ -162,13 +162,13 @@ export function confirmAction(db, actionId, { fields, allowSameName = false } = 
       const done = db.prepare("UPDATE actions SET status = 'completed', result = ?, error = NULL, updated_at = ? WHERE id = ? AND status = 'awaiting_confirmation'")
         .run(json({ lead_id: lead.id }), now(), actionId)
       if (done.changes !== 1) throw new AppError(409, 'action_changed', 'This draft changed while saving. Reload and try again.')
-      if (row.conversation_id) addMessage(db, row.conversation_id, 'assistant', `Saved ${lead.full_name} as lead ${leadCode(lead.id)} in the local database.`, { status: 'completed', actionId, leadId: lead.id })
+      if (row.conversation_id) addMessage(db, row.conversation_id, 'assistant', `Saved ${lead.full_name} as lead ${leadCode(lead.id)} in DealSaathi's database.`, { status: 'completed', actionId, leadId: lead.id })
       return { alreadySaved: false, lead, leadId: lead.id }
     })
   } catch (error) {
     if (error instanceof AppError) throw error
     db.prepare('UPDATE actions SET error = ?, updated_at = ? WHERE id = ?').run('database_error', now(), actionId)
-    throw new AppError(500, 'save_failed', 'The lead could not be saved to the local database, so nothing was saved. Please try again.')
+    throw new AppError(500, 'save_failed', 'The lead could not be saved to the database, so nothing was saved. Please try again.')
   }
 }
 

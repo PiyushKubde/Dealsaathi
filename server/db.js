@@ -1,7 +1,7 @@
 // SQLite storage (Node's built-in node:sqlite). Every query is a prepared statement with bound parameters.
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const MIGRATIONS = [
   `
@@ -81,7 +81,13 @@ const MIGRATIONS = [
   `
 ]
 
-export function openDatabase(file = process.env.DATABASE_FILE || 'data/dealsaathi.db') {
+/** Where the database lives: DATABASE_FILE, else the host's persistent DATA_DIR (Embarko), else ./data. */
+export function databaseFile(env = process.env) {
+  if (env.DATABASE_FILE) return env.DATABASE_FILE
+  return env.DATA_DIR ? join(env.DATA_DIR, 'dealsaathi.db') : 'data/dealsaathi.db'
+}
+
+export function openDatabase(file = databaseFile()) {
   if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true })
   const db = new DatabaseSync(file)
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 3000;')

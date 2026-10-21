@@ -28,8 +28,8 @@ export function extraction(intent, lead = {}, uncertain = []) {
   return { intent, lead: { ...base, ...lead }, uncertain }
 }
 
-export async function startApp({ ai = fakeAi(), db = openDatabase(':memory:') } = {}) {
-  const app = createApp({ db, ai })
+export async function startApp({ ai = fakeAi(), db = openDatabase(':memory:'), auth } = {}) {
+  const app = createApp({ db, ai, auth })
   const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)) })
   const base = `http://127.0.0.1:${server.address().port}`
   const call = async (path, { method = 'GET', body, headers = {} } = {}) => {

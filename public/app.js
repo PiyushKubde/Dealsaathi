@@ -73,7 +73,13 @@ async function api(path, { method = 'GET', body, headers = {} } = {}) {
     throw new ApiError(0, { error: { code: 'network', message: 'Could not reach the DealSaathi server. Is it still running?' } })
   }
   const data = await res.json().catch(() => null)
-  if (!res.ok) throw new ApiError(res.status, data)
+  if (!res.ok) {
+    if (data?.error?.code === 'login_required' && !path.startsWith('/api/session')) {
+      session.signedIn = false
+      renderLogin()
+    }
+    throw new ApiError(res.status, data)
+  }
   return data
 }
 
@@ -169,7 +175,7 @@ async function renderDashboard() {
         <div class="small muted">${esc([l.preferred_location, lookingFor(l), budgetText(l)].filter(Boolean).join(' · ') || 'No preferences yet')} · ${esc(label('status', l.status))} · updated ${esc(fmtDate(l.updated_at))}</div></li>`).join('')}</ul>`
     : `<p class="muted">${empty}</p>`
   main.innerHTML = `
-    <div class="page-head"><div><h1>Dashboard</h1><p>All counts come from the leads saved in the local database on this computer.</p></div>
+    <div class="page-head"><div><h1>Dashboard</h1><p>All counts come from the leads saved in ${esc(storedIn())}.</p></div>
       <div class="row"><a class="btn primary" href="#/assistant">Add a lead with AI</a><a class="btn ghost" href="#/leads/new">New lead form</a></div></div>
     <div class="grid stats">
       <div class="card stat"><div class="label">Total leads</div><div class="value">${d.total}</div></div>
@@ -189,7 +195,7 @@ async function renderLeads(params) {
   const state = { q: params.get('q') || '', customer_type: params.get('customer_type') || '', status: params.get('status') || '', location: params.get('location') || '', follow_up: params.get('follow_up') || '' }
   const opt = (group, sel) => Object.entries(LABELS[group]).map(([k, l]) => `<option value="${k}"${k === sel ? ' selected' : ''}>${esc(l)}</option>`).join('')
   main.innerHTML = `
-    <div class="page-head"><div><h1>Leads</h1><p>Saved in the local database on this computer. Not synced to any CRM.</p></div>
+    <div class="page-head"><div><h1>Leads</h1><p>Saved in ${esc(storedIn())}. Not synced to any CRM.</p></div>
       <div class="row"><a class="btn primary" href="#/assistant">Add with AI</a><a class="btn ghost" href="#/leads/new">New lead</a></div></div>
     <form class="filters" id="filters" role="search">
       <div class="field"><label for="q">Search</label><input id="q" name="q" type="search" placeholder="Name, phone, email, location, notes" value="${esc(state.q)}"></div>
@@ -250,7 +256,7 @@ async function renderLeadDetail(id) {
     ['Preferred location', dash(l.preferred_location)], ['Property type', dash(label('property_type', l.property_type))], ['Interested in', dash(l.property_interest)],
     ['Bedrooms', dash(l.bedrooms)], ['Budget', dash(budgetText(l))], ['Lead source', dash(label('source', l.source))], ['Status', esc(label('status', l.status))],
     ['Assigned broker', dash(l.assigned_broker)], ['Notes', dash(l.notes)], ['Created', esc(fmtDateTime(l.created_at))], ['Last updated', esc(fmtDateTime(l.updated_at))],
-    ['Stored in', 'Local database on this computer']
+    ['Stored in', esc(storedIn())]
   ]
   main.innerHTML = `
     <div class="page-head"><div><a href="#/leads" class="small">← All leads</a><h1>${esc(l.full_name)}</h1></div>
@@ -261,7 +267,7 @@ async function renderLeadDetail(id) {
         <div class="small muted">${esc(fmtDateTime(a.created_at))} · via ${a.via === 'assistant' ? 'AI assistant (confirmed by you)' : 'form'}</div></li>`).join('')}</ul></section>
     </div>`
   document.getElementById('delete').addEventListener('click', async () => {
-    const ok = await confirmDialog(`Delete ${l.full_name}?`, 'This permanently removes the lead and its activity history from the local database. It cannot be undone.', 'Delete permanently')
+    const ok = await confirmDialog(`Delete ${l.full_name}?`, 'This permanently removes the lead and its activity history from DealSaathi\'s database. It cannot be undone.', 'Delete permanently')
     if (!ok) return
     try {
       await api(`/api/leads/${l.id}`, { method: 'DELETE' })
@@ -311,7 +317,7 @@ async function renderLeadForm(id) {
       const res = id
         ? await api(`/api/leads/${id}`, { method: 'PATCH', body })
         : await api('/api/leads', { method: 'POST', body, headers: { 'Idempotency-Key': idempotencyKey } })
-      toast(id ? (res.changed.length ? 'Changes saved to the local database.' : 'No changes to save.') : `Saved ${res.lead.full_name} (${res.lead.code}) to the local database.`)
+      toast(id ? (res.changed.length ? 'Changes saved.' : 'No changes to save.') : `Saved ${res.lead.full_name} (${res.lead.code}).`)
       location.hash = `#/leads/${res.lead.id}`
     } catch (error) {
       showFieldErrors(form, error.details?.fields)
@@ -385,7 +391,7 @@ async function renderAssistant() {
   const renderSaved = (lead, alreadySaved) => {
     review.innerHTML = `
       <div class="review-state"><span class="badge saved">Saved</span><h2 style="margin:0">${esc(lead.full_name)}</h2></div>
-      <div class="notice ok">${alreadySaved ? 'This lead was already saved earlier; it was not saved twice.' : 'Saved to the local database on this computer'} as <strong>${esc(lead.code)}</strong>. It has not been sent to any CRM or other app.</div>
+      <div class="notice ok">${alreadySaved ? 'This lead was already saved earlier; it was not saved twice.' : `Saved to ${esc(storedIn())}`} as <strong>${esc(lead.code)}</strong>. It has not been sent to any CRM or other app.</div>
       <dl class="details">${[['Type', typeBadge(lead.customer_type)], ['Phone', dash(lead.phone)], ['Email', dash(lead.email)], ['Location', dash(lead.preferred_location)],
         ['Looking for', dash(lookingFor(lead))], ['Budget', dash(budgetText(lead))], ['Saved at', esc(fmtDateTime(lead.created_at))]].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
       <div class="row" style="margin-top:1rem"><a class="btn primary" href="#/leads/${lead.id}">Open lead</a><button class="btn ghost" id="another">Add another lead</button></div>`
@@ -427,7 +433,7 @@ async function renderAssistant() {
       confirmBtn.textContent = 'Saving…'
       try {
         const res = await api(`/api/assistant/actions/${a.id}/confirm`, { method: 'POST', body: { fields: readForm(rf), allowSameName } })
-        addMsg('assistant', res.alreadySaved ? `${res.lead.full_name} was already saved as ${res.lead.code}.` : `Saved ${res.lead.full_name} as lead ${res.lead.code} in the local database.`)
+        addMsg('assistant', res.alreadySaved ? `${res.lead.full_name} was already saved as ${res.lead.code}.` : `Saved ${res.lead.full_name} as lead ${res.lead.code} in DealSaathi's database.`)
         action = null
         dirty.clear()
         renderSaved(res.lead, res.alreadySaved)
@@ -530,8 +536,67 @@ async function renderAssistant() {
   }
 }
 
+// ---------- access ----------
+const session = { mode: 'open', signedIn: true, hosted: false }
+const storedIn = () => (session.hosted ? "DealSaathi's own database on its hosting server" : 'the local database on this computer')
+
+function renderLogin() {
+  document.querySelectorAll('[data-nav]').forEach((a) => a.classList.remove('active'))
+  main.innerHTML = `
+    <div class="card" style="max-width:420px;margin:3rem auto">
+      <h1>Sign in</h1>
+      <p class="muted">This DealSaathi is protected. Enter the access password.</p>
+      <form id="login-form" class="stack" novalidate>
+        <div class="field"><label for="password">Access password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+        <div id="login-error"></div>
+        <button class="btn primary" type="submit">Sign in</button>
+      </form>
+    </div>`
+  const form = document.getElementById('login-form')
+  form.elements.password.focus()
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    try {
+      await api('/api/session/login', { method: 'POST', body: { password: form.elements.password.value } })
+      session.signedIn = true
+      updateAccessUi()
+      route()
+    } catch (error) {
+      document.getElementById('login-error').innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+    }
+  })
+}
+
+function renderLocked() {
+  main.innerHTML = `<div class="card" style="max-width:520px;margin:3rem auto"><h1>Not ready yet</h1>
+    <p>This hosted copy of DealSaathi is locked because no access password has been set.</p>
+    <p class="muted">The owner adds <strong>APP_PASSWORD</strong> (at least 12 characters) in the hosting settings, then reloads this page.</p></div>`
+}
+
+function updateAccessUi() {
+  const foot = document.querySelector('.sidebar-foot')
+  let out = document.getElementById('sign-out')
+  if (session.mode === 'password' && session.signedIn && !out) {
+    out = document.createElement('button')
+    out.id = 'sign-out'
+    out.className = 'btn ghost'
+    out.textContent = 'Sign out'
+    out.addEventListener('click', async () => {
+      await api('/api/session/logout', { method: 'POST', body: {} }).catch(() => {})
+      session.signedIn = false
+      out.remove()
+      renderLogin()
+    })
+    foot.before(out)
+  } else if (out && !(session.mode === 'password' && session.signedIn)) {
+    out.remove()
+  }
+}
+
 // ---------- router ----------
 async function route() {
+  if (session.mode === 'locked') return renderLocked()
+  if (!session.signedIn) return renderLogin()
   const [path, query = ''] = location.hash.replace(/^#/, '').split('?')
   const parts = path.split('/').filter(Boolean)
   const params = new URLSearchParams(query)
@@ -557,7 +622,7 @@ async function checkHealth() {
   try {
     const h = await api('/api/health')
     dot.className = `dot ${h.ai === 'configured' ? 'ok' : 'warn'}`
-    text.textContent = h.ai === 'configured' ? 'Local database · AI credentials set' : 'Local database · AI not configured'
+    text.textContent = h.ai === 'configured' ? 'Database ok · AI credentials set' : 'Database ok · AI not configured'
   } catch {
     dot.className = 'dot bad'
     text.textContent = 'Server not reachable'
@@ -566,5 +631,7 @@ async function checkHealth() {
 
 window.addEventListener('hashchange', route)
 if (!location.hash) history.replaceState(null, '', '#/dashboard')
-route()
-checkHealth()
+api('/api/session')
+  .then((s) => Object.assign(session, s))
+  .catch(() => {})
+  .finally(() => { updateAccessUi(); route(); checkHealth() })
