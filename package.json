@@ -1,0 +1,25 @@
+{
+  "name": "dealsaathi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DealSaathi — AI-powered real estate assistant for brokers and property managers, built on viaSocket.",
+  "type": "module",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test \"test/*.test.js\" && node viasocket-check.mjs server public",
+    "test:unit": "node --test \"test/*.test.js\"",
+    "check:viasocket": "node viasocket-check.mjs server public",
+    "lint": "node scripts/lint.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^4.22.3",
+    "jsonwebtoken": "^9.0.3",
+    "zod": "^4.6.7"
+  }
+}

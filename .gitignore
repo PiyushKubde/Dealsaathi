@@ -1,0 +1,11 @@
+node_modules/
+data/
+.env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+# viaSocket app documents are fetched fresh for every task (see viasocket/SKILL.md)
+viasocket/apps/
+viasocket/viasocket-*.md
