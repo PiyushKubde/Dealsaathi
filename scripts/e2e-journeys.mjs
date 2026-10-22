@@ -289,6 +289,15 @@ const lastMsg = buyerPage.locator('.agent-msg').last()
 check('buyer assistant: a listing with contact details in its text is shown with a warning, not endorsed', /does not endorse it/.test(await lastMsg.textContent()) && /contact details/.test(await lastMsg.textContent()))
 check('buyer assistant: the assistant\'s own words never carry the listing\'s phone number', !/98765/.test(await lastMsg.locator('.agent-text').textContent()) && !/98765/.test(JSON.stringify(ai.calls.map((c) => c.message))))
 
+// The buyer deletes the conversation: chat records go, sent viewing requests stay in My viewings.
+const viewingsBeforeDelete = t.db.prepare('SELECT COUNT(*) AS n FROM viewings').get().n
+await buyerPage.click('#ag-delete')
+await buyerPage.waitForSelector('#confirm-dialog[open]')
+check('buyer assistant: deleting explains what is kept and what cannot be deleted', /stay in My viewings/.test(await buyerPage.textContent('#confirm-body')) && /cannot be deleted/.test(await buyerPage.textContent('#confirm-body')))
+await buyerPage.click('#confirm-ok')
+await buyerPage.waitForFunction(() => !document.querySelector('.agent-msg'))
+check('buyer assistant: the conversation is deleted, sent viewing requests are kept', t.db.prepare('SELECT COUNT(*) AS n FROM agent_conversations').get().n === 0 && t.db.prepare('SELECT COUNT(*) AS n FROM viewings').get().n === viewingsBeforeDelete && await buyerPage.isHidden('#ag-delete'))
+
 // ---- System email through the agent's Gmail (stand-in): verification for the buyer
 const agentId = t.db.prepare("SELECT id FROM users WHERE role = 'agent'").get().id
 mail.id = (await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: await vs.serviceIdFor('gmail'), authId: vs.connectApp(agentId, 'gmail') }, as: agentCookie })).body.connection.id

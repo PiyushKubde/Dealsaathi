@@ -2122,7 +2122,7 @@ function agentActionHtml(a) {
 
 async function renderAgentAssistant() {
   main.innerHTML = `<div class="page-head"><div><h1>Assistant</h1><p>Ask in your own words. It searches published listings, explains why they match and can check your agent’s free times. Nothing reaches your agent until you press <strong>Confirm</strong>, and a viewing is booked only when your agent confirms it.</p></div>
-      <button class="btn ghost" id="ag-new">New conversation</button></div>
+      <div class="row"><button class="btn ghost" id="ag-delete" hidden>Delete conversation</button><button class="btn ghost" id="ag-new">New conversation</button></div></div>
     <section class="card chat agent-chat" aria-label="Conversation">
       <div class="chat-log" id="ag-log" aria-live="polite"></div>
       <div class="examples" id="ag-examples">${AGENT_EXAMPLES.map((e) => `<button type="button">${esc(e)}</button>`).join('')}</div>
@@ -2180,6 +2180,7 @@ async function renderAgentAssistant() {
   }
   const load = async () => {
     log.innerHTML = ''
+    document.getElementById('ag-delete').hidden = !conversationId
     if (!conversationId) { log.innerHTML = '<p class="muted small">Tell the assistant what you are looking for: area, budget, bedrooms. It only uses real listings that are on the market.</p>'; return }
     try {
       const { messages } = await api(`/api/agent/conversations/${conversationId}`)
@@ -2207,6 +2208,7 @@ async function renderAgentAssistant() {
       const r = await api('/api/agent/messages', { method: 'POST', body: { message: text, conversationId } })
       conversationId = r.conversationId
       store.set('ds_agent_conversation', conversationId)
+      document.getElementById('ag-delete').hidden = false
       wait.remove()
       addAssistant(r)
     } catch (error) {
@@ -2218,6 +2220,18 @@ async function renderAgentAssistant() {
   form.addEventListener('submit', (e) => { e.preventDefault(); const text = input.value; input.value = ''; send(text) })
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit() } })
   document.getElementById('ag-examples').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => send(b.textContent)))
+  document.getElementById('ag-delete').addEventListener('click', async () => {
+    if (!conversationId) return
+    if (!(await confirmDialog('Delete this conversation?', 'Its messages and any request you have not confirmed are deleted from DealSaathi. Viewing requests you already sent stay in My viewings. Copies kept by the AI service DealSaathi uses cannot be deleted from here.', 'Delete conversation'))) return
+    try {
+      await api(`/api/agent/conversations/${conversationId}`, { method: 'DELETE' })
+      conversationId = null
+      store.set('ds_agent_conversation', null)
+      document.getElementById('ag-examples').hidden = false
+      toast('Conversation deleted.')
+      await load()
+    } catch (error) { toast(error.message) }
+  })
   document.getElementById('ag-new').addEventListener('click', () => { conversationId = null; store.set('ds_agent_conversation', null); document.getElementById('ag-examples').hidden = false; load(); input.focus() })
   await load()
 }

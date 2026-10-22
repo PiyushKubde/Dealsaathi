@@ -12,7 +12,7 @@ import { describeInZone, todayIn } from '../time.js'
 import { parseRequest } from './parse.js'
 import { cleanText, forModel, hasContact } from './untrusted.js'
 import { DECISION_SCHEMA, systemPrompt } from './prompt.js'
-import { MAX_SLOTS, TOOLS, ToolInputError, toolError, toolsFor } from './tools.js'
+import { MAX_SLOTS, TOOLS, ToolInputError, buyerTimezone, toolError, toolsFor } from './tools.js'
 
 export const LIMITS = { decisions: 6, toolCalls: 4, errors: 2, aiTimeoutMs: 30000, toolTimeoutMs: 20000, turnMs: 60000, message: 1000, reply: 1500 }
 const RATE = { max: 20, windowMs: 10 * 60 * 1000 }
@@ -118,7 +118,7 @@ function contextFor(db, ctx, turn) {
   const history = db.prepare('SELECT role, content FROM agent_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 9').all(ctx.conversationId).reverse().slice(0, -1)
   const pending = db.prepare("SELECT * FROM agent_actions WHERE conversation_id = ? AND status = 'awaiting_confirmation' ORDER BY created_at DESC LIMIT 1").get(ctx.conversationId)
   return JSON.stringify({
-    today: todayIn('Asia/Kolkata'), timezone: 'Asia/Kolkata', helping: 'a buyer',
+    today: todayIn(ctx.timezone), timezone: ctx.timezone, helping: 'a buyer',
     conversation: history.map((m) => ({ role: m.role, text: m.content.slice(0, 600) })),
     listings_shown_earlier: stillVisible(db, ctx.user, ctx.state.shown).slice(0, 10).map(forModel),
     free_times_shown_earlier: (ctx.state.offers || []).map((o) => ({ property_id: o.property_id, title: o.title, date: o.date, timezone: o.timezone, agent_name: o.agent_name, free_times: o.slots.slice(0, MAX_SLOTS) })),
@@ -179,7 +179,8 @@ export async function handleAgentMessage(db, ai, vs, user, { conversationId, mes
     db, vs, user, conversationId: conv.id, state: parse(conv.state) || {},
     // Newest first: the buyer's latest word on a requirement wins (tools.js stated()).
     userMessages: [message.trim(), ...db.prepare("SELECT content FROM agent_messages WHERE conversation_id = ? AND role = 'user' ORDER BY id DESC LIMIT 10").all(conv.id).map((m) => m.content)],
-    savedRequirements: null
+    savedRequirements: null,
+    timezone: buyerTimezone(db, user)
   }
   const pr = db.prepare('SELECT b.lead_id FROM buyer_profiles b WHERE b.user_id = ?').get(user.id)
   if (pr?.lead_id) {
@@ -376,6 +377,23 @@ export async function confirmAgentAction(db, vs, user, id) {
     : `The viewing request was not sent: ${error}`, { status: done ? 'action_completed' : 'action_failed' })
   console.log(`[agent] action ${row.id.slice(0, 8)} request_viewing ${row.status}`)
   return { action: describeAction(db, row) }
+}
+
+/**
+ * The buyer deletes one of their conversations: its messages, context, run records and any request still
+ * awaiting Confirm (nothing was sent for those). Viewing requests already sent are kept: they belong to the
+ * buyer and their agent (My viewings), not to the chat. Refused while a turn or a Confirm is still running.
+ * Copies held by viaSocket's AI service are not affected (it offers no deletion).
+ */
+export function deleteAgentConversation(db, user, id) {
+  requireRole(user, 'buyer')
+  expireActions(db, user.id)
+  const conv = ownConversation(db, id, user.id)
+  if (conv.busy_until && conv.busy_until > now()) throw new AppError(409, 'agent_busy', 'The assistant is still working on your last message.')
+  if (db.prepare("SELECT 1 FROM agent_actions WHERE conversation_id = ? AND status = 'executing'").get(conv.id)) throw new AppError(409, 'action_in_progress', 'A viewing request from this conversation is still being sent. Try again in a few minutes.')
+  db.prepare('DELETE FROM agent_conversations WHERE id = ? AND user_id = ?').run(conv.id, user.id)
+  console.log(`[agent] conversation ${conv.id.slice(0, 8)} deleted by its buyer`)
+  return { deleted: true }
 }
 
 export function cancelAgentAction(db, user, id) {

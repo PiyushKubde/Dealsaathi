@@ -34,7 +34,14 @@ function calendarRead(userId) {
   calendarReads.set(userId, list)
 }
 const UNITS = ['rupees', 'thousand', 'lakh', 'crore']
-const TZ = 'Asia/Kolkata'
+const DEFAULT_TZ = 'Asia/Kolkata'
+
+/** The time zone the buyer's viewings are offered in: their agent's calendar setting, else India. */
+export function buyerTimezone(db, user) {
+  const prof = db.prepare('SELECT lead_id FROM buyer_profiles WHERE user_id = ?').get(user.id)
+  const agentId = prof?.lead_id ? db.prepare('SELECT assigned_agent_id FROM leads WHERE id = ?').get(prof.lead_id)?.assigned_agent_id : null
+  return (agentId && getSetting(db, agentId, 'viewing_scheduler').config?.timezone) || DEFAULT_TZ
+}
 const words = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter((w) => w.length > 2)
 
 const int = (v, name, min, max) => {
@@ -214,7 +221,7 @@ export const TOOLS = {
         how_ranked: 'Location 35 (area) or 25 (city), within budget 30, exact bedrooms 25, property type 10. Over budget, other bedroom counts or another place are left out.'
       }
     },
-    label: (c, r) => `Searched published listings (${describeCriteria(r.criteria_used)}): ${r.matched} of ${r.considered} fit`
+    label: (c, r) => `Searched published listings (${describeCriteria(r.criteria_used)}): ${r.matched} of ${r.considered} fit${r.incomplete ? ` (incomplete: more than ${MAX_CANDIDATES.toLocaleString('en-IN')} listings fit these filters, so not all were ranked; narrow the search)` : ''}`
   },
 
   get_listing: {
@@ -246,11 +253,11 @@ export const TOOLS = {
     roles: ['buyer'],
     description: 'Free times in the buyer\'s agent\'s real Google Calendar on one date, for a listing. Read only.',
     fields: ['property_id', 'date'],
-    validate(a) {
+    validate(a, ctx) {
       const id = int(a.property_id, 'property_id', 1, 1e9)
       if (!id) throw new ToolInputError('property_id is required.')
       if (typeof a.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(a.date)) throw new ToolInputError('date must be YYYY-MM-DD. If the buyer has not said which day, ask them.')
-      const today = todayIn(TZ)
+      const today = todayIn(ctx.timezone || DEFAULT_TZ) // the agent's calendar day, not necessarily India's
       if (a.date < today || a.date > addDays(today, 60)) throw new ToolInputError(`date must be from ${today} to ${addDays(today, 60)}.`)
       return { property_id: id, date: a.date }
     },

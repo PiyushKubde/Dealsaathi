@@ -117,6 +117,14 @@ gets SQL, HTTP, shell or other users' data.
   details (phone numbers, emails, links) reach the model only as a cleaned copy, flagged as such; the page shows the
   real listing with a warning. Server-written replies use cleaned titles, and model replies containing contact
   details or links are refused.
+- **Dates**: "today" and the allowed viewing dates follow the buyer's agent's calendar time zone (viewing
+  scheduler setting; India when unset), the same zone the free times come from. An incomplete search (over 5,000
+  candidates) says so in the step the buyer sees, not only to the model.
+- **Deletion and retention**: a buyer can delete a conversation (`DELETE /api/agent/conversations/:id`): its
+  messages, context, run records and unconfirmed requests go; viewing requests already sent stay (My viewings).
+  Refused while a turn or a Confirm is running. Nothing expires on its own yet (a retention period is a business
+  decision). viaSocket keeps its own copy of each AI step (one thread per step, buyer messages and cleaned listing
+  data, never emails, phones or addresses); its SDK and docs offer no deletion and state no retention period.
 - **Live check** (`scripts/live-agent-check.mjs`): the real viaSocket AI against a throwaway database of made-up listings
   and the Calendar stand-in; never confirms a request. Run only with approval: it makes real AI calls.
 - **Records** (schema v8, new tables only): `agent_conversations` (with working context: listings and free times

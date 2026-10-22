@@ -15,7 +15,7 @@ import { createMailer } from './mail.js'
 import { requestPasswordReset, resetPassword, sendVerification, verificationState, verifyEmail } from './accounts.js'
 import { acceptInvite, createInvite, previewInvite, revokeInvites, unlinkParty } from './rent/service.js'
 import { cancelAction, confirmAction, handleMessage, loadConversation } from './assistant/service.js'
-import { cancelAgentAction, confirmAgentAction, handleAgentMessage, loadAgentConversation } from './agent/runtime.js'
+import { cancelAgentAction, confirmAgentAction, deleteAgentConversation, handleAgentMessage, loadAgentConversation } from './agent/runtime.js'
 import { createAuth } from './auth.js'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { disconnect, listUserConnections, reconnectDetails, requireViasocket, saveConnection, viasocketError } from './integrations/service.js'
@@ -153,6 +153,7 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
     res.json(await handleAgentMessage(db, ai, vs, req.user, { conversationId: conversationId == null ? null : parseUuid(conversationId, 'conversation'), message }))
   })
   app.get('/api/agent/conversations/:id', allow('buyer'), (req, res) => res.json(loadAgentConversation(db, req.user, parseUuid(req.params.id, 'conversation'))))
+  app.delete('/api/agent/conversations/:id', allow('buyer'), (req, res) => res.json(deleteAgentConversation(db, req.user, parseUuid(req.params.id, 'conversation'))))
   app.post('/api/agent/actions/:id/confirm', allow('buyer'), async (req, res) => res.json(await confirmAgentAction(db, vs, req.user, parseUuid(req.params.id, 'action'))))
   app.post('/api/agent/actions/:id/cancel', allow('buyer'), (req, res) => res.json(cancelAgentAction(db, req.user, parseUuid(req.params.id, 'action'))))
   // ---- Tenants and landlords: their tenancies (read), landlords record payments they received

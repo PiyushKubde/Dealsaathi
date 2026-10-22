@@ -715,3 +715,92 @@ test('stuck Confirm: another buyer cannot see, recover or confirm the request', 
     assert.equal(actionRow(s.t, c.actionId).status, 'executing', 'another buyer\'s request does not trigger recovery of this one')
   } finally { await s.t.close() }
 })
+
+// ---- Staging blockers (fast-track): each test failed before its fix, except the race test, which pins behaviour
+
+test('staging: an agent outside India: "today" and allowed dates follow the agent\'s calendar time zone', async () => {
+  const ai = fakeAi(answer('Hello.'))
+  const s = await setup({ ai })
+  try {
+    const TZ = 'America/Los_Angeles'
+    const row = s.t.db.prepare("SELECT user_id, config FROM automation_settings WHERE key = 'viewing_scheduler'").get()
+    s.t.db.prepare("UPDATE automation_settings SET config = ? WHERE key = 'viewing_scheduler'").run(JSON.stringify({ ...JSON.parse(row.config), timezone: TZ }))
+    await s.say('hi')
+    const ctx = JSON.parse(ai.calls[0].message)
+    assert.equal(ctx.timezone, TZ)
+    assert.equal(ctx.today, todayIn(TZ))
+    const agentToday = todayIn(TZ)
+    s.ai.queue.push(tool('get_viewing_slots', { property_id: s.ids.best, date: agentToday }), ask('Which time?'))
+    const ok = await s.say(`listing ${s.ids.best} today`)
+    assert.ok(ok.body.offer, 'the agent\'s today is accepted, whatever the date in India')
+    s.ai.queue.push(tool('get_viewing_slots', { property_id: s.ids.best, date: addDays(agentToday, -1) }), ask('Which day?'))
+    await s.say('yesterday then')
+    assert.match(JSON.parse(ai.calls.at(-1).message).this_turn.steps[0].error.message, new RegExp(`from ${agentToday}`))
+  } finally { await s.t.close() }
+})
+
+test('staging: an incomplete search is shown to the buyer in the step itself, not only told to the model', async () => {
+  const ai = fakeAi(tool('search_listings', SEARCH), answer('Please narrow it down.'))
+  const { t, say, ids } = await setup({ ai })
+  try {
+    const copy = t.db.prepare(`INSERT INTO properties (title, listing_type, property_type, bedrooms, price, city, locality, address, area_sqft, amenities, status, is_sample, notes, created_by, created_at, updated_at, owner_user_id, agent_id, listing_state, published_at)
+      SELECT title, listing_type, property_type, bedrooms, price, city, locality, address, area_sqft, amenities, status, is_sample, notes, created_by, created_at, updated_at, owner_user_id, agent_id, listing_state, published_at FROM properties WHERE id = ?`)
+    t.db.exec('BEGIN')
+    for (let i = 0; i < MAX_CANDIDATES; i++) copy.run(ids.best)
+    t.db.exec('COMMIT')
+    const r = await say(ASK)
+    assert.match(r.body.steps[0].label, /incomplete/i)
+    assert.match(r.body.steps[0].label, /narrow/i)
+  } finally { await t.close() }
+})
+
+test('staging: a buyer can delete a conversation; sent requests stay; nothing in flight is lost', async () => {
+  const s = await setup()
+  try {
+    const c = await prepared(s)
+    const other = signedInUser(s.t.db, { name: 'Other Buyer', role: 'buyer' })
+    assert.equal((await s.t.call(`/api/agent/conversations/${c.conversationId}`, { method: 'DELETE', as: other })).status, 404)
+    assert.equal((await s.t.call(`/api/agent/conversations/${c.conversationId}`, { method: 'DELETE' })).status, 403, 'agents cannot')
+    // While a Confirm is being sent, deleting is refused (the result must still be recorded).
+    s.t.db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ? WHERE id = ?").run(new Date().toISOString(), c.actionId)
+    const busy = await s.b(`/api/agent/conversations/${c.conversationId}`, { method: 'DELETE' })
+    assert.equal(busy.status, 409)
+    assert.equal(busy.body.error.code, 'action_in_progress')
+    s.t.db.prepare("UPDATE agent_actions SET status = 'awaiting_confirmation' WHERE id = ?").run(c.actionId)
+    // Confirm, so a real (stand-in) viewing request exists, then delete the conversation.
+    assert.equal((await s.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })).body.action.status, 'completed')
+    const del = await s.b(`/api/agent/conversations/${c.conversationId}`, { method: 'DELETE' })
+    assert.equal(del.status, 200)
+    assert.equal(del.body.deleted, true)
+    for (const table of ['agent_conversations', 'agent_messages', 'agent_actions', 'agent_runs']) assert.equal(s.t.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, table)
+    assert.equal(viewingsCount(s.t), 1, 'the viewing request itself is kept: it belongs to the buyer and agent, not the chat')
+    assert.equal((await s.b(`/api/agent/conversations/${c.conversationId}`)).status, 404)
+  } finally { await s.t.close() }
+})
+
+test('staging: deleting a conversation with a prepared request cancels it (nothing was sent)', async () => {
+  const s = await setup()
+  try {
+    const c = await prepared(s)
+    assert.equal((await s.b(`/api/agent/conversations/${c.conversationId}`, { method: 'DELETE' })).status, 200)
+    assert.equal(viewingsCount(s.t), 0)
+    assert.equal((await s.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })).status, 404, 'its request is gone with it')
+  } finally { await s.t.close() }
+})
+
+test('staging race: Confirm and Cancel at the same moment end in exactly one consistent state', async () => {
+  for (const order of ['confirm-first', 'cancel-first']) {
+    const s = await setup()
+    try {
+      const c = await prepared(s)
+      const original = s.vs.runAction
+      s.vs.runAction = async (...args) => { await new Promise((r) => setTimeout(r, 200)); return original(...args) }
+      const confirm = () => s.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })
+      const cancel = () => s.b(`/api/agent/actions/${c.actionId}/cancel`, { method: 'POST', body: {} })
+      await Promise.all(order === 'confirm-first' ? [confirm(), cancel()] : [cancel(), confirm()])
+      const status = actionRow(s.t, c.actionId).status
+      assert.ok(['completed', 'cancelled'].includes(status), `${order}: ${status}`)
+      assert.equal(viewingsCount(s.t), status === 'completed' ? 1 : 0, `${order}: a viewing request exists exactly when completed`)
+    } finally { await s.t.close() }
+  }
+})
