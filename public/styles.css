@@ -136,6 +136,15 @@ dl.details dd { margin: 0; }
 .examples { display: flex; flex-wrap: wrap; gap: .4rem; padding: 0 1rem 1rem; }
 .examples button { font: inherit; font-size: .8rem; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: .3rem .7rem; cursor: pointer; }
 .review-state { display: flex; align-items: center; gap: .5rem; margin-bottom: .75rem; }
+.agent-chat { height: calc(100vh - 210px); }
+.msg.agent-msg { max-width: 100%; width: 100%; white-space: normal; }
+.agent-text { white-space: pre-wrap; }
+.msg.agent-warn { border-left: 3px solid var(--warn); }
+.agent-steps { list-style: none; margin: 0 0 .4rem; padding: 0; color: var(--muted); }
+.agent-steps li::before { content: '✓ '; color: var(--primary); }
+.agent-steps li.warn::before { content: '! '; color: var(--danger); }
+.agent-block { margin-top: .6rem; white-space: normal; }
+.agent-action { max-width: 460px; }
 
 .toast { position: fixed; bottom: 1.25rem; right: 1.25rem; background: var(--text); color: var(--bg); padding: .65rem 1rem; border-radius: 8px; box-shadow: var(--shadow); max-width: 360px; font-size: .9rem; }
 dialog { border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; max-width: 420px; background: var(--surface); color: var(--text); }

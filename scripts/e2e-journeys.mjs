@@ -4,7 +4,7 @@
 // console error, failed request, or horizontal scroll on a phone-width screen.
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
-import { startApp, fakeVs } from '../test/helpers.js'
+import { startApp, fakeAi, fakeVs } from '../test/helpers.js'
 import { addDays, todayIn } from '../server/time.js'
 
 const require = createRequire(process.env.PLAYWRIGHT_MODULE || '/opt/node22/lib/node_modules/')
@@ -18,7 +18,8 @@ const check = (name, ok, detail = '') => { results.push({ name, ok, detail }); i
 
 const vs = fakeVs()
 const mail = { id: null } // system email goes through the agent's (stand-in) Gmail once connected below
-const t = await startApp({ vs, withUser: false, mailConnection: () => mail.id })
+const ai = fakeAi() // the assistant's decisions are scripted below; nothing reaches a real AI
+const t = await startApp({ vs, ai, withUser: false, mailConnection: () => mail.id })
 const sentMail = () => vs.calls.filter((c) => c.name === 'runAction' && c.args[2]?.messageBody).map((c) => c.args[2]).at(-1)
 const B = t.base
 const browser = await chromium.launch()
@@ -211,6 +212,41 @@ await go(buyerPage, `#/recommendations`)
 await buyerPage.waitForTimeout(500)
 check('buyer: the rejected listing is no longer recommended', !/2 BHK in Baner<\/a>/.test(await buyerPage.innerHTML('#recs')))
 
+// ---- Buyer's AI assistant (scripted decisions, real tools): search, explain, free times, confirm a request
+const NULLS = { property_id: null, property_ids: null, date: null, start: null, location: null, bedrooms: null, budget_max_amount: null, budget_max_unit: null, budget_min_amount: null, budget_min_unit: null, listing_type: null, property_type: null, limit: null }
+const decide = (type, extra = {}) => ({ type, tool: null, message: null, listing_ids: null, ...extra, args: { ...NULLS, ...(extra.args || {}) } })
+const hills = t.db.prepare("SELECT id FROM properties WHERE title = '2 BHK near Baner hills'").get().id
+const aDay = addDays(todayIn('Asia/Kolkata'), 3)
+ai.queue.push(decide('tool', { tool: 'search_listings', args: { location: 'Baner', bedrooms: 2, budget_max_amount: 50, budget_max_unit: 'lakh' } }), decide('answer', { message: 'One listing fits. Shall I check free times?', listing_ids: [hills] }))
+await go(buyerPage, '#/assistant')
+await buyerPage.waitForSelector('#ag-input')
+await buyerPage.fill('#ag-input', 'Find me a 2 BHK in Baner under 50 lakh')
+await buyerPage.click('#ag-send')
+await buyerPage.waitForSelector('.agent-msg .agent-steps')
+const agentText = await buyerPage.textContent('#ag-log')
+check('buyer assistant: shows the search it ran and the matching listing with reasons', /Searched published listings/.test(agentText) && /2 BHK near Baner hills/.test(agentText) && /One listing fits/.test(agentText), agentText.slice(0, 300))
+check('buyer assistant: no street address in the conversation', !/Baner Road/.test(agentText))
+ai.queue.push(decide('tool', { tool: 'get_viewing_slots', args: { property_id: hills, date: aDay } }), decide('ask', { message: 'Which time suits you?' }))
+await buyerPage.fill('#ag-input', `Yes, on ${aDay}`)
+await buyerPage.click('#ag-send')
+await buyerPage.waitForSelector('.agent-msg [data-slot]')
+const offered = JSON.parse(t.db.prepare('SELECT state FROM agent_conversations').get().state).offers[0].slots[0]
+ai.queue.push(decide('tool', { tool: 'propose_viewing_request', args: { property_ids: [hills], start: offered.start } }))
+const viewingsBefore = t.db.prepare('SELECT COUNT(*) AS n FROM viewings').get().n
+await buyerPage.locator('.agent-msg [data-slot]').first().click()
+await buyerPage.waitForSelector('[data-action] [data-confirm]')
+check('buyer assistant: a prepared request is not sent before Confirm', t.db.prepare('SELECT COUNT(*) AS n FROM viewings').get().n === viewingsBefore)
+await shot(buyerPage, '55-buyer-assistant')
+await buyerPage.click('[data-action] [data-confirm]')
+await buyerPage.waitForSelector('.agent-action .notice.ok')
+await buyerPage.waitForTimeout(300)
+const sentText = await buyerPage.textContent('#ag-log')
+check('buyer assistant: Confirm sends one request, described as waiting for the agent', t.db.prepare('SELECT COUNT(*) AS n FROM viewings').get().n === viewingsBefore + 1 && /not booked yet/.test(sentText), sentText.slice(-200))
+check('buyer assistant: no calendar event before the agent confirms', t.db.prepare("SELECT status FROM viewings ORDER BY created_at DESC LIMIT 1").get().status === 'draft')
+await go(buyerPage, '#/assistant')
+await buyerPage.waitForSelector('.agent-msg')
+check('buyer assistant: the conversation is there after a reload', /Which time suits you/.test(await buyerPage.textContent('#ag-log')))
+
 // ---- System email through the agent's Gmail (stand-in): verification for the buyer
 const agentId = t.db.prepare("SELECT id FROM users WHERE role = 'agent'").get().id
 mail.id = (await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: await vs.serviceIdFor('gmail'), authId: vs.connectApp(agentId, 'gmail') }, as: agentCookie })).body.connection.id
@@ -316,7 +352,7 @@ await anon.waitForTimeout(400)
 check('sign-in: wrong password gives a readable error', /do not match/.test(await anon.textContent('#auth-error')))
 
 // ---- Phone width: no horizontal scroll on the main pages of each role
-for (const [who, page, hrefs] of [['buyer', buyerPage, ['#/dashboard', '#/recommendations', '#/my-viewings']], ['seller', sellerPage, ['#/dashboard', '#/my-listings']], ['agent', agentPage2, ['#/dashboard', '#/leads', '#/viewings', '#/activity']]]) {
+for (const [who, page, hrefs] of [['buyer', buyerPage, ['#/dashboard', '#/assistant', '#/recommendations', '#/my-viewings']], ['seller', sellerPage, ['#/dashboard', '#/my-listings']], ['agent', agentPage2, ['#/dashboard', '#/leads', '#/viewings', '#/activity']]]) {
   await page.setViewportSize({ width: 390, height: 800 })
   for (const h of hrefs) {
     await go(page, h)

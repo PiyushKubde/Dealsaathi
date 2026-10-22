@@ -1,6 +1,6 @@
 # DealSaathi architecture: a three-sided marketplace
 
-## Data model (schema v6)
+## Data model (schema v6; v7 and v8 add tables, see below and server/db.js)
 
 ```
 users (role: buyer | seller | agent)
@@ -82,3 +82,27 @@ that is not met (location, budget, BHK, type, rejected listings/areas) and expla
 gaps, never guessed. A stored match carries a **fingerprint** of the listing facts it rests on; only a new match, or one
 whose facts changed, is announced, so the same unchanged match never reaches anyone twice. A match that stops fitting
 is **withdrawn** with the reason; a dismissed match stays dismissed.
+
+## The buyer's AI Assistant (agent runtime, `server/agent/`)
+
+One loop per buyer message (`POST /api/agent/messages`, buyers only). Each step sends viaSocket AI (the existing
+`ai.send`, default model, `json_schema`) a compact JSON context and receives **one decision**: call a tool, ask, or
+answer. The server validates the decision and runs the tool **in-process as the signed-in buyer**; the model never
+gets SQL, HTTP, shell or other users' data.
+
+- **Tools** (`tools.js`) wrap existing functions: `get_my_requirements` (profile), `search_listings`
+  (`listProperties` market scope + `scoreMatch`, with the buyer's feedback exclusions), `get_listing` (`viewProperty`),
+  `get_my_recommendations` (`buyerRecommendations`), `get_viewing_slots` (`buyerSlots`: the agent's real free/busy,
+  read only) and `propose_viewing_request` (prepares an `agent_actions` row; sends nothing).
+- **Criteria guard**: a search may only use values from the buyer's own messages (parsed by `parse.js`), their saved
+  requirements or the criteria already in use. Anything else is refused back to the model, so it must ask.
+- **Approval**: only the buyer's Confirm (`POST /api/agent/actions/:id/confirm`) runs `requestViewing`, once (atomic
+  claim; a repeat returns the first result; an identical request already sent is reused). That creates a *request*;
+  the agent's own confirmation books it in Google Calendar, exactly as from the listing page.
+- **Limits**: 6 decisions, 4 tool calls and 2 errors per message; 30 s per AI call, 20 s per tool, 60 s per message;
+  no identical call twice; one message at a time per conversation; 20 messages per 10 minutes per buyer; prepared
+  requests expire after 30 minutes. A reply that claims a booking is rejected.
+- **Records** (schema v8, new tables only): `agent_conversations` (with working context: listings and free times
+  shown), `agent_messages`, `agent_runs` and `agent_steps` (tool names, outcomes, timings: no message text),
+  `agent_actions`. The log gets one line per run and per confirmed action, with no content.
+

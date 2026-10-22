@@ -705,7 +705,7 @@ const ROLE_LABEL = { buyer: 'Buyer', seller: 'Seller', agent: 'Agent' }
 /** Each role's sections, in nav order. The server enforces the same split; this only decides what is shown. */
 const NAV = {
   agent: [['dashboard', 'Dashboard'], ['notifications', 'Notifications'], ['assistant', 'Add with AI'], ['leads', 'Leads'], ['pool', 'Lead pool'], ['properties', 'Properties'], ['viewings', 'Viewings'], ['feedback', 'Feedback'], ['rent', 'Rent'], ['integrations', 'Integrations'], ['automations', 'Automations'], ['activity', 'Activity log'], ['profile', 'Profile']],
-  buyer: [['dashboard', 'Home'], ['requirements', 'My requirements'], ['recommendations', 'Recommendations'], ['browse', 'Browse listings'], ['my-viewings', 'My viewings'], ['my-tenancies', 'My rent'], ['notifications', 'Notifications']],
+  buyer: [['dashboard', 'Home'], ['assistant', 'Assistant'], ['requirements', 'My requirements'], ['recommendations', 'Recommendations'], ['browse', 'Browse listings'], ['my-viewings', 'My viewings'], ['my-tenancies', 'My rent'], ['notifications', 'Notifications']],
   seller: [['dashboard', 'Home'], ['my-listings', 'My listings'], ['listing-viewings', 'Viewings'], ['my-tenancies', 'My rentals'], ['notifications', 'Notifications'], ['profile', 'Profile']]
 }
 function renderNav() {
@@ -2097,6 +2097,122 @@ async function renderMyViewings() {
   }))
 }
 
+// ---------- the buyer's AI assistant ----------
+const AGENT_EXAMPLES = ['Find me a 2 BHK near Vijay Nagar under ₹50 lakh', 'Show me my best matches', 'What requirements have I saved?']
+const AGENT_ACTION_STATE = {
+  awaiting_confirmation: '', executing: '<div class="notice info small">Sending…</div>',
+  completed: '<div class="notice ok small"><strong>Request sent.</strong> Your agent confirms it before it is booked in their Google Calendar. Follow it in <a href="#/my-viewings">My viewings</a>.</div>',
+  cancelled: '<div class="notice small">Cancelled. Nothing was sent.</div>', expired: '<div class="notice warn small">This request expired. Ask the assistant to check free times again.</div>'
+}
+const agentListingCard = (l) => `<article class="card"><h2><a href="#/browse/${Number(l.id)}">${esc(l.title)}</a></h2>
+  <div><strong>${esc(l.price_text)}</strong> · ${esc([l.locality, l.city].filter(Boolean).join(', '))}${l.score != null ? ` <span class="badge">${Number(l.score)}/100</span>` : ''}</div>
+  ${l.reasons?.length || l.gaps?.length ? `<ul class="small">${(l.reasons || []).map((x) => `<li>${esc(x)}</li>`).join('')}${(l.gaps || []).map((g) => `<li class="muted">Unknown: ${esc(g)}</li>`).join('')}</ul>` : ''}
+  <a class="btn ghost small" href="#/browse/${Number(l.id)}">Open listing</a></article>`
+function agentActionHtml(a) {
+  if (!a) return ''
+  return `<div class="card agent-action" data-action="${esc(a.id)}"><h2>Viewing request</h2>
+    <p class="small">${a.properties.map((p) => esc(p.title)).join(', ')}<br><strong>${esc(a.when)}</strong></p>
+    ${a.status === 'awaiting_confirmation' ? `<p class="small muted">Confirm sends this request to your agent. It is booked in their Google Calendar only after they confirm it.</p>
+      <div class="row"><button class="btn primary small" data-confirm>Confirm and send to my agent</button><button class="btn ghost small" data-cancel>Cancel</button></div>`
+      : a.status === 'failed' ? `<div class="notice err small">Not sent: ${esc(a.error || 'it could not be sent')}</div>` : AGENT_ACTION_STATE[a.status] || ''}</div>`
+}
+
+async function renderAgentAssistant() {
+  main.innerHTML = `<div class="page-head"><div><h1>Assistant</h1><p>Ask in your own words. It searches published listings, explains why they match and can check your agent’s free times. Nothing reaches your agent until you press <strong>Confirm</strong>, and a viewing is booked only when your agent confirms it.</p></div>
+      <button class="btn ghost" id="ag-new">New conversation</button></div>
+    <section class="card chat agent-chat" aria-label="Conversation">
+      <div class="chat-log" id="ag-log" aria-live="polite"></div>
+      <div class="examples" id="ag-examples">${AGENT_EXAMPLES.map((e) => `<button type="button">${esc(e)}</button>`).join('')}</div>
+      <form class="chat-form" id="ag-form"><label for="ag-input" class="skip">Message</label>
+        <textarea id="ag-input" maxlength="1000" placeholder="e.g. Find me a 2 BHK near Vijay Nagar under ₹50 lakh"></textarea>
+        <button class="btn primary" id="ag-send">Send</button></form>
+    </section>`
+  const log = document.getElementById('ag-log')
+  const form = document.getElementById('ag-form')
+  const input = document.getElementById('ag-input')
+  let conversationId = store.get('ds_agent_conversation')
+
+  const scroll = () => { log.scrollTop = log.scrollHeight }
+  const addUser = (text) => {
+    const el = document.createElement('div')
+    el.className = 'msg user'
+    el.textContent = text
+    log.append(el)
+    document.getElementById('ag-examples').hidden = true
+    scroll()
+  }
+  const addAssistant = (m) => {
+    const el = document.createElement('div')
+    el.className = `msg assistant agent-msg${['failed', 'stopped', 'action_failed'].includes(m.status) ? ' agent-warn' : ''}`
+    el.innerHTML = `${m.steps?.length ? `<ul class="agent-steps small">${m.steps.map((s) => `<li class="${s.status === 'ok' ? 'ok' : 'warn'}">${esc(s.label)}</li>`).join('')}</ul>` : ''}
+      <div class="agent-text"></div>
+      ${m.listings?.length ? `<div class="grid cards agent-block">${m.listings.map(agentListingCard).join('')}</div>` : ''}
+      ${m.offer?.slots?.length ? `<div class="agent-block"><p class="small">Free with ${esc(m.offer.agent_name)} on ${esc(m.offer.date)} (${esc(m.offer.timezone)}):</p>
+        <div class="slot-grid">${m.offer.slots.slice(0, 16).map((sl) => `<button class="btn ghost small" type="button" data-slot="${esc(sl.label)}" data-date="${esc(m.offer.date)}">${esc(sl.label)}</button>`).join('')}</div></div>` : ''}
+      ${m.action ? `<div class="agent-block">${agentActionHtml(m.action)}</div>` : ''}`
+    el.querySelector('.agent-text').textContent = m.reply ?? m.content ?? ''
+    el.querySelectorAll('[data-slot]').forEach((b) => b.addEventListener('click', () => send(`Please request a viewing at ${b.dataset.slot} on ${b.dataset.date}.`)))
+    bindAction(el)
+    log.append(el)
+    scroll()
+  }
+  const bindAction = (el) => {
+    const card = el.querySelector('[data-action]')
+    if (!card) return
+    card.querySelector('[data-confirm]')?.addEventListener('click', async (e) => {
+      e.target.disabled = true
+      try {
+        const { action } = await api(`/api/agent/actions/${card.dataset.action}/confirm`, { method: 'POST', body: {} })
+        card.outerHTML = agentActionHtml(action)
+        await load()
+      } catch (error) { toast(error.message); e.target.disabled = false }
+    })
+    card.querySelector('[data-cancel]')?.addEventListener('click', async () => {
+      try { const { action } = await api(`/api/agent/actions/${card.dataset.action}/cancel`, { method: 'POST', body: {} }); card.outerHTML = agentActionHtml(action) } catch (error) { toast(error.message) }
+    })
+  }
+  const load = async () => {
+    log.innerHTML = ''
+    if (!conversationId) { log.innerHTML = '<p class="muted small">Tell the assistant what you are looking for: area, budget, bedrooms. It only uses real listings that are on the market.</p>'; return }
+    try {
+      const { messages } = await api(`/api/agent/conversations/${conversationId}`)
+      document.getElementById('ag-examples').hidden = messages.length > 0
+      for (const m of messages) m.role === 'user' ? addUser(m.content) : addAssistant(m)
+    } catch (error) {
+      if (error.status === 404) { conversationId = null; store.set('ds_agent_conversation', null); return load() }
+      throw error
+    }
+  }
+  const send = async (text) => {
+    if (!text.trim()) return
+    const btn = document.getElementById('ag-send')
+    btn.disabled = true
+    if (log.querySelector('p.muted')) log.innerHTML = ''
+    addUser(text)
+    const wait = document.createElement('div')
+    wait.className = 'msg assistant thinking'
+    wait.textContent = 'Working on it: searching and checking…'
+    log.append(wait)
+    scroll()
+    try {
+      const r = await api('/api/agent/messages', { method: 'POST', body: { message: text, conversationId } })
+      conversationId = r.conversationId
+      store.set('ds_agent_conversation', conversationId)
+      wait.remove()
+      addAssistant(r)
+    } catch (error) {
+      wait.className = 'msg error'
+      wait.textContent = error.message
+      if (error.status === 404) { conversationId = null; store.set('ds_agent_conversation', null) }
+    } finally { btn.disabled = false; input.focus() }
+  }
+  form.addEventListener('submit', (e) => { e.preventDefault(); const text = input.value; input.value = ''; send(text) })
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit() } })
+  document.getElementById('ag-examples').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => send(b.textContent)))
+  document.getElementById('ag-new').addEventListener('click', () => { conversationId = null; store.set('ds_agent_conversation', null); document.getElementById('ag-examples').hidden = false; load(); input.focus() })
+  await load()
+}
+
 // ---------- sellers ----------
 async function renderSellerHome() {
   const [{ profile }, { properties }, { viewings }, { notifications }] = await Promise.all([api('/api/me'), api('/api/properties?scope=mine'), api('/api/me/listing-viewings'), api('/api/notifications?limit=5')])
@@ -2154,7 +2270,7 @@ const ROUTES = {
     integrations: () => renderIntegrations(), automations: () => renderAutomations()
   },
   buyer: {
-    dashboard: () => renderBuyerHome(), requirements: () => renderRequirements(), recommendations: () => renderRecommendations(),
+    dashboard: () => renderBuyerHome(), assistant: () => renderAgentAssistant(), requirements: () => renderRequirements(), recommendations: () => renderRecommendations(),
     browse: (p, params) => (p[1] ? renderPropertyDetail(p[1]) : renderProperties(params)), 'my-viewings': () => renderMyViewings(),
     'my-tenancies': () => renderMyTenancies(), notifications: () => renderNotifications()
   },

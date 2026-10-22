@@ -5,7 +5,7 @@ See [docs/architecture.md](docs/architecture.md) for roles, assignment, matching
 
 | Role | Signs up as | Can do |
 | --- | --- | --- |
-| Buyer (or tenant) | Buyer — open signup | Save requirements (with consent to matching), see recommendations with reasons, browse listings, request viewings in their agent's calendar, give feedback, see their tenancy and rent |
+| Buyer (or tenant) | Buyer — open signup | Ask the AI Assistant in their own words (searches real listings, explains matches, checks free times, prepares a viewing request they confirm), save requirements (with consent to matching), see recommendations with reasons, browse listings, request viewings in their agent's calendar, give feedback, see their tenancy and rent |
 | Seller (or landlord) | Seller — open signup | Create draft listings, publish / unpublish / archive them, see how many buyers match (never who), see viewings of their listings, see their rentals and record rent received |
 | Agent | Agent — needs the team access code on the hosted copy | Their assigned leads (plus a claimable pool), AI lead entry, all published listings, matches, viewings, feedback, rent management, integrations, the seven automations, the activity log |
 
@@ -123,6 +123,7 @@ The skill's test-connection step, for proving Gmail · Send Email works before a
 | `public/feedback.html`, `public/feedback.js` | The buyer's feedback page: standalone, loads no app code |
 | `server/leads/` | Lead rules, storage, duplicates, activity |
 | `server/assistant/` | AI lead extraction and the confirm/cancel flow |
+| `server/agent/` | The buyer's AI Assistant: bounded agent loop (`runtime.js`), fixed tools over existing services (`tools.js`), decision format (`prompt.js`), budget/BHK parsing (`parse.js`) |
 | `public/` | The web pages (the Connect popup uses `/vendor/viasocket-apps-browser.js`, served from the installed package) |
 | `scripts/live-gmail-check.js` | The live Gmail check above |
 | `test/` | Automated tests |

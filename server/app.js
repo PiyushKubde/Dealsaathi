@@ -15,6 +15,7 @@ import { createMailer } from './mail.js'
 import { requestPasswordReset, resetPassword, sendVerification, verificationState, verifyEmail } from './accounts.js'
 import { acceptInvite, createInvite, previewInvite, revokeInvites, unlinkParty } from './rent/service.js'
 import { cancelAction, confirmAction, handleMessage, loadConversation } from './assistant/service.js'
+import { cancelAgentAction, confirmAgentAction, handleAgentMessage, loadAgentConversation } from './agent/runtime.js'
 import { createAuth } from './auth.js'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { disconnect, listUserConnections, reconnectDetails, requireViasocket, saveConnection, viasocketError } from './integrations/service.js'
@@ -145,6 +146,15 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   app.post('/api/me/viewings', allow('buyer'), async (req, res) => { limitBuyer(req); res.status(201).json(await requestViewing(db, vs, req.user, req.body || {})) })
   app.post('/api/me/viewings/:id/cancel', allow('buyer'), async (req, res) => res.json(await buyerCancel(db, vs, req.user, parseUuid(req.params.id, 'viewing'))))
   app.post('/api/me/viewings/:id/feedback', allow('buyer'), (req, res) => res.json(submitBuyerFeedback(db, req.user, parseUuid(req.params.id, 'viewing'), req.body || {})))
+  // ---- The buyer's AI assistant (server/agent): a bounded loop over fixed, permission-checked tools. A viewing
+  // request it prepares is sent only by the buyer's Confirm, and booked only when their agent confirms.
+  app.post('/api/agent/messages', allow('buyer'), async (req, res) => {
+    const { conversationId, message } = req.body || {}
+    res.json(await handleAgentMessage(db, ai, vs, req.user, { conversationId: conversationId == null ? null : parseUuid(conversationId, 'conversation'), message }))
+  })
+  app.get('/api/agent/conversations/:id', allow('buyer'), (req, res) => res.json(loadAgentConversation(db, req.user, parseUuid(req.params.id, 'conversation'))))
+  app.post('/api/agent/actions/:id/confirm', allow('buyer'), async (req, res) => res.json(await confirmAgentAction(db, vs, req.user, parseUuid(req.params.id, 'action'))))
+  app.post('/api/agent/actions/:id/cancel', allow('buyer'), (req, res) => res.json(cancelAgentAction(db, req.user, parseUuid(req.params.id, 'action'))))
   // ---- Tenants and landlords: their tenancies (read), landlords record payments they received
   app.get('/api/me/tenancies', allow('buyer', 'seller'), (req, res) => res.json({ tenancies: partyTenancies(db, req.user) }))
   app.get('/api/me/tenancies/:id', allow('buyer', 'seller'), (req, res) => res.json(partyTenancy(db, req.user, parseId(req.params.id))))

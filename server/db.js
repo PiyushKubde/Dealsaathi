@@ -571,6 +571,71 @@ const MIGRATIONS = [
     detail     TEXT,
     created_at TEXT NOT NULL
   );
+  `,
+  // 8: the AI agent (buyer assistant). New tables only: the lead assistant's conversations/messages/actions are
+  // untouched. state holds the conversation's working context (listings and free times shown), never secrets.
+  `
+  CREATE TABLE agent_conversations (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    state      TEXT NOT NULL DEFAULT '{}',
+    busy_until TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX agent_conversations_user ON agent_conversations(user_id, updated_at);
+
+  CREATE TABLE agent_messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+    role            TEXT NOT NULL CHECK (role IN ('user','assistant')),
+    content         TEXT NOT NULL,
+    payload         TEXT,
+    created_at      TEXT NOT NULL
+  );
+  CREATE INDEX agent_messages_conversation ON agent_messages(conversation_id, id);
+
+  -- One row per user message: how the bounded loop ended. Steps say which tools ran, never message text.
+  CREATE TABLE agent_runs (
+    id              TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status          TEXT NOT NULL CHECK (status IN ('running','answered','needs_input','awaiting_approval','stopped','failed')),
+    stop_reason     TEXT,
+    decisions       INTEGER NOT NULL DEFAULT 0,
+    tool_calls      INTEGER NOT NULL DEFAULT 0,
+    started_at      TEXT NOT NULL,
+    finished_at     TEXT
+  );
+  CREATE TABLE agent_steps (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    n          INTEGER NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('decision','tool')),
+    tool       TEXT,
+    status     TEXT NOT NULL CHECK (status IN ('ok','error','invalid','refused')),
+    error_code TEXT,
+    label      TEXT,
+    ms         INTEGER,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX agent_steps_run ON agent_steps(run_id, n);
+
+  -- A consequential step the agent prepared; only the user's Confirm runs it, at most once.
+  CREATE TABLE agent_actions (
+    id              TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type            TEXT NOT NULL CHECK (type IN ('request_viewing')),
+    params          TEXT NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('awaiting_confirmation','executing','completed','failed','cancelled','expired')),
+    result          TEXT,
+    error           TEXT,
+    expires_at      TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+  );
+  CREATE INDEX agent_actions_user ON agent_actions(user_id, status);
   `
 ]
 
