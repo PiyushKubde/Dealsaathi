@@ -146,6 +146,12 @@ dl.details dd { margin: 0; }
 .agent-block { margin-top: .6rem; white-space: normal; }
 .agent-action { max-width: 460px; }
 
+/* Buyer interest: the "I'm interested" control and request rows (My requests, Buyer interest) */
+.interest-control { display: inline-flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.interest-control .notice { flex-basis: 100%; margin: .35rem 0 0; }
+.request-row { justify-content: space-between; align-items: flex-start; }
+.request-main { flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
+
 .toast { position: fixed; bottom: 1.25rem; right: 1.25rem; background: var(--text); color: var(--bg); padding: .65rem 1rem; border-radius: 8px; box-shadow: var(--shadow); max-width: 360px; font-size: .9rem; }
 dialog { border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; max-width: 420px; background: var(--surface); color: var(--text); }
 dialog::backdrop { background: rgba(0, 0, 0, .4); }

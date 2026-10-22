@@ -294,6 +294,7 @@ async function renderLeadDetail(id) {
       <section class="card"><h2>Activity</h2><ul class="timeline">${activities.map((a) => `<li><strong>${esc(a.summary)}</strong>
         <div class="small muted">${esc(fmtDateTime(a.created_at))} · via ${esc(VIA_LABELS[a.via] || a.via)}${a.user_name ? ` · by ${esc(a.user_name)}` : ''}</div></li>`).join('')}</ul></section>
     </div>
+    ${l.buyer_user_id ? '<section class="card" style="margin-top:1rem"><h2>Buyer interest</h2><p class="small muted">Listings this buyer said they are interested in, newest first.</p><div id="lead-interests"><p class="muted">Loading…</p></div></section>' : ''}
     <section class="card" style="margin-top:1rem"><h2>Matching properties</h2><p class="small muted">Kept up to date automatically when this lead’s requirements or any listing change.</p><div id="lead-matches"><p class="muted">Loading…</p></div></section>
     <section class="card" style="margin-top:1rem"><h2>Transfer to another agent</h2><form id="transfer" class="row"><label for="t-agent" class="sr-only">Agent</label><select id="t-agent" name="agentId" style="width:auto"><option value="">Choose an agent</option></select><button class="btn ghost" type="submit">Transfer</button></form><div id="transfer-msg"></div></section>
     <section class="card" style="margin-top:1rem"><h2>Email this lead</h2>
@@ -301,6 +302,7 @@ async function renderLeadDetail(id) {
       <div id="followup"><p class="muted">Loading…</p></div></section>`
   const followupBox = document.getElementById('followup')
   renderLeadMatches(l, document.getElementById('lead-matches'), (preset) => renderFollowupPanel(l, followupBox, preset))
+  if (l.buyer_user_id) renderInterestList(document.getElementById('lead-interests'), `/api/leads/${l.id}/interests`, { showLead: false })
   renderFollowupPanel(l, followupBox)
   api('/api/agents').then(({ agents }) => {
     document.getElementById('t-agent').insertAdjacentHTML('beforeend', agents.filter((a) => a.id !== session.user.id).map((a) => `<option value="${esc(a.id)}">${esc(a.name)}${a.agency ? ` (${esc(a.agency)})` : ''}</option>`).join(''))
@@ -704,8 +706,8 @@ function renderLocked() {
 const ROLE_LABEL = { buyer: 'Buyer', seller: 'Seller', agent: 'Agent' }
 /** Each role's sections, in nav order. The server enforces the same split; this only decides what is shown. */
 const NAV = {
-  agent: [['dashboard', 'Dashboard'], ['notifications', 'Notifications'], ['assistant', 'Add with AI'], ['leads', 'Leads'], ['pool', 'Lead pool'], ['properties', 'Properties'], ['viewings', 'Viewings'], ['feedback', 'Feedback'], ['rent', 'Rent'], ['integrations', 'Integrations'], ['automations', 'Automations'], ['activity', 'Activity log'], ['profile', 'Profile']],
-  buyer: [['dashboard', 'Home'], ['assistant', 'Assistant'], ['requirements', 'My requirements'], ['recommendations', 'Recommendations'], ['browse', 'Browse listings'], ['my-viewings', 'My viewings'], ['my-tenancies', 'My rent'], ['notifications', 'Notifications']],
+  agent: [['dashboard', 'Dashboard'], ['notifications', 'Notifications'], ['assistant', 'Add with AI'], ['leads', 'Leads'], ['pool', 'Lead pool'], ['interests', 'Buyer interest'], ['properties', 'Properties'], ['viewings', 'Viewings'], ['feedback', 'Feedback'], ['rent', 'Rent'], ['integrations', 'Integrations'], ['automations', 'Automations'], ['activity', 'Activity log'], ['profile', 'Profile']],
+  buyer: [['dashboard', 'Home'], ['assistant', 'Assistant'], ['requirements', 'My requirements'], ['recommendations', 'Recommendations'], ['browse', 'Browse listings'], ['my-requests', 'My requests'], ['my-viewings', 'My viewings'], ['my-tenancies', 'My rent'], ['notifications', 'Notifications']],
   seller: [['dashboard', 'Home'], ['my-listings', 'My listings'], ['listing-viewings', 'Viewings'], ['my-tenancies', 'My rentals'], ['notifications', 'Notifications'], ['profile', 'Profile']]
 }
 function renderNav() {
@@ -1285,6 +1287,7 @@ async function renderPropertyDetail(id) {
     return
   }
   const { property: p, matches = [], otherBuyers = 0 } = data
+  const mine = role === 'buyer' ? await openInterests() : new Map()
   const rows = [['Listing ID', `<span class="code">${esc(p.code)}</span>`], ['Listing', esc(P_LABELS.listing_type[p.listing_type])], ['Type', esc(label('property_type', p.property_type))],
     ['Bedrooms', dash(p.bedrooms)], ['Price', esc(priceText(p))], ['Where', esc([p.locality, p.city].filter(Boolean).join(', '))], ...(p.address != null || p.mine ? [['Address', dash(p.address)]] : []),
     ['Area', p.area_sqft ? `${esc(p.area_sqft)} sq ft` : dash(null)], ['Amenities', p.amenities.length ? esc(p.amenities.join(', ')) : dash(null)],
@@ -1295,7 +1298,7 @@ async function renderPropertyDetail(id) {
     p.listing_state === 'published' ? '<button class="btn ghost" data-state="unpublish">Unpublish</button>' : '',
     p.listing_state !== 'archived' && p.published_at && !p.is_sample ? '<button class="btn ghost" data-state="archive">Archive</button>' : '',
     !p.published_at || p.is_sample ? '<button class="btn danger" id="p-delete">Delete</button>' : ''
-  ].join('') : role === 'buyer' ? '<button class="btn primary" id="p-view">Request a viewing</button>' : ''
+  ].join('') : role === 'buyer' ? `${interestControl(p.id, mine.get(p.id), 'normal')}<button class="btn ghost" id="p-view">Request a viewing</button>` : ''
   const matchSection = role === 'buyer' ? '' : role === 'seller' ? `<section class="card"><h2>Interest</h2>
       <p>${p.listing_state === 'published' ? `<strong>${otherBuyers}</strong> saved buyer requirement${otherBuyers === 1 ? ' matches' : 's match'} this listing.` : 'Publish the listing to match it against buyers’ requirements.'}</p>
       <p class="small muted">Buyers’ identities stay private; your agent contacts interested buyers.</p></section>`
@@ -1331,6 +1334,7 @@ async function renderPropertyDetail(id) {
     try { await api(`/api/properties/${p.id}`, { method: 'DELETE' }); toast('Listing deleted.'); location.hash = base } catch (error) { toast(error.message) }
   })
   document.getElementById('p-view')?.addEventListener('click', () => viewingRequestPanel(p, document.getElementById('p-extra')))
+  wireInterest(main)
 }
 
 const listBase = () => (session.user.role === 'seller' ? '#/my-listings' : '#/properties')
@@ -2029,14 +2033,15 @@ async function renderRecommendations() {
   main.innerHTML = '<div class="page-head"><div><h1>Recommendations</h1><p>Published properties that fit your saved requirements, best first, with the reasons. Updated automatically.</p></div><button class="btn ghost" id="rec-refresh">Refresh</button></div><div id="recs"><p class="muted">Loading…</p></div>'
   const box = document.getElementById('recs')
   const load = async () => {
-    const { recommendations, state } = await api('/api/me/recommendations')
+    const [{ recommendations, state }, mine] = await Promise.all([api('/api/me/recommendations'), openInterests()])
     box.innerHTML = state === 'no_requirements' ? '<div class="notice info">Save <a href="#/requirements">your requirements</a> first.</div>'
       : state === 'no_consent' ? '<div class="notice warn">Matching is off until you agree to it in <a href="#/requirements">My requirements</a>.</div>'
         : recommendations.length ? `<div class="grid cards">${recommendations.map((r) => `<article class="card"><h2><a href="#/browse/${r.property.id}">${esc(r.property.title)}</a></h2>
             <div><strong>${esc(priceText(r.property))}</strong> · ${esc([r.property.locality, r.property.city].filter(Boolean).join(', '))} <span class="badge">${r.score}/100</span></div>
             <ul class="small">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}${(r.gaps || []).map((g) => `<li class="muted">Unknown: ${esc(g)}</li>`).join('')}</ul>
-            <div class="small muted">Matched ${esc(fmtDate(r.matchedAt))}</div><a class="btn ghost small" href="#/browse/${r.property.id}">View and request a viewing</a></article>`).join('')}</div>`
+            <div class="small muted">Matched ${esc(fmtDate(r.matchedAt))}</div><div class="row">${interestControl(r.property.id, mine.get(r.property.id))}<a class="btn ghost small" href="#/browse/${r.property.id}">View and request a viewing</a></div></article>`).join('')}</div>`
           : '<p class="muted">Nothing matches yet. You will be notified when a new listing fits.</p>'
+    wireInterest(box)
   }
   document.getElementById('rec-refresh').addEventListener('click', () => load().catch((e) => toast(e.message)))
   await load()
@@ -2062,7 +2067,145 @@ function viewingRequestPanel(p, box) {
   })
 }
 
-const BV_STATUS = { requested: '<span class="pill pill-setup">Waiting for your agent</span>', booked: '<span class="pill pill-on">Booked</span>', completed: '<span class="pill pill-on">Took place</span>', no_show: '<span class="pill pill-off">Missed</span>', cancelled: '<span class="pill pill-off">Cancelled</span>', failed: '<span class="pill pill-err">Not booked</span>', unknown: '<span class="pill pill-setup">Being checked</span>', booking: '<span class="pill pill-setup">Booking…</span>' }
+// ---------- buyer interest ("I'm interested") and My requests ----------
+const INTEREST_STATUS = { open: '<span class="pill pill-on">Interested</span>', withdrawn: '<span class="pill pill-off">Withdrawn</span>', closed: '<span class="pill pill-off">Closed</span>' }
+const interestDone = () => '<span class="pill pill-on">Interested</span> <a class="small" href="#/my-requests">View in My requests</a>'
+
+/** The "I'm interested" control for one listing: its state when a request is already open, else the button. */
+const interestControl = (propertyId, open, size = 'small') => `<span class="interest-control" data-interest="${Number(propertyId)}">${open ? interestDone() : `<button class="btn primary${size === 'small' ? ' small' : ''}" data-interest-btn>I’m interested</button>`}</span>`
+
+/** One click, one request: the button is disabled while it is sent, and only the server's answer changes the state. */
+function wireInterest(root) {
+  root.querySelectorAll('[data-interest]').forEach((box) => {
+    const btn = box.querySelector('[data-interest-btn]')
+    if (!btn) return
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return
+      btn.disabled = true
+      const text = btn.textContent
+      btn.textContent = 'Sending…'
+      box.querySelector('.notice')?.remove()
+      try {
+        const r = await api('/api/me/interests', { method: 'POST', body: { propertyId: Number(box.dataset.interest) } })
+        box.innerHTML = interestDone()
+        toast(!r.created ? 'You already told your agent you are interested.' : r.interest.agentName ? `${r.interest.agentName} has been told you are interested.` : 'Saved. An agent will pick up your request soon.')
+      } catch (error) {
+        btn.disabled = false
+        btn.textContent = text
+        box.insertAdjacentHTML('beforeend', error.code === 'no_requirements'
+          ? `<div class="notice info small">${esc(error.message)} <a href="#/requirements">Save my requirements</a></div>`
+          : `<div class="notice err small">${esc(error.message)}</div>`)
+      }
+    })
+  })
+}
+/** The buyer's open requests by listing id; empty when they cannot be read (the server still refuses duplicates). */
+const openInterests = () => api('/api/me/interests').then(({ interests }) => new Map(interests.filter((i) => i.status === 'open').map((i) => [i.property.id, i]))).catch(() => new Map())
+
+function requestItem(i) {
+  const p = i.property
+  const actions = [
+    i.next.type === 'request_viewing' ? `<a class="btn ghost small" href="#/browse/${p.id}">Request a viewing</a>` : '',
+    i.next.type === 'give_feedback' ? '<a class="btn primary small" href="#/my-viewings">Give feedback</a>' : '',
+    ['await_viewing', 'viewing_booked'].includes(i.next.type) ? '<a class="btn ghost small" href="#/my-viewings">My viewings</a>' : '',
+    i.status === 'open' ? '<button class="btn ghost small" data-withdraw>Withdraw</button>' : '',
+    i.next.type === 'express_again' ? '<button class="btn primary small" data-again>Show interest again</button>' : ''
+  ].join('')
+  return `<li data-i="${esc(i.id)}" data-p="${Number(p.id)}"><div class="row request-row"><div class="request-main">
+      <strong>${p.available ? `<a href="#/browse/${p.id}">${esc(p.title)}</a>` : esc(p.title)}</strong> ${INTEREST_STATUS[i.status] || esc(i.status)}
+      <div class="small">${[p.price != null ? priceText(p) : '', p.area].filter(Boolean).map(esc).join(' · ')}${i.agentName ? ` · Agent: ${esc(i.agentName)}` : ''}</div>
+      ${i.viewing ? `<div class="small">Viewing: ${esc(i.viewing.when)} ${BV_STATUS[i.viewing.status] || esc(i.viewing.status)}</div>` : ''}
+      ${i.note ? `<div class="small muted">Your note: ${esc(i.note)}</div>` : ''}
+      ${i.status === 'closed' && i.closedReason ? `<div class="small muted">Reason: ${esc(i.closedReason)}</div>` : ''}
+      <div class="small"><strong>Next:</strong> ${esc(i.next.label)}</div>
+      <div class="small muted">Sent ${esc(fmtDate(i.createdAt))}${i.status === 'withdrawn' && i.withdrawnAt ? ` · withdrawn ${esc(fmtDate(i.withdrawnAt))}` : ''}${i.status === 'closed' && i.closedAt ? ` · closed ${esc(fmtDate(i.closedAt))}` : ''}</div>
+    </div>${actions ? `<div class="row">${actions}</div>` : ''}</div><div class="i-msg"></div></li>`
+}
+
+async function renderMyRequests() {
+  main.innerHTML = `<div class="page-head"><div><h1>My requests</h1><p>Listings you told your agent you are interested in, with any viewing of them. Your agent contacts you; a request is not an offer or a booking.</p></div></div>
+    <section class="card"><div id="mr" aria-live="polite"><p class="muted">Loading…</p></div></section>`
+  const box = document.getElementById('mr')
+  const busy = (b, on) => { b.disabled = on; b.dataset.text ??= b.textContent; b.textContent = on ? 'Sending…' : b.dataset.text }
+  const fail = (li, error) => { li.querySelector('.i-msg').innerHTML = `<div class="notice err small">${esc(error.message)}</div>` }
+  const load = async () => {
+    let interests
+    try {
+      ({ interests } = await api('/api/me/interests'))
+    } catch (error) {
+      box.innerHTML = `<div class="notice err">${esc(error.message)}</div><button class="btn ghost small" id="mr-retry">Try again</button>`
+      document.getElementById('mr-retry').addEventListener('click', () => { box.innerHTML = '<p class="muted">Loading…</p>'; load() })
+      return
+    }
+    box.innerHTML = interests.length ? `<ul class="timeline">${interests.map(requestItem).join('')}</ul>`
+      : '<p class="muted">No requests yet. Press <strong>I’m interested</strong> on a listing in <a href="#/browse">Browse listings</a> or <a href="#/recommendations">Recommendations</a>, and your agent is told.</p>'
+    box.querySelectorAll('[data-withdraw]').forEach((b) => b.addEventListener('click', async () => {
+      const li = b.closest('[data-i]')
+      if (!(await confirmDialog('Withdraw this request?', 'Your agent sees that you are no longer interested. Viewings you requested are not cancelled: manage them in My viewings.', 'Withdraw'))) return
+      busy(b, true)
+      try { await api(`/api/me/interests/${encodeURIComponent(li.dataset.i)}/withdraw`, { method: 'POST', body: {} }); toast('Request withdrawn.'); await load() } catch (error) { busy(b, false); fail(li, error) }
+    }))
+    box.querySelectorAll('[data-again]').forEach((b) => b.addEventListener('click', async () => {
+      const li = b.closest('[data-i]')
+      busy(b, true)
+      try { await api('/api/me/interests', { method: 'POST', body: { propertyId: Number(li.dataset.p) } }); toast('Your agent has been told you are interested again.'); await load() } catch (error) { busy(b, false); fail(li, error) }
+    }))
+  }
+  await load()
+}
+
+/** The interest requests on an agent's leads (all of them, or one lead's), with Close for open ones. */
+async function renderInterestList(box, url, { showLead = true } = {}) {
+  let interests
+  try {
+    ({ interests } = await api(url))
+  } catch (error) {
+    box.innerHTML = `<div class="notice err">${esc(error.message)}</div><button class="btn ghost small" data-retry>Try again</button>`
+    box.querySelector('[data-retry]').addEventListener('click', () => { box.innerHTML = '<p class="muted">Loading…</p>'; renderInterestList(box, url, { showLead }) })
+    return
+  }
+  box.innerHTML = interests.length ? `<ul class="timeline">${interests.map((i) => {
+    const p = i.property
+    const off = p.status && (p.status !== 'available' || p.listing_state !== 'published')
+    return `<li data-i="${esc(i.id)}"><div class="row request-row"><div class="request-main">
+      ${showLead ? `<a href="#/leads/${Number(i.lead.id)}"><strong>${esc(i.lead.name || 'Buyer')}</strong></a> · ` : ''}<a href="#/properties/${Number(p.id)}">${esc(p.title)}</a> ${INTEREST_STATUS[i.status] || esc(i.status)}${off ? ' <span class="badge">No longer available</span>' : ''}
+      <div class="small">${[p.price != null ? priceText(p) : '', p.area].filter(Boolean).map(esc).join(' · ')}</div>
+      ${i.viewing ? `<div class="small">Viewing: ${esc(i.viewing.when)} ${BV_STATUS[i.viewing.status] || esc(i.viewing.status)}</div>` : ''}
+      ${i.note ? `<div class="small">Buyer’s note: ${esc(i.note)}</div>` : ''}
+      ${i.status === 'closed' && i.closedReason ? `<div class="small muted">Closed: ${esc(i.closedReason)}</div>` : ''}
+      <div class="small muted">Sent ${esc(fmtDateTime(i.createdAt))}</div></div>
+      ${i.status === 'open' ? '<div class="row"><a class="btn ghost small" href="#/viewings?lead=' + Number(i.lead.id) + '">Schedule viewing</a><button class="btn ghost small" data-close>Close</button></div>' : ''}</div><div class="i-msg"></div></li>`
+  }).join('')}</ul>` : '<p class="muted">No buyer interest here yet.</p>'
+  box.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => {
+    const li = b.closest('[data-i]')
+    const msg = li.querySelector('.i-msg')
+    msg.innerHTML = `<form class="row" style="margin-top:.5rem"><label for="ic-${esc(li.dataset.i)}" class="sr-only">Reason (optional)</label>
+      <input id="ic-${esc(li.dataset.i)}" name="reason" maxlength="200" placeholder="Reason (optional), shown to the buyer" style="flex:1;min-width:12rem">
+      <button class="btn primary small">Close request</button></form>`
+    msg.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const btn = e.target.querySelector('button')
+      if (btn.disabled) return
+      btn.disabled = true
+      try {
+        await api(`/api/interests/${encodeURIComponent(li.dataset.i)}/close`, { method: 'POST', body: { reason: e.target.elements.reason.value } })
+        toast('Request closed.')
+        renderInterestList(box, url, { showLead })
+      } catch (error) { btn.disabled = false; msg.insertAdjacentHTML('beforeend', `<div class="notice err small">${esc(error.message)}</div>`) }
+    })
+  }))
+}
+
+async function renderAgentInterests(params) {
+  const status = ['open', 'withdrawn', 'closed', 'all'].includes(params.get('status')) ? params.get('status') : 'open'
+  main.innerHTML = `<div class="page-head"><div><h1>Buyer interest</h1><p>Listings your buyers said they are interested in. Only you, as their agent, see these; the listing’s owner is not told who they are.</p></div>
+    <div class="row"><label for="bi-status" class="sr-only">Show</label><select id="bi-status" style="width:auto">${[['open', 'Open'], ['withdrawn', 'Withdrawn'], ['closed', 'Closed'], ['all', 'All']].map(([v, l]) => `<option value="${v}"${v === status ? ' selected' : ''}>${l}</option>`).join('')}</select></div></div>
+    <section class="card"><div id="bi" aria-live="polite"><p class="muted">Loading…</p></div></section>`
+  document.getElementById('bi-status').addEventListener('change', (e) => { location.hash = `#/interests?status=${e.target.value}` })
+  await renderInterestList(document.getElementById('bi'), `/api/interests?status=${status}`)
+}
+
+const BV_STATUS = { requested:'<span class="pill pill-setup">Waiting for your agent</span>', booked: '<span class="pill pill-on">Booked</span>', completed: '<span class="pill pill-on">Took place</span>', no_show: '<span class="pill pill-off">Missed</span>', cancelled: '<span class="pill pill-off">Cancelled</span>', failed: '<span class="pill pill-err">Not booked</span>', unknown: '<span class="pill pill-setup">Being checked</span>', booking: '<span class="pill pill-setup">Booking…</span>' }
 async function renderMyViewings() {
   main.innerHTML = '<div class="page-head"><div><h1>My viewings</h1><p>Request one from any listing’s page. After a viewing, tell us what you thought: it improves your matches.</p></div></div><section class="card"><div id="mv"><p class="muted">Loading…</p></div></section>'
   const box = document.getElementById('mv')
@@ -2286,7 +2429,7 @@ const ROUTES = {
   agent: {
     dashboard: () => renderDashboard(), notifications: () => renderNotifications(), profile: () => renderProfile(), assistant: () => renderAssistant(),
     leads: (p, params) => (p[1] === 'new' ? renderLeadForm(null) : p[1] && p[2] === 'edit' ? renderLeadForm(p[1]) : p[1] ? renderLeadDetail(p[1]) : renderLeads(params)),
-    pool: () => renderPool(), activity: (p, params) => renderActivity(params),
+    pool: () => renderPool(), interests: (p, params) => renderAgentInterests(params), activity: (p, params) => renderActivity(params),
     properties: (p, params) => (p[1] === 'new' ? renderPropertyForm(null) : p[1] && p[2] === 'edit' ? renderPropertyForm(p[1]) : p[1] ? renderPropertyDetail(p[1]) : renderProperties(params)),
     viewings: (p, params) => renderViewings(params), feedback: () => renderFeedback(),
     rent: (p) => (p[1] === 'new' ? renderTenancyForm(null) : p[1] && p[2] === 'edit' ? renderTenancyForm(p[1]) : p[1] ? renderTenancy(p[1]) : renderRent()),
@@ -2295,7 +2438,7 @@ const ROUTES = {
   buyer: {
     dashboard: () => renderBuyerHome(), assistant: () => renderAgentAssistant(), requirements: () => renderRequirements(), recommendations: () => renderRecommendations(),
     browse: (p, params) => (p[1] ? renderPropertyDetail(p[1]) : renderProperties(params)), 'my-viewings': () => renderMyViewings(),
-    'my-tenancies': () => renderMyTenancies(), notifications: () => renderNotifications()
+    'my-requests': () => renderMyRequests(), 'my-tenancies': () => renderMyTenancies(), notifications: () => renderNotifications()
   },
   seller: {
     dashboard: () => renderSellerHome(), profile: () => renderProfile(), notifications: () => renderNotifications(),

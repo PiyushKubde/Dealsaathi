@@ -26,6 +26,7 @@ import { listReminders, setReminderStatus } from './automations/reminders.js'
 import { bookViewing, buyerCancel, buyerSlots, cancelViewing, draftViewing, freeSlots, getViewing, listBuyerViewings, listListingViewings, listViewings, requestViewing, rescheduleViewing, resendConfirmation, setOutcome } from './viewings/service.js'
 import { baseUrl, listFeedback, onViewingCompleted, publicFeedback, resendFeedback, submitBuyerFeedback, submitFeedback } from './feedback/service.js'
 import { checkDueNow, createTenancy, partyTenancies, partyTenancy, recordManualPayment, rentOverview, tenancyDetail, updateTenancy, waiveDue } from './rent/service.js'
+import { closeInterest, expressInterest, leadInterests, listAgentInterests, listBuyerInterests, withdrawInterest } from './interests/service.js'
 import { addSampleProperties, createProperty, deleteProperty, dismissMatch, listProperties, listPropertyMatches, setAgentForSeller, setListingState, updateProperty, viewProperty } from './properties/service.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -146,6 +147,14 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   app.post('/api/me/viewings', allow('buyer'), async (req, res) => { limitBuyer(req); res.status(201).json(await requestViewing(db, vs, req.user, req.body || {})) })
   app.post('/api/me/viewings/:id/cancel', allow('buyer'), async (req, res) => res.json(await buyerCancel(db, vs, req.user, parseUuid(req.params.id, 'viewing'))))
   app.post('/api/me/viewings/:id/feedback', allow('buyer'), (req, res) => res.json(submitBuyerFeedback(db, req.user, parseUuid(req.params.id, 'viewing'), req.body || {})))
+  // "I'm interested" (server/interests): on the buyer's own lead; only their assigned agent is told and can see it.
+  app.post('/api/me/interests', allow('buyer'), (req, res) => {
+    const { propertyId, note } = req.body || {}
+    const out = expressInterest(db, req.user, { propertyId, note })
+    res.status(out.created ? 201 : 200).json(out)
+  })
+  app.get('/api/me/interests', allow('buyer'), (req, res) => res.json({ interests: listBuyerInterests(db, req.user) }))
+  app.post('/api/me/interests/:id/withdraw', allow('buyer'), (req, res) => res.json(withdrawInterest(db, req.user, parseUuid(req.params.id, 'interest'))))
   // ---- The buyer's AI assistant (server/agent): a bounded loop over fixed, permission-checked tools. A viewing
   // request it prepares is sent only by the buyer's Confirm, and booked only when their agent confirms.
   app.post('/api/agent/messages', allow('buyer'), async (req, res) => {
@@ -168,6 +177,9 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   app.get('/api/agents', allow('agent'), (req, res) => res.json({ agents: listAgents(db) }))
   app.get('/api/pool', allow('agent'), (req, res) => res.json({ leads: unassignedPool(db) }))
   app.post('/api/pool/:id/claim', allow('agent'), (req, res) => res.json({ lead: claimLead(db, req.user, parseId(req.params.id)) }))
+  app.get('/api/interests', allow('agent'), (req, res) => res.json({ interests: listAgentInterests(db, req.user, { status: req.query.status || 'open' }) }))
+  app.post('/api/interests/:id/close', allow('agent'), (req, res) => res.json(closeInterest(db, req.user, parseUuid(req.params.id, 'interest'), req.body || {})))
+  app.get('/api/leads/:id/interests', allow('agent'), (req, res) => res.json({ interests: leadInterests(db, req.user, parseId(req.params.id)) }))
   app.get('/api/events', allow('agent'), (req, res) => res.json({ events: listEvents(db, { agentId: req.user.id, status: ['failed', 'pending', 'done'].includes(req.query.status) ? req.query.status : null }) }))
   app.get('/api/deliveries', allow('agent'), (req, res) => res.json({ deliveries: listDeliveries(db, req.user.id) }))
 

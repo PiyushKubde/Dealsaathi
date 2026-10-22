@@ -636,6 +636,28 @@ const MIGRATIONS = [
     updated_at      TEXT NOT NULL
   );
   CREATE INDEX agent_actions_user ON agent_actions(user_id, status);
+  `,
+
+  // 9: a buyer's interest in a listing, on their own lead (never a new lead). Rows are kept as history: withdrawn
+  // or closed ones stay, and at most one per lead and listing is open at a time. Viewings are not copied here; the
+  // buyer's viewings of the listing are looked up when the request is shown. New table only.
+  `
+  CREATE TABLE property_interests (
+    id            TEXT PRIMARY KEY,
+    lead_id       INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    buyer_user_id TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    property_id   INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+    status        TEXT    NOT NULL DEFAULT 'open' CHECK (status IN ('open','withdrawn','closed')),
+    note          TEXT,
+    closed_reason TEXT,
+    created_at    TEXT    NOT NULL,
+    updated_at    TEXT    NOT NULL,
+    withdrawn_at  TEXT,
+    closed_at     TEXT
+  );
+  CREATE UNIQUE INDEX property_interests_one_open ON property_interests(lead_id, property_id) WHERE status = 'open';
+  CREATE INDEX property_interests_buyer ON property_interests(buyer_user_id, created_at);
+  CREATE INDEX property_interests_lead ON property_interests(lead_id, status);
   `
 ]
 

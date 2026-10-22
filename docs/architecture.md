@@ -1,6 +1,6 @@
 # DealSaathi architecture: a three-sided marketplace
 
-## Data model (schema v6; v7 and v8 add tables, see below and server/db.js)
+## Data model (schema v6; v7, v8 and v9 add tables, see below and server/db.js)
 
 ```
 users (role: buyer | seller | agent)
@@ -82,6 +82,28 @@ that is not met (location, budget, BHK, type, rejected listings/areas) and expla
 gaps, never guessed. A stored match carries a **fingerprint** of the listing facts it rests on; only a new match, or one
 whose facts changed, is announced, so the same unchanged match never reaches anyone twice. A match that stops fitting
 is **withdrawn** with the reason; a dismissed match stays dismissed.
+
+## Buyer interest and My requests (`server/interests/`, schema v9)
+
+"I'm interested" on a listing (its page and Recommendations) records a `property_interests` row on the buyer's
+**own lead** (the one their saved requirements created): interest never creates a lead, so a buyer without saved
+requirements is asked to save them first (409 `no_requirements`). The buyer is always the signed-in user; ids sent by
+the client are ignored. Only listings the buyer may see and that are published and available are accepted (404
+otherwise, as for the listing itself).
+
+- **One open request per lead and listing**, enforced by a partial unique index: repeated or concurrent clicks return
+  the same request (200, `created: false`) and queue nothing. Withdrawn and closed requests are kept as history; showing
+  interest again opens a new one.
+- **Statuses**: `open` → `withdrawn` (the buyer) or `closed` (their agent, with an optional reason the buyer sees).
+- **Who is told**: `interest.created` notifies the buyer's **assigned agent**, in the app only, once per lead, listing and
+  day (so withdrawing and re-expressing cannot flood them). The listing's owner and the listing's agent, when someone
+  else, are not told and cannot see it. A request on an unassigned lead waits; the agent who claims the lead sees it.
+- **Viewings are not copied**: a request shows the buyer's latest viewing of that listing from the viewings table, and
+  the next step is worked out from the request, the listing's availability and that viewing.
+- **Endpoints**: buyers `POST/GET /api/me/interests`, `POST /api/me/interests/:id/withdraw`; agents `GET /api/interests`
+  (`?status=open|withdrawn|closed|all`), `GET /api/leads/:id/interests` (the lead's assigned agent only, 404 otherwise)
+  and `POST /api/interests/:id/close`. Pages: buyer **My requests**, agent **Buyer interest** and the lead page.
+- Not in this phase: offers, applications, payments, agreements or any transaction status.
 
 ## The buyer's AI Assistant (agent runtime, `server/agent/`)
 

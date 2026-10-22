@@ -5,9 +5,9 @@ See [docs/architecture.md](docs/architecture.md) for roles, assignment, matching
 
 | Role | Signs up as | Can do |
 | --- | --- | --- |
-| Buyer (or tenant) | Buyer — open signup | Ask the AI Assistant in their own words (searches real listings, explains matches, checks free times, prepares a viewing request they confirm), save requirements (with consent to matching), see recommendations with reasons, browse listings, request viewings in their agent's calendar, give feedback, see their tenancy and rent |
+| Buyer (or tenant) | Buyer — open signup | Ask the AI Assistant in their own words (searches real listings, explains matches, checks free times, prepares a viewing request they confirm), save requirements (with consent to matching), see recommendations with reasons, browse listings, say "I'm interested" and follow it in My requests, request viewings in their agent's calendar, give feedback, see their tenancy and rent |
 | Seller (or landlord) | Seller — open signup | Create draft listings, publish / unpublish / archive them, see how many buyers match (never who), see viewings of their listings, see their rentals and record rent received |
-| Agent | Agent — needs the team access code on the hosted copy | Their assigned leads (plus a claimable pool), AI lead entry, all published listings, matches, viewings, feedback, rent management, integrations, the seven automations, the activity log |
+| Agent | Agent — needs the team access code on the hosted copy | Their assigned leads (plus a claimable pool), their buyers' interest in listings, AI lead entry, all published listings, matches, viewings, feedback, rent management, integrations, the seven automations, the activity log |
 
 Every rule is enforced on the server (`server/access.js`); pages only hide what a role cannot use.
 
@@ -117,6 +117,7 @@ The skill's test-connection step, for proving Gmail · Send Email works before a
 | `server/notifications/service.js` | In-app notifications and external delivery claims |
 | `server/properties/service.js` | Listings: ownership, publish / unpublish / archive, scoring |
 | `server/viewings/service.js` | Free times, booking, moving, cancelling and outcomes of viewings |
+| `server/interests/service.js` | Buyer interest ("I'm interested"), My requests, the agent's view and closing |
 | `server/feedback/service.js` | Feedback links (only a hash is stored), the public answer, preference updates |
 | `server/rent/service.js` | Tenancies, monthly rent, reminder stages, payment links, payment verification, audit |
 | `server/time.js` | Time zone conversions for viewings and rent |

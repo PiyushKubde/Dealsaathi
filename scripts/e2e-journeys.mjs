@@ -170,6 +170,88 @@ await agentPage.waitForTimeout(400)
 check('agent: activity log lists processed events', /Lead created/.test(await agentPage.textContent('main')) && /Listing published/.test(await agentPage.textContent('main')))
 await shot(agentPage, '52-agent-activity')
 
+// ---- Interest: the buyer says "I'm interested", follows it in My requests; only their agent is told and sees it
+const interestPid = t.db.prepare("SELECT id FROM properties WHERE title = '2 BHK in Baner'").get().id
+const hillsPid = t.db.prepare("SELECT id FROM properties WHERE title = '2 BHK near Baner hills'").get().id
+await go(buyerPage, `#/browse/${interestPid}`)
+await buyerPage.waitForSelector('[data-interest-btn]')
+await buyerPage.click('[data-interest-btn]')
+await buyerPage.waitForSelector('[data-interest] a[href="#/my-requests"]')
+check('interest: the button becomes the request state, with a link to My requests', /Interested/.test(await buyerPage.textContent('[data-interest]')))
+check('interest: the success message names the agent', /Asha Broker has been told/.test(await buyerPage.textContent('#toast')), await buyerPage.textContent('#toast'))
+await go(buyerPage, `#/browse/${interestPid}`)
+await buyerPage.waitForSelector('[data-interest]')
+check('interest: after a reload the listing shows the open request, no second button', !(await buyerPage.$('[data-interest-btn]')) && /Interested/.test(await buyerPage.textContent('[data-interest]')))
+await go(buyerPage, '#/recommendations')
+await buyerPage.waitForSelector(`[data-interest="${hillsPid}"] [data-interest-btn]`)
+await buyerPage.dblclick(`[data-interest="${hillsPid}"] [data-interest-btn]`)
+await buyerPage.waitForSelector(`[data-interest="${hillsPid}"] a[href="#/my-requests"]`)
+await idle()
+check('interest: a double click on a recommendation makes one request', t.db.prepare('SELECT COUNT(*) AS n FROM property_interests WHERE property_id = ?').get(hillsPid).n === 1)
+await go(buyerPage, '#/my-requests')
+await buyerPage.waitForSelector('#mr [data-i]')
+const reqText = await buyerPage.textContent('#mr')
+check('my requests: both listings, their state and the next step', /2 BHK in Baner/.test(reqText) && /2 BHK near Baner hills/.test(reqText) && /Next:/.test(reqText) && /Agent: Asha Broker/.test(reqText), reqText.slice(0, 200))
+await shot(buyerPage, '54-buyer-my-requests')
+await buyerPage.click(`[data-p="${hillsPid}"] [data-withdraw]`)
+await buyerPage.waitForSelector('#confirm-dialog[open]')
+await buyerPage.click('#confirm-ok')
+await buyerPage.waitForSelector(`[data-p="${hillsPid}"] [data-again]`)
+check('my requests: withdrawn, with Show interest again', /Withdrawn/.test(await buyerPage.textContent(`[data-p="${hillsPid}"]`)))
+await buyerPage.click(`[data-p="${hillsPid}"] [data-again]`)
+await buyerPage.waitForFunction((pid) => [...document.querySelectorAll(`#mr [data-p="${pid}"]`)].some((li) => li.querySelector('[data-withdraw]')), hillsPid)
+check('my requests: interest shown again opens a new request, the old one is kept', t.db.prepare("SELECT group_concat(status, ',') AS s FROM (SELECT status FROM property_interests WHERE property_id = ? ORDER BY created_at)").get(hillsPid).s === 'withdrawn,open')
+await idle()
+await go(agentPage, '#/notifications')
+await agentPage.waitForTimeout(400)
+const interestNoteText = await agentPage.textContent('main')
+check('agent: told in the app once per listing that the buyer is interested', (interestNoteText.match(/Rahul Sharma is interested in 2 BHK near Baner hills/g) || []).length === 1 && /Rahul Sharma is interested in 2 BHK in Baner/.test(interestNoteText))
+check('interest: no email or other channel used', t.db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'interest' AND channel != 'in_app'").get().n === 0)
+const rahulLead = t.db.prepare('SELECT id FROM leads WHERE buyer_user_id IS NOT NULL').get().id
+await go(agentPage, `#/leads/${rahulLead}`)
+await agentPage.waitForSelector('#lead-interests [data-i]')
+check('agent: the lead page lists the buyer’s interest', /2 BHK in Baner/.test(await agentPage.textContent('#lead-interests')))
+await go(agentPage, '#/interests')
+await agentPage.waitForSelector('#bi [data-i]')
+await agentPage.locator('#bi [data-i]', { hasText: 'Baner hills' }).locator('[data-close]').click()
+await agentPage.fill('#bi .i-msg input[name=reason]', 'Seller is not taking offers yet')
+await agentPage.click('#bi .i-msg form button')
+await agentPage.waitForFunction(() => !/Baner hills/.test(document.querySelector('#bi')?.textContent || 'Baner hills'))
+check('agent: closing a request removes it from the open list', !/Baner hills/.test(await agentPage.textContent('#bi')))
+await shot(agentPage, '55-agent-buyer-interest')
+await go(buyerPage, '#/my-requests')
+await buyerPage.waitForSelector('#mr [data-i]')
+check('my requests: the buyer sees the closure and its reason', /Closed/.test(await buyerPage.textContent('#mr')) && /Seller is not taking offers yet/.test(await buyerPage.textContent('#mr')))
+await go(sellerPage, `#/my-listings/${hillsPid}`)
+await sellerPage.waitForTimeout(400)
+check('seller: the listing page reveals no interested buyer', !/Rahul|is interested in|Interested<|My requests/.test(await sellerPage.innerHTML('main')))
+await go(sellerPage, '#/notifications')
+await sellerPage.waitForTimeout(300)
+check('seller: not told about buyer interest', !/interested/i.test(await sellerPage.textContent('main')))
+// A buyer without saved requirements is sent to save them first; no lead is created for them.
+const newBuyerPage = await newPage()
+await register(newBuyerPage, { role: 'buyer', name: 'Meera Joshi', email: 'meera@example.com' })
+const leadsBefore = t.db.prepare('SELECT COUNT(*) AS n FROM leads').get().n
+await go(newBuyerPage, `#/browse/${interestPid}`)
+await newBuyerPage.waitForSelector('[data-interest-btn]')
+await newBuyerPage.click('[data-interest-btn]')
+await newBuyerPage.waitForSelector('[data-interest] .notice')
+const noReq = await newBuyerPage.textContent('[data-interest]')
+check('interest: without requirements the buyer is asked to save them, nothing pretends to succeed', /Save your requirements first/.test(noReq) && await newBuyerPage.isVisible('[data-interest] a[href="#/requirements"]') && await newBuyerPage.isEnabled('[data-interest-btn]'), noReq)
+check('interest: no lead or request was created for them', t.db.prepare('SELECT COUNT(*) AS n FROM leads').get().n === leadsBefore && t.db.prepare("SELECT COUNT(*) AS n FROM property_interests i JOIN users u ON u.id = i.buyer_user_id WHERE u.email = 'meera@example.com'").get().n === 0)
+await go(newBuyerPage, '#/my-requests')
+await newBuyerPage.waitForTimeout(300)
+check('my requests: an empty state that says what to do', /No requests yet/.test(await newBuyerPage.textContent('#mr')))
+await newBuyerPage.route('**/api/me/interests', (r) => r.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ error: { code: 'too_many_requests', message: 'The server is busy. Try again.' } }) }))
+await go(newBuyerPage, '#/my-requests')
+await newBuyerPage.waitForSelector('#mr-retry')
+check('my requests: a failed load shows the error and a retry', /server is busy/.test(await newBuyerPage.textContent('#mr')))
+await newBuyerPage.unroute('**/api/me/interests')
+await newBuyerPage.click('#mr-retry')
+await newBuyerPage.waitForFunction(() => /No requests yet/.test(document.querySelector('#mr')?.textContent || ''))
+check('my requests: retry loads the page', true)
+await newBuyerPage.context().close()
+
 // ---- Viewing: agent turns on the scheduler; buyer requests; agent confirms; completed; buyer feedback
 const cal = (await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: await vs.serviceIdFor('google-calendar'), authId: vs.connectApp(t.db.prepare("SELECT id FROM users WHERE role = 'agent'").get().id, 'google-calendar') }, as: { cookie: (await agentPage.context().cookies()).map((c) => `${c.name}=${c.value}`).join('; ') } }))
 check('agent: calendar connected (stand-in)', cal.status === 201, String(cal.status))
@@ -211,6 +293,10 @@ check('buyer: feedback lowers the budget', /4[,.]?7/.test(String(t.db.prepare('S
 await go(buyerPage, `#/recommendations`)
 await buyerPage.waitForTimeout(500)
 check('buyer: the rejected listing is no longer recommended', !/2 BHK in Baner<\/a>/.test(await buyerPage.innerHTML('#recs')))
+await go(buyerPage, '#/my-requests')
+await buyerPage.waitForSelector(`#mr [data-p="${interestPid}"]`)
+const afterVisit = await buyerPage.textContent(`#mr [data-p="${interestPid}"]`)
+check('my requests: shows the viewing that took place, and no feedback prompt once it was given', /Took place/.test(afterVisit) && !/how the viewing went/.test(afterVisit) && !(await buyerPage.$(`#mr [data-p="${interestPid}"] a[href="#/my-viewings"].primary`)), afterVisit.slice(0, 200))
 
 // ---- Buyer's AI assistant (scripted decisions, real tools): search, explain, free times, confirm a request
 const NULLS = { property_id: null, property_ids: null, date: null, start: null, location: null, bedrooms: null, budget_max_amount: null, budget_max_unit: null, budget_min_amount: null, budget_min_unit: null, listing_type: null, property_type: null, limit: null }
@@ -368,8 +454,11 @@ const XSS = '<img src=x onerror="window.__xss=1">'
 const asAgent = { cookie: (await agentPage2.context().cookies()).map((c) => `${c.name}=${c.value}`).join('; ') }
 await t.call('/api/properties', { method: 'POST', body: { property: { title: `Flat ${XSS}`, listing_type: 'sale', property_type: 'apartment', bedrooms: 2, price: 4600000, city: 'Pune', locality: 'Baner', notes: XSS, amenities: [XSS] } }, as: asAgent })
 await t.call('/api/leads', { method: 'POST', body: { lead: { full_name: `Evil ${XSS}`, customer_type: 'buyer', phone: '9000000099', notes: XSS, preferred_location: 'Baner, Pune', bedrooms: 2, budget_max: 5000000 } }, as: asAgent })
+const asBuyer = { cookie: (await buyerPage.context().cookies()).map((c) => `${c.name}=${c.value}`).join('; ') }
+const xssInterestPid = t.db.prepare("SELECT id FROM properties WHERE title LIKE 'Flat <img%'").get().id
+check('xss: interest with a hostile note is accepted as text', (await t.call('/api/me/interests', { method: 'POST', body: { propertyId: xssInterestPid, note: XSS }, as: asBuyer })).status === 201)
 await idle()
-const xssPages = [[agentPage2, ['#/properties', '#/leads', '#/notifications', '#/activity', '#/dashboard']], [buyerPage, ['#/browse', '#/recommendations', '#/notifications']], [sellerPage, ['#/dashboard', '#/notifications']]]
+const xssPages = [[agentPage2, ['#/properties', '#/leads', '#/notifications', '#/activity', '#/dashboard', '#/interests']], [buyerPage, ['#/browse', '#/recommendations', '#/notifications', '#/my-requests']], [sellerPage, ['#/dashboard', '#/notifications']]]
 for (const [page, hrefs] of xssPages) {
   for (const h of hrefs) {
     await go(page, h)
@@ -403,7 +492,7 @@ await anon.waitForTimeout(400)
 check('sign-in: wrong password gives a readable error', /do not match/.test(await anon.textContent('#auth-error')))
 
 // ---- Phone width: no horizontal scroll on the main pages of each role
-for (const [who, page, hrefs] of [['buyer', buyerPage, ['#/dashboard', '#/assistant', '#/recommendations', '#/my-viewings']], ['seller', sellerPage, ['#/dashboard', '#/my-listings']], ['agent', agentPage2, ['#/dashboard', '#/leads', '#/viewings', '#/activity']]]) {
+for (const [who, page, hrefs] of [['buyer', buyerPage, ['#/dashboard', '#/assistant', '#/recommendations', '#/my-requests', '#/my-viewings']], ['seller', sellerPage, ['#/dashboard', '#/my-listings']], ['agent', agentPage2, ['#/dashboard', '#/leads', '#/interests', '#/viewings', '#/activity']]]) {
   await page.setViewportSize({ width: 390, height: 800 })
   for (const h of hrefs) {
     await go(page, h)

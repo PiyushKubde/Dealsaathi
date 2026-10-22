@@ -6,6 +6,7 @@ import { matchLead, matchProperty } from '../matching/engine.js'
 import { claimExternal, finishExternal, notifyInApp } from '../notifications/service.js'
 import { finishRun, getSetting, startRun } from '../automations/store.js'
 import { describeInZone } from '../time.js'
+import { createInterestHandler } from '../interests/service.js'
 
 const inr = (n) => (n >= 1e7 ? `₹${+(n / 1e7).toFixed(2)} Cr` : n >= 1e5 ? `₹${+(n / 1e5).toFixed(2)} L` : `₹${Number(n).toLocaleString('en-IN')}`)
 const userRow = (db, id) => (id ? db.prepare('SELECT id, name, email, role FROM users WHERE id = ?').get(id) : null)
@@ -200,6 +201,7 @@ export function createHandlers({ db, notifyThrough, leadAlertMessage }) {
     'viewing.cancelled': onViewing,
     'viewing.completed': onViewing,
     'feedback.submitted': onFeedback,
+    'interest.created': createInterestHandler({ db, notifyInApp }),
     'rent.payment_recorded': onRent,
     'rent.reminder_sent': onRent,
     'tenancy.linked': onRent
