@@ -11,7 +11,7 @@ import { requestViewing } from '../viewings/service.js'
 import { describeInZone, todayIn } from '../time.js'
 import { parseRequest } from './parse.js'
 import { DECISION_SCHEMA, systemPrompt } from './prompt.js'
-import { TOOLS, ToolInputError, toolError, toolsFor } from './tools.js'
+import { MAX_SLOTS, TOOLS, ToolInputError, toolError, toolsFor } from './tools.js'
 
 export const LIMITS = { decisions: 6, toolCalls: 4, errors: 2, aiTimeoutMs: 30000, toolTimeoutMs: 20000, turnMs: 60000, message: 1000, reply: 1500 }
 const RATE = { max: 20, windowMs: 10 * 60 * 1000 }
@@ -73,7 +73,7 @@ function contextFor(db, ctx, turn) {
     today: todayIn('Asia/Kolkata'), timezone: 'Asia/Kolkata', helping: 'a buyer',
     conversation: history.map((m) => ({ role: m.role, text: m.content.slice(0, 600) })),
     listings_shown_earlier: stillVisible(db, ctx.user, ctx.state.shown).slice(0, 10),
-    free_times_shown_earlier: (ctx.state.offers || []).map((o) => ({ property_id: o.property_id, title: o.title, date: o.date, timezone: o.timezone, agent_name: o.agent_name, free_times: o.slots.slice(0, 16) })),
+    free_times_shown_earlier: (ctx.state.offers || []).map((o) => ({ property_id: o.property_id, title: o.title, date: o.date, timezone: o.timezone, agent_name: o.agent_name, free_times: o.slots.slice(0, MAX_SLOTS) })),
     criteria_in_use: ctx.state.criteria || null,
     viewing_request_waiting_for_buyer_confirm: pending ? describeAction(db, pending) : null,
     this_turn: { buyer_message: turn.message, read_from_message: parseRequest(turn.message), steps: turn.observations },

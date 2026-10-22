@@ -2148,7 +2148,7 @@ async function renderAgentAssistant() {
       <div class="agent-text"></div>
       ${m.listings?.length ? `<div class="grid cards agent-block">${m.listings.map(agentListingCard).join('')}</div>` : ''}
       ${m.offer?.slots?.length ? `<div class="agent-block"><p class="small">Free with ${esc(m.offer.agent_name)} on ${esc(m.offer.date)} (${esc(m.offer.timezone)}):</p>
-        <div class="slot-grid">${m.offer.slots.slice(0, 16).map((sl) => `<button class="btn ghost small" type="button" data-slot="${esc(sl.label)}" data-date="${esc(m.offer.date)}">${esc(sl.label)}</button>`).join('')}</div></div>` : ''}
+        <div class="slot-grid">${m.offer.slots.slice(0, 48).map((sl) => `<button class="btn ghost small" type="button" data-slot="${esc(sl.label)}" data-date="${esc(m.offer.date)}">${esc(sl.label)}</button>`).join('')}</div></div>` : ''}
       ${m.action ? `<div class="agent-block">${agentActionHtml(m.action)}</div>` : ''}`
     el.querySelector('.agent-text').textContent = m.reply ?? m.content ?? ''
     el.querySelectorAll('[data-slot]').forEach((b) => b.addEventListener('click', () => send(`Please request a viewing at ${b.dataset.slot} on ${b.dataset.date}.`)))

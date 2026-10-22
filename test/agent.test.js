@@ -89,6 +89,8 @@ test('the target scenario: search real listings, rank and explain, check the cal
     assert.equal(seenByModel.matched, 2)
     for (const hidden of [ids.draft, ids.sold, ids.rent]) assert.ok(!JSON.stringify(seenByModel).includes(`"id":${hidden},`), `listing ${hidden} is never offered`)
     assert.ok(ai.calls.every((c) => c.responseType === 'json_schema' && c.jsonSchema.strict), 'every step asks for a strict structured decision')
+    assert.match(ai.calls[0].prompt, /cannot share other people's information/, 'the model is told it only sees this buyer\'s data')
+    assert.match(ai.calls[0].prompt, /Refer to listings by their title, never by id/)
     assert.doesNotMatch(JSON.stringify(ai.calls), /neha\.buyer@example\.com|7 Hidden Lane/, 'no email or address is sent to the AI')
     assert.ok(ai.users.every((u) => u === buyer.id), 'AI calls are made for the signed-in buyer')
     assert.deepEqual((await b('/api/me')).body.profile.requirements.budget_max, saved.budget_max, 'saved requirements are not changed by a search')
@@ -403,5 +405,19 @@ test('review: cancelling an expired request reports its state instead of an erro
     const c = await b(`/api/agent/actions/${p.body.action.id}/cancel`, { method: 'POST', body: {} })
     assert.equal(c.status, 200)
     assert.equal(c.body.action.status, 'expired')
+  } finally { await t.close() }
+})
+
+test('live finding: every free time of the day reaches the model and the page (none cut off after 16)', async () => {
+  const day = addDays(todayIn('Asia/Kolkata'), 2)
+  const ai = fakeAi()
+  const { t, say, ids } = await setup({ ai })
+  try {
+    ai.queue.push(tool('get_viewing_slots', { property_id: ids.best, date: day }), ask('Which time?'))
+    const r = await say(`listing ${ids.best} on ${day}`)
+    const seen = JSON.parse(ai.calls[1].message).this_turn.steps[0].result
+    assert.ok(seen.total_free > 16, `the stand-in day has ${seen.total_free} free times`)
+    assert.equal(seen.free_times.length, seen.total_free, 'the model sees all of them, so it never guesses the range')
+    assert.equal(r.body.offer.slots.length, seen.total_free, 'and the page can offer all of them')
   } finally { await t.close() }
 })

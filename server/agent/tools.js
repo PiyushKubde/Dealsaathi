@@ -20,6 +20,8 @@ export class ToolInputError extends Error {
 }
 
 export const ACTION_TTL_MS = 30 * 60 * 1000
+// Every free time of a day (a full day at 30-minute steps is 48): a shorter list made the model guess the range.
+export const MAX_SLOTS = 48
 const CALENDAR_READS = { max: 20, windowMs: 15 * 60 * 1000 }
 const calendarReads = new Map() // userId → times: each check reads the agent's real calendar through viaSocket
 function calendarRead(userId) {
@@ -228,7 +230,7 @@ export const TOOLS = {
       const r = await buyerSlots(ctx.db, ctx.vs, ctx.user, { propertyId: a.property_id, date: a.date })
       const slots = r.slots.map((s) => ({ start: s.start, label: s.label }))
       ctx.state.offers = [{ property_id: a.property_id, title: listing.title, date: a.date, timezone: r.timezone, agent_name: r.agentName, slots, at: now() }, ...(ctx.state.offers || [])].slice(0, 3)
-      return { property_id: a.property_id, title: listing.title, agent_name: r.agentName, date: a.date, timezone: r.timezone, free_times: slots.slice(0, 16), total_free: slots.length }
+      return { property_id: a.property_id, title: listing.title, agent_name: r.agentName, date: a.date, timezone: r.timezone, free_times: slots.slice(0, MAX_SLOTS), total_free: slots.length }
     },
     label: (a, r) => `Checked ${r.agent_name}'s calendar on ${a.date}: ${r.total_free} free time${r.total_free === 1 ? '' : 's'}`
   },
