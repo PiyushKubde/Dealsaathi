@@ -1,23 +1,43 @@
 // System email (verification links, password resets) sent through one Gmail connection the operator designates:
 // SYSTEM_MAIL_CONNECTION is the DealSaathi id of an agent's connected Gmail account (shown on the Integrations page).
 // Without it, these emails cannot be sent, and the app says so instead of pretending.
-import { gmailInput, readGmailResult, runOnce } from './integrations/run.js'
+import { gmailInput, readGmailResult, requireActiveConnection, runOnce, ACTIONS } from './integrations/run.js'
 import { claimExternal, finishExternal } from './notifications/service.js'
 
 export function createMailer({ db, vs, connectionId = null }) {
   // A function lets the operator's choice be read at send time (tests set it after connecting an account).
   const current = () => { const v = typeof connectionId === 'function' ? connectionId() : connectionId; return v == null || v === '' ? null : Number(v) }
+  let checked = null // { id, ok, reason }: the result of check() for the configured connection
 
   function sender() {
     const id = current()
     if (!id || !Number.isInteger(id)) return { ok: false, reason: 'No system email account is set on this server (SYSTEM_MAIL_CONNECTION).' }
     if (!vs.configured) return { ok: false, reason: 'viaSocket is not configured on this server.' }
     const row = db.prepare("SELECT c.id, c.user_id FROM connections c JOIN users u ON u.id = c.user_id WHERE c.id = ? AND u.role = 'agent'").get(id)
-    if (!row) return { ok: false, reason: 'The system email account (SYSTEM_MAIL_CONNECTION) is not an agent’s connected Gmail account.' }
+    if (!row) return { ok: false, reason: `SYSTEM_MAIL_CONNECTION=${id} is not a connection of an agent account.` }
+    if (checked?.id === id && !checked.ok) return { ok: false, reason: checked.reason }
     return { ok: true, userId: row.user_id, connectionId: row.id }
   }
 
+  /**
+   * Confirms with viaSocket that the configured connection is a Gmail connection that exists and has not expired.
+   * Run at start-up; until then (and in tests) the database checks above apply.
+   */
+  async function check() {
+    const s = sender()
+    if (!s.ok) return { available: false, reason: s.reason }
+    try {
+      await requireActiveConnection(db, vs, s.userId, s.connectionId, ACTIONS.gmail_send_email)
+      checked = { id: s.connectionId, ok: true }
+      return { available: true, reason: null, connectionId: s.connectionId }
+    } catch (error) {
+      checked = { id: s.connectionId, ok: false, reason: `SYSTEM_MAIL_CONNECTION=${s.connectionId}: ${error.message}` }
+      return { available: false, reason: checked.reason }
+    }
+  }
+
   return {
+    check,
     status: () => { const s = sender(); return { available: s.ok, reason: s.ok ? null : s.reason } },
 
     /**

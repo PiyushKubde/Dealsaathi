@@ -200,3 +200,25 @@ test('migration 7 removes tenancy links that were made from an unverified email,
     db.close()
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+test('the system mailer is on only for an agent’s Gmail connection that viaSocket confirms is live', async () => {
+  const { createMailer } = await import('../server/mail.js')
+  const { t, vs, holder } = await setup()
+  try {
+    const gmailId = holder.id
+    const slack = (await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: await vs.serviceIdFor('slack'), authId: vs.connectSlack(t.user.id) } })).body.connection
+    assert.equal((await createMailer({ db: t.db, vs, connectionId: gmailId }).check()).available, true)
+    const notGmail = await createMailer({ db: t.db, vs, connectionId: slack.id }).check()
+    assert.equal(notGmail.available, false)
+    assert.match(notGmail.reason, /Gmail/)
+    assert.match((await createMailer({ db: t.db, vs, connectionId: 999 }).check()).reason, /not a connection of an agent/)
+    const buyer = signedInUser(t.db, { name: 'Buyer', role: 'buyer' })
+    const buyerConn = t.db.prepare("INSERT INTO connections (user_id, service_id, app_name, auth_id, created_at, updated_at) VALUES (?, 'rowo0bqrhj5g', 'Gmail', 'auth_buyer', ?, ?)").run(buyer.id, new Date().toISOString(), new Date().toISOString()).lastInsertRowid
+    assert.equal((await createMailer({ db: t.db, vs, connectionId: Number(buyerConn) }).check()).available, false, 'only an agent’s account')
+    // A connection removed on viaSocket: off, and status() says why.
+    vs.state.connections[t.user.id] = vs.state.connections[t.user.id].filter((c) => !/gmail|rowo0bqrhj5g/i.test(JSON.stringify(c)))
+    const gone = createMailer({ db: t.db, vs, connectionId: gmailId })
+    assert.equal((await gone.check()).available, false)
+    assert.equal(gone.status().available, false)
+  } finally { await t.close() }
+})

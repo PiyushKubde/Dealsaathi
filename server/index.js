@@ -51,6 +51,8 @@ app.listen(port, host, () => {
   console.log(`Database: ${hosted ? 'DATA_DIR/dealsaathi.db' : databaseFile()} schema v${db.prepare('SELECT version FROM schema_version').get().version} (${count('users')} users ${JSON.stringify(roles)}, ${count('leads')} leads, ${count('properties')} properties, ${count('connections')} connections, ${count('domain_events')} events)`)
   console.log(viasocketConfigured ? 'viaSocket: configured (AI, integrations, automations).' : 'viaSocket: not configured (add the viaSocket values). Leads still work.')
   console.log(`Scheduler: ${scheduler.available ? 'on (/tasks/automations, every 15 minutes)' : 'off (no CRON_SECRET; reminders run only with "Run check now")'}${interrupted ? `; ${interrupted} interrupted run(s) marked unknown` : ''}`)
-  console.log(`System email: ${app.locals.mailer.status().available ? 'on' : `off (${app.locals.mailer.status().reason})`}. Backup download: ${(process.env.BACKUP_TOKEN || '').length >= 32 ? 'on' : 'off (no BACKUP_TOKEN)'}.`)
+  console.log(`Backup download: ${(process.env.BACKUP_TOKEN || '').length >= 32 ? 'on' : 'off (no BACKUP_TOKEN)'}.`)
+  // Checked with viaSocket (a Gmail connection that exists and has not expired), not just read from the settings.
+  app.locals.mailer.check().then((m) => console.log(`System email: ${m.available ? `on (Gmail connection #${m.connectionId}, live on viaSocket)` : `off (${m.reason})`}`))
   console.log(`Access: ${auth.mode === 'locked' ? 'LOCKED until APP_PASSWORD is set' : hosted ? 'accounts; buyers and sellers sign up openly, new agents need the team access code' : 'accounts (this computer only)'}`)
 })
