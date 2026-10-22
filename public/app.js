@@ -53,7 +53,7 @@ function lookingFor(l) {
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '')
 const typeBadge = (t) => (t ? `<span class="badge ${esc(t)}">${esc(label('customer_type', t))}</span>` : '')
-const VIA_LABELS = { buyer: 'the buyer (their own account)', assignment: 'assignment', form: 'form', assistant: 'AI assistant (confirmed by you)', gmail: 'Gmail via viaSocket', matching: 'automatic matching', automation: 'Buyer Follow-Up Reminders', calendar: 'Google Calendar via viaSocket', feedback: 'the buyer’s feedback' }
+const VIA_LABELS = { buyer: 'the buyer (their own account)', assignment: 'assignment', form: 'form', assistant: 'AI assistant (confirmed by you)', gmail: 'Gmail via viaSocket', matching: 'automatic matching', automation: 'Buyer Follow-Up Reminders', calendar: 'Google Calendar via viaSocket', feedback: 'the buyer’s feedback', agent: 'the buyer’s agent', listing_owner: 'the listing’s owner' }
 const dash = (v) => (v == null || v === '' ? '<span class="muted">Unknown</span>' : esc(v))
 
 class ApiError extends Error {
@@ -294,7 +294,7 @@ async function renderLeadDetail(id) {
       <section class="card"><h2>Activity</h2><ul class="timeline">${activities.map((a) => `<li><strong>${esc(a.summary)}</strong>
         <div class="small muted">${esc(fmtDateTime(a.created_at))} · via ${esc(VIA_LABELS[a.via] || a.via)}${a.user_name ? ` · by ${esc(a.user_name)}` : ''}</div></li>`).join('')}</ul></section>
     </div>
-    ${l.buyer_user_id ? '<section class="card" style="margin-top:1rem"><h2>Buyer interest</h2><p class="small muted">Listings this buyer said they are interested in, newest first.</p><div id="lead-interests"><p class="muted">Loading…</p></div></section>' : ''}
+    ${l.buyer_user_id ? '<section class="card" style="margin-top:1rem"><h2>Buyer interest</h2><p class="small muted">Listings this buyer said they are interested in, newest first.</p><div id="lead-interests"><p class="muted">Loading…</p></div></section><section class="card" style="margin-top:1rem"><h2>Offers</h2><div id="lead-offers"><p class="muted">Loading…</p></div></section>' : ''}
     <section class="card" style="margin-top:1rem"><h2>Matching properties</h2><p class="small muted">Kept up to date automatically when this lead’s requirements or any listing change.</p><div id="lead-matches"><p class="muted">Loading…</p></div></section>
     <section class="card" style="margin-top:1rem"><h2>Transfer to another agent</h2><form id="transfer" class="row"><label for="t-agent" class="sr-only">Agent</label><select id="t-agent" name="agentId" style="width:auto"><option value="">Choose an agent</option></select><button class="btn ghost" type="submit">Transfer</button></form><div id="transfer-msg"></div></section>
     <section class="card" style="margin-top:1rem"><h2>Email this lead</h2>
@@ -303,6 +303,7 @@ async function renderLeadDetail(id) {
   const followupBox = document.getElementById('followup')
   renderLeadMatches(l, document.getElementById('lead-matches'), (preset) => renderFollowupPanel(l, followupBox, preset))
   if (l.buyer_user_id) renderInterestList(document.getElementById('lead-interests'), `/api/leads/${l.id}/interests`, { showLead: false })
+  if (l.buyer_user_id) renderOfferList(document.getElementById('lead-offers'), `/api/leads/${l.id}/offers`, 'agent', { showLead: false, empty: 'No offers from this buyer yet.' })
   renderFollowupPanel(l, followupBox)
   api('/api/agents').then(({ agents }) => {
     document.getElementById('t-agent').insertAdjacentHTML('beforeend', agents.filter((a) => a.id !== session.user.id).map((a) => `<option value="${esc(a.id)}">${esc(a.name)}${a.agency ? ` (${esc(a.agency)})` : ''}</option>`).join(''))
@@ -706,9 +707,9 @@ function renderLocked() {
 const ROLE_LABEL = { buyer: 'Buyer', seller: 'Seller', agent: 'Agent' }
 /** Each role's sections, in nav order. The server enforces the same split; this only decides what is shown. */
 const NAV = {
-  agent: [['dashboard', 'Dashboard'], ['notifications', 'Notifications'], ['assistant', 'Add with AI'], ['leads', 'Leads'], ['pool', 'Lead pool'], ['interests', 'Buyer interest'], ['properties', 'Properties'], ['viewings', 'Viewings'], ['feedback', 'Feedback'], ['rent', 'Rent'], ['integrations', 'Integrations'], ['automations', 'Automations'], ['activity', 'Activity log'], ['profile', 'Profile']],
+  agent: [['dashboard', 'Dashboard'], ['notifications', 'Notifications'], ['assistant', 'Add with AI'], ['leads', 'Leads'], ['pool', 'Lead pool'], ['interests', 'Buyer interest'], ['offers', 'Offers'], ['properties', 'Properties'], ['viewings', 'Viewings'], ['feedback', 'Feedback'], ['rent', 'Rent'], ['integrations', 'Integrations'], ['automations', 'Automations'], ['activity', 'Activity log'], ['profile', 'Profile']],
   buyer: [['dashboard', 'Home'], ['assistant', 'Assistant'], ['requirements', 'My requirements'], ['recommendations', 'Recommendations'], ['browse', 'Browse listings'], ['my-requests', 'My requests'], ['my-viewings', 'My viewings'], ['my-tenancies', 'My rent'], ['notifications', 'Notifications']],
-  seller: [['dashboard', 'Home'], ['my-listings', 'My listings'], ['listing-viewings', 'Viewings'], ['my-tenancies', 'My rentals'], ['notifications', 'Notifications'], ['profile', 'Profile']]
+  seller: [['dashboard', 'Home'], ['my-listings', 'My listings'], ['listing-viewings', 'Viewings'], ['listing-offers', 'Offers'], ['my-tenancies', 'My rentals'], ['notifications', 'Notifications'], ['profile', 'Profile']]
 }
 function renderNav() {
   const nav = document.getElementById('nav')
@@ -2108,7 +2109,8 @@ function requestItem(i) {
     i.next.type === 'request_viewing' ? `<a class="btn ghost small" href="#/browse/${p.id}">Request a viewing</a>` : '',
     i.next.type === 'give_feedback' ? '<a class="btn primary small" href="#/my-viewings">Give feedback</a>' : '',
     ['await_viewing', 'viewing_booked'].includes(i.next.type) ? '<a class="btn ghost small" href="#/my-viewings">My viewings</a>' : '',
-    i.status === 'open' ? '<button class="btn ghost small" data-withdraw>Withdraw</button>' : '',
+    i.canOffer ? `<button class="btn primary small" data-make-offer>${p.listing_type === 'rent' ? 'Apply to rent' : 'Make an offer'}</button>` : '',
+    i.status === 'open' && !(i.offer && OFFER_ACTIVE.includes(i.offer.status)) ? '<button class="btn ghost small" data-withdraw>Withdraw</button>' : '',
     i.next.type === 'express_again' ? '<button class="btn primary small" data-again>Show interest again</button>' : ''
   ].join('')
   return `<li data-i="${esc(i.id)}" data-p="${Number(p.id)}"><div class="row request-row"><div class="request-main">
@@ -2118,8 +2120,9 @@ function requestItem(i) {
       ${i.note ? `<div class="small muted">Your note: ${esc(i.note)}</div>` : ''}
       ${i.status === 'closed' && i.closedReason ? `<div class="small muted">Reason: ${esc(i.closedReason)}</div>` : ''}
       <div class="small"><strong>Next:</strong> ${esc(i.next.label)}</div>
+      ${i.offer ? buyerOfferHtml(i.offer) : ''}
       <div class="small muted">Sent ${esc(fmtDate(i.createdAt))}${i.status === 'withdrawn' && i.withdrawnAt ? ` · withdrawn ${esc(fmtDate(i.withdrawnAt))}` : ''}${i.status === 'closed' && i.closedAt ? ` · closed ${esc(fmtDate(i.closedAt))}` : ''}</div>
-    </div>${actions ? `<div class="row">${actions}</div>` : ''}</div><div class="i-msg"></div></li>`
+    </div>${actions ? `<div class="row">${actions}</div>` : ''}</div><div class="i-form"></div><div class="i-msg"></div></li>`
 }
 
 async function renderMyRequests() {
@@ -2145,6 +2148,16 @@ async function renderMyRequests() {
       busy(b, true)
       try { await api(`/api/me/interests/${encodeURIComponent(li.dataset.i)}/withdraw`, { method: 'POST', body: {} }); toast('Request withdrawn.'); await load() } catch (error) { busy(b, false); fail(li, error) }
     }))
+    box.querySelectorAll('[data-make-offer]').forEach((b) => b.addEventListener('click', () => {
+      const li = b.closest('[data-i]')
+      const i = interests.find((x) => x.id === li.dataset.i)
+      offerForm(li.querySelector('.i-form'), { rent: i.property.listing_type === 'rent', onSubmit: async (body) => {
+        const r = await api('/api/me/offers', { method: 'POST', body: { propertyId: i.property.id, ...body } })
+        toast(r.created ? `Sent to ${i.agentName || 'your agent'}.` : 'You already have an active offer on this listing.')
+        await load()
+      } })
+    }))
+    wireBuyerOffers(box, load)
     box.querySelectorAll('[data-again]').forEach((b) => b.addEventListener('click', async () => {
       const li = b.closest('[data-i]')
       busy(b, true)
@@ -2205,6 +2218,168 @@ async function renderAgentInterests(params) {
   await renderInterestList(document.getElementById('bi'), `/api/interests?status=${status}`)
 }
 
+// ---------- offers and rental applications (buyer → their agent → the listing's owner) ----------
+const OFFER_STATUS = {
+  submitted: '<span class="pill pill-setup">With the buyer’s agent</span>', forwarded: '<span class="pill pill-setup">With the owner</span>',
+  countered: '<span class="pill pill-setup">Counter-offer</span>', accepted: '<span class="pill pill-on">Accepted in principle</span>',
+  rejected: '<span class="pill pill-off">Declined</span>', withdrawn: '<span class="pill pill-off">Withdrawn</span>',
+  closed_won: '<span class="pill pill-on">Recorded as agreed</span>', closed_lost: '<span class="pill pill-off">Not going ahead</span>'
+}
+const OFFER_ACTIVE = ['submitted', 'forwarded', 'countered', 'accepted']
+const offerWord = (o) => (o.kind === 'application' ? 'rental application' : 'offer')
+const offerAmount = (o) => `${rupees(o.amount)}${o.kind === 'application' ? '/month' : ''}`
+const OFFER_BY = { buyer: 'Buyer', agent: 'Buyer’s agent', owner: 'Owner' }
+const offerHistory = (o) => o.history?.length ? `<details class="small"><summary>History</summary><ul class="small">${o.history.map((e) => `<li>${esc(fmtDateTime(e.at))} · ${esc(OFFER_BY[e.by] || e.by)}: ${esc(String(e.to).replace('_', ' '))}${e.amount ? ` · ${esc(rupees(e.amount))}` : ''}${e.note ? ` · “${esc(e.note)}”` : ''}</li>`).join('')}</ul></details>` : ''
+
+/** The offer as its buyer sees it, with the buyer's own actions. */
+function buyerOfferHtml(o) {
+  return `<div class="offer-box" data-offer="${esc(o.id)}" data-kind="${esc(o.kind)}"><div><strong>Your ${esc(offerWord(o))}:</strong> ${esc(offerAmount(o))} ${OFFER_STATUS[o.status] || esc(o.status)}</div>
+    ${o.moveInDate ? `<div class="small">Move-in: ${esc(o.moveInDate)}</div>` : ''}${o.terms ? `<div class="small muted">Terms: ${esc(o.terms)}</div>` : ''}
+    ${o.status === 'countered' ? `<div class="small"><strong>Counter-offer: ${esc(rupees(o.counterAmount))}${o.kind === 'application' ? '/month' : ''}</strong>${o.ownerNote ? ` · “${esc(o.ownerNote)}”` : ''}</div>` : o.ownerNote ? `<div class="small">Owner’s note: “${esc(o.ownerNote)}”</div>` : ''}
+    ${o.disclaimer ? `<div class="notice info small">${esc(o.disclaimer)}</div>` : ''}
+    <div class="row">${o.status === 'countered' ? '<button class="btn primary small" data-o-accept>Accept the counter-offer</button><button class="btn ghost small" data-o-revise>Answer with a new amount</button>' : ''}
+      ${OFFER_ACTIVE.includes(o.status) ? `<button class="btn ghost small" data-o-withdraw>Withdraw ${esc(offerWord(o))}</button>` : ''}</div>
+    ${offerHistory(o)}<div class="o-msg"></div></div>`
+}
+
+/** The form a buyer fills to make an offer (sale) or apply (rent), or to answer a counter with a new amount. */
+function offerForm(box, { rent, revise = false, onSubmit }) {
+  box.innerHTML = `<form class="stack offer-form" novalidate><p class="small muted">${rent ? 'Your agent passes your application to the owner.' : 'Your agent passes your offer to the owner.'} The owner can accept in principle, decline or counter. Nothing here is a payment or an agreement.</p>
+    <label>${rent ? 'Monthly rent you offer (₹)' : 'Your offer (₹)'}<input name="amount" inputmode="numeric" required placeholder="${rent ? 'e.g. 24000' : 'e.g. 4500000'}"></label>
+    ${rent && !revise ? '<label>Move-in date (optional)<input name="moveInDate" type="date"></label>' : ''}
+    <label>${revise ? 'Note (optional)' : 'Terms or a note for the owner (optional)'}<textarea name="terms" maxlength="500" rows="2"></textarea></label>
+    <div class="row"><button class="btn primary small" data-send>${revise ? 'Send new amount' : rent ? 'Send application' : 'Send offer'}</button><button type="button" class="btn ghost small" data-cancel-form>Cancel</button></div><div class="f-msg"></div></form>`
+  const f = box.querySelector('form')
+  f.querySelector('[data-cancel-form]').addEventListener('click', () => { box.innerHTML = '' })
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const btn = f.querySelector('[data-send]')
+    if (btn.disabled) return
+    const amount = f.elements.amount.value.replace(/[\s,₹]/g, '')
+    if (!/^\d+$/.test(amount) || Number(amount) < 1) { f.querySelector('.f-msg').innerHTML = '<div class="notice err small">Enter the amount in rupees, digits only.</div>'; return }
+    btn.disabled = true
+    try { await onSubmit({ amount: Number(amount), terms: f.elements.terms.value, moveInDate: f.elements.moveInDate?.value || undefined }) } catch (error) { btn.disabled = false; f.querySelector('.f-msg').innerHTML = `<div class="notice err small">${esc(error.message)}</div>` }
+  })
+}
+
+/** Wires a buyer's offer actions inside `root`; `reload` re-renders the page afterwards. */
+function wireBuyerOffers(root, reload) {
+  root.querySelectorAll('[data-offer]').forEach((box) => {
+    const id = box.dataset.offer
+    const msg = box.querySelector('.o-msg')
+    const run = async (btn, path, body, done) => {
+      if (btn.disabled) return
+      btn.disabled = true
+      try { await api(`/api/me/offers/${encodeURIComponent(id)}/${path}`, { method: 'POST', body: body || {} }); toast(done); await reload() } catch (error) { btn.disabled = false; msg.innerHTML = `<div class="notice err small">${esc(error.message)}</div>` }
+    }
+    box.querySelector('[data-o-accept]')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget
+      if (!(await confirmDialog('Accept the counter-offer?', 'It becomes accepted in principle at the counter amount. This is not an agreement or a payment: your agent guides the next steps outside DealSaathi.', 'Accept'))) return
+      run(btn, 'accept-counter', null, 'Counter-offer accepted in principle.')
+    })
+    box.querySelector('[data-o-withdraw]')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget
+      if (!(await confirmDialog('Withdraw this?', 'Your agent and, if it was passed on, the owner are told. You can make a new one later while the listing is available.', 'Withdraw'))) return
+      run(btn, 'withdraw', null, 'Withdrawn.')
+    })
+    box.querySelector('[data-o-revise]')?.addEventListener('click', () => offerForm(msg, { rent: box.dataset.kind === 'application', revise: true, onSubmit: async (body) => { await api(`/api/me/offers/${encodeURIComponent(id)}/revise`, { method: 'POST', body: { amount: body.amount, terms: body.terms } }); toast('Sent to your agent.'); await reload() } }))
+  })
+}
+
+/** An offer as the buyer's agent sees it, with Forward and Close. */
+function agentOfferHtml(o, { showLead = true } = {}) {
+  const rent = o.kind === 'application'
+  return `<li data-ao="${esc(o.id)}"><div class="row request-row"><div class="request-main">
+      ${showLead ? `<a href="#/leads/${Number(o.lead.id)}"><strong>${esc(o.lead.name || 'Buyer')}</strong></a> · ` : ''}<a href="#/properties/${Number(o.property.id)}">${esc(o.property.title)}</a>
+      <div><strong>${rent ? 'Application' : 'Offer'}: ${esc(offerAmount(o))}</strong> ${OFFER_STATUS[o.status] || esc(o.status)}</div>
+      ${o.status === 'countered' ? `<div class="small">Counter-offer: ${esc(rupees(o.counterAmount))}${o.ownerNote ? ` · “${esc(o.ownerNote)}”` : ''}</div>` : ''}
+      ${o.moveInDate ? `<div class="small">Move-in: ${esc(o.moveInDate)}</div>` : ''}${o.terms ? `<div class="small muted">Terms: ${esc(o.terms)}</div>` : ''}
+      <div class="small muted">Owner: ${o.owner ? `${esc(o.owner.name)} (${esc(o.owner.role)})` : 'none in DealSaathi'}</div>
+      ${o.status === 'accepted' ? `<div class="notice info small">${esc(o.disclaimer || '')}${rent ? ' When the tenancy is agreed, set it up in <a href="#/rent/new">Rent</a>.' : ''}</div>` : ''}
+      ${offerHistory(o)}</div>
+      <div class="row">${o.status === 'submitted' ? '<button class="btn primary small" data-ao-forward>Forward to owner</button>' : ''}
+        ${o.status === 'accepted' ? '<button class="btn primary small" data-ao-won>Record as agreed</button>' : ''}
+        ${OFFER_ACTIVE.includes(o.status) ? '<button class="btn ghost small" data-ao-lost>Not going ahead</button>' : ''}</div></div><div class="i-msg"></div></li>`
+}
+
+/** Offers forwarded to the listing's owner (a seller or an agent who owns the listing): accept, decline or counter. */
+function ownerOfferHtml(o) {
+  const rent = o.kind === 'application'
+  return `<li data-oo="${esc(o.id)}"><div class="row request-row"><div class="request-main">
+      <a href="#/${session.user.role === 'seller' ? 'my-listings' : 'properties'}/${Number(o.property.id)}">${esc(o.property.title)}</a> ${OFFER_STATUS[o.status] || esc(o.status)}
+      <div><strong>${rent ? 'Rental application' : 'Offer'}: ${esc(offerAmount(o))}</strong> · from a buyer represented by ${esc(o.buyerAgentName || 'their agent')}</div>
+      ${o.status === 'countered' ? `<div class="small">Your counter-offer: ${esc(rupees(o.counterAmount))}</div>` : ''}
+      ${o.moveInDate ? `<div class="small">Move-in: ${esc(o.moveInDate)}</div>` : ''}${o.terms ? `<div class="small muted">Terms: ${esc(o.terms)}</div>` : ''}
+      ${o.disclaimer ? `<div class="notice info small">${esc(o.disclaimer)}</div>` : ''}
+      ${offerHistory(o)}</div>
+      ${o.status === 'forwarded' ? '<div class="row"><button class="btn primary small" data-oo-accept>Accept in principle</button><button class="btn ghost small" data-oo-counter>Counter</button><button class="btn ghost small" data-oo-reject>Decline</button></div>' : ''}</div><div class="i-msg"></div></li>`
+}
+
+async function renderOfferList(box, url, kind, opts = {}) {
+  let offers
+  try {
+    ({ offers } = await api(url))
+  } catch (error) {
+    box.innerHTML = `<div class="notice err">${esc(error.message)}</div><button class="btn ghost small" data-retry>Try again</button>`
+    box.querySelector('[data-retry]').addEventListener('click', () => { box.innerHTML = '<p class="muted">Loading…</p>'; renderOfferList(box, url, kind, opts) })
+    return
+  }
+  const reload = () => renderOfferList(box, url, kind, opts)
+  box.innerHTML = offers.length ? `<ul class="timeline">${offers.map((o) => (kind === 'owner' ? ownerOfferHtml(o) : agentOfferHtml(o, opts))).join('')}</ul>` : `<p class="muted">${esc(opts.empty || 'No offers here.')}</p>`
+  const act = async (li, btn, path, body, done) => {
+    if (btn.disabled) return
+    btn.disabled = true
+    try { await api(path, { method: 'POST', body }); toast(done); await reload() } catch (error) { btn.disabled = false; li.querySelector('.i-msg').insertAdjacentHTML('beforeend', `<div class="notice err small">${esc(error.message)}</div>`) }
+  }
+  const noteForm = (li, label, button, onSend, { amount = false } = {}) => {
+    const msg = li.querySelector('.i-msg')
+    const key = esc(li.dataset.ao || li.dataset.oo)
+    msg.innerHTML = `<form class="row" style="margin-top:.5rem">${amount ? `<label class="sr-only" for="of-a-${key}">Amount</label><input id="of-a-${key}" name="amount" inputmode="numeric" placeholder="Amount (₹)" style="width:10rem" required>` : ''}
+      <label class="sr-only" for="of-n-${key}">${esc(label)}</label><input id="of-n-${key}" name="note" maxlength="500" placeholder="${esc(label)}" style="flex:1;min-width:12rem"><button class="btn primary small">${esc(button)}</button></form>`
+    msg.querySelector('form').addEventListener('submit', (e) => {
+      e.preventDefault()
+      const a = e.target.elements.amount?.value.replace(/[\s,₹]/g, '')
+      if (amount && !/^\d+$/.test(a || '')) { msg.insertAdjacentHTML('beforeend', '<div class="notice err small">Enter the amount in rupees, digits only.</div>'); return }
+      onSend(e.target.querySelector('button'), { note: e.target.elements.note.value, ...(amount ? { amount: Number(a) } : {}) })
+    })
+  }
+  box.querySelectorAll('[data-ao]').forEach((li) => {
+    const id = encodeURIComponent(li.dataset.ao)
+    li.querySelector('[data-ao-forward]')?.addEventListener('click', () => noteForm(li, 'Note for the owner (optional, shown to them)', 'Forward', (btn, body) => act(li, btn, `/api/offers/${id}/forward`, body, 'Forwarded to the owner.')))
+    li.querySelector('[data-ao-won]')?.addEventListener('click', () => noteForm(li, 'Note (optional), e.g. next steps agreed', 'Record as agreed', (btn, body) => act(li, btn, `/api/offers/${id}/close`, { ...body, outcome: 'won' }, 'Recorded as agreed. Any agreement and payment happen outside DealSaathi.')))
+    li.querySelector('[data-ao-lost]')?.addEventListener('click', () => noteForm(li, 'Reason (optional, shown to the buyer)', 'Not going ahead', (btn, body) => act(li, btn, `/api/offers/${id}/close`, { ...body, outcome: 'lost' }, 'Recorded as not going ahead.')))
+  })
+  box.querySelectorAll('[data-oo]').forEach((li) => {
+    const id = encodeURIComponent(li.dataset.oo)
+    li.querySelector('[data-oo-accept]')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget
+      if (!(await confirmDialog('Accept in principle?', 'The buyer and their agent are told. This is not a sale or rental agreement and no payment is taken: the next steps happen outside DealSaathi.', 'Accept in principle'))) return
+      act(li, btn, `/api/listing-offers/${id}/respond`, { action: 'accept' }, 'Accepted in principle.')
+    })
+    li.querySelector('[data-oo-reject]')?.addEventListener('click', () => noteForm(li, 'Reason (optional, shown to the buyer)', 'Decline', (btn, body) => act(li, btn, `/api/listing-offers/${id}/respond`, { ...body, action: 'reject' }, 'Declined.')))
+    li.querySelector('[data-oo-counter]')?.addEventListener('click', () => noteForm(li, 'Note (optional, shown to the buyer)', 'Send counter-offer', (btn, body) => act(li, btn, `/api/listing-offers/${id}/respond`, { ...body, action: 'counter' }, 'Counter-offer sent.'), { amount: true }))
+  })
+}
+
+async function renderAgentOffers(params) {
+  const status = ['active', 'all'].includes(params.get('status')) ? params.get('status') : 'active'
+  main.innerHTML = `<div class="page-head"><div><h1>Offers</h1><p>Offers and rental applications from your buyers, and those forwarded to you on listings you own. “Accepted” is in principle only: agreements and payments happen outside DealSaathi.</p></div>
+    <div class="row"><label for="of-status" class="sr-only">Show</label><select id="of-status" style="width:auto"><option value="active"${status === 'active' ? ' selected' : ''}>Active</option><option value="all"${status === 'all' ? ' selected' : ''}>All</option></select></div></div>
+    <section class="card"><h2>Your buyers’ offers</h2><div id="of-mine" aria-live="polite"><p class="muted">Loading…</p></div></section>
+    <section class="card" style="margin-top:1rem"><h2>Offers on listings you own</h2><div id="of-owned" aria-live="polite"><p class="muted">Loading…</p></div></section>`
+  document.getElementById('of-status').addEventListener('change', (e) => { location.hash = `#/offers?status=${e.target.value}` })
+  await Promise.all([
+    renderOfferList(document.getElementById('of-mine'), `/api/offers?status=${status}`, 'agent', { empty: 'No offers from your buyers yet.' }),
+    renderOfferList(document.getElementById('of-owned'), '/api/listing-offers', 'owner', { empty: 'No offers forwarded to you.' })
+  ])
+}
+
+async function renderSellerOffers() {
+  main.innerHTML = `<div class="page-head"><div><h1>Offers</h1><p>Offers and rental applications that a buyer’s agent forwarded to you. Buyers’ identities stay private. Accepting is in principle only: no agreement is signed and no payment is taken in DealSaathi.</p></div></div>
+    <section class="card"><div id="so" aria-live="polite"><p class="muted">Loading…</p></div></section>`
+  await renderOfferList(document.getElementById('so'), '/api/listing-offers', 'owner', { empty: 'No offers yet. When a buyer’s agent forwards one, it appears here and you are notified.' })
+}
+
 const BV_STATUS = { requested:'<span class="pill pill-setup">Waiting for your agent</span>', booked: '<span class="pill pill-on">Booked</span>', completed: '<span class="pill pill-on">Took place</span>', no_show: '<span class="pill pill-off">Missed</span>', cancelled: '<span class="pill pill-off">Cancelled</span>', failed: '<span class="pill pill-err">Not booked</span>', unknown: '<span class="pill pill-setup">Being checked</span>', booking: '<span class="pill pill-setup">Booking…</span>' }
 async function renderMyViewings() {
   main.innerHTML = '<div class="page-head"><div><h1>My viewings</h1><p>Request one from any listing’s page. After a viewing, tell us what you thought: it improves your matches.</p></div></div><section class="card"><div id="mv"><p class="muted">Loading…</p></div></section>'
@@ -2251,7 +2426,7 @@ const agentListingCard = (l) => `<article class="card"><h2><a href="#/browse/${N
   <div><strong>${esc(l.price_text)}</strong> · ${esc([l.locality, l.city].filter(Boolean).join(', '))}${l.score != null ? ` <span class="badge">${Number(l.score)}/100</span>` : ''}</div>
   ${l.reasons?.length || l.gaps?.length ? `<ul class="small">${(l.reasons || []).map((x) => `<li>${esc(x)}</li>`).join('')}${(l.gaps || []).map((g) => `<li class="muted">Unknown: ${esc(g)}</li>`).join('')}</ul>` : ''}
   ${l.flags?.length ? `<div class="notice warn small">This listing’s own text includes ${l.flags.map((f) => (f === 'contact_details' ? 'contact details' : 'instructions addressed to an assistant')).join(' and ')}. DealSaathi does not endorse it: request viewings only through DealSaathi.</div>` : ''}
-  <a class="btn ghost small" href="#/browse/${Number(l.id)}">Open listing</a></article>`
+  <div class="row">${interestControl(l.id, null)}<a class="btn ghost small" href="#/browse/${Number(l.id)}">Open listing</a></div></article>`
 function agentActionHtml(a) {
   if (!a) return ''
   return `<div class="card agent-action" data-action="${esc(a.id)}"><h2>Viewing request</h2>
@@ -2299,6 +2474,7 @@ async function renderAgentAssistant() {
     el.querySelector('.agent-text').textContent = m.reply ?? m.content ?? ''
     el.querySelectorAll('[data-slot]').forEach((b) => b.addEventListener('click', () => send(`Please request a viewing at ${b.dataset.slot} on ${b.dataset.date}.`)))
     bindAction(el)
+    wireInterest(el)
     log.append(el)
     scroll()
   }
@@ -2429,7 +2605,7 @@ const ROUTES = {
   agent: {
     dashboard: () => renderDashboard(), notifications: () => renderNotifications(), profile: () => renderProfile(), assistant: () => renderAssistant(),
     leads: (p, params) => (p[1] === 'new' ? renderLeadForm(null) : p[1] && p[2] === 'edit' ? renderLeadForm(p[1]) : p[1] ? renderLeadDetail(p[1]) : renderLeads(params)),
-    pool: () => renderPool(), interests: (p, params) => renderAgentInterests(params), activity: (p, params) => renderActivity(params),
+    pool: () => renderPool(), interests: (p, params) => renderAgentInterests(params), offers: (p, params) => renderAgentOffers(params), activity: (p, params) => renderActivity(params),
     properties: (p, params) => (p[1] === 'new' ? renderPropertyForm(null) : p[1] && p[2] === 'edit' ? renderPropertyForm(p[1]) : p[1] ? renderPropertyDetail(p[1]) : renderProperties(params)),
     viewings: (p, params) => renderViewings(params), feedback: () => renderFeedback(),
     rent: (p) => (p[1] === 'new' ? renderTenancyForm(null) : p[1] && p[2] === 'edit' ? renderTenancyForm(p[1]) : p[1] ? renderTenancy(p[1]) : renderRent()),
@@ -2443,7 +2619,7 @@ const ROUTES = {
   seller: {
     dashboard: () => renderSellerHome(), profile: () => renderProfile(), notifications: () => renderNotifications(),
     'my-listings': (p, params) => (p[1] === 'new' ? renderPropertyForm(null) : p[1] && p[2] === 'edit' ? renderPropertyForm(p[1]) : p[1] ? renderPropertyDetail(p[1]) : renderProperties(params)),
-    'listing-viewings': () => renderListingViewings(), 'my-tenancies': () => renderMyTenancies()
+    'listing-viewings': () => renderListingViewings(), 'listing-offers': () => renderSellerOffers(), 'my-tenancies': () => renderMyTenancies()
   }
 }
 

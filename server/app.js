@@ -26,6 +26,7 @@ import { listReminders, setReminderStatus } from './automations/reminders.js'
 import { bookViewing, buyerCancel, buyerSlots, cancelViewing, draftViewing, freeSlots, getViewing, listBuyerViewings, listListingViewings, listViewings, requestViewing, rescheduleViewing, resendConfirmation, setOutcome } from './viewings/service.js'
 import { baseUrl, listFeedback, onViewingCompleted, publicFeedback, resendFeedback, submitBuyerFeedback, submitFeedback } from './feedback/service.js'
 import { checkDueNow, createTenancy, partyTenancies, partyTenancy, recordManualPayment, rentOverview, tenancyDetail, updateTenancy, waiveDue } from './rent/service.js'
+import { acceptCounter, closeOffer, forwardOffer, listAgentOffers, listBuyerOffers, listOwnerOffers, respondToOffer, reviseOffer, submitOffer, withdrawOffer } from './offers/service.js'
 import { closeInterest, expressInterest, leadInterests, listAgentInterests, listBuyerInterests, withdrawInterest } from './interests/service.js'
 import { addSampleProperties, createProperty, deleteProperty, dismissMatch, listProperties, listPropertyMatches, setAgentForSeller, setListingState, updateProperty, viewProperty } from './properties/service.js'
 
@@ -155,6 +156,20 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   })
   app.get('/api/me/interests', allow('buyer'), (req, res) => res.json({ interests: listBuyerInterests(db, req.user) }))
   app.post('/api/me/interests/:id/withdraw', allow('buyer'), (req, res) => res.json(withdrawInterest(db, req.user, parseUuid(req.params.id, 'interest'))))
+  // Offers and rental applications (server/offers): on an open interest; the buyer's agent forwards them to the
+  // listing's owner. "Accepted" is in principle only: no agreement, payment or transfer happens in DealSaathi.
+  app.post('/api/me/offers', allow('buyer'), (req, res) => {
+    const { propertyId, amount, terms, moveInDate } = req.body || {}
+    const out = submitOffer(db, req.user, { propertyId, amount, terms, moveInDate })
+    res.status(out.created ? 201 : 200).json(out)
+  })
+  app.get('/api/me/offers', allow('buyer'), (req, res) => res.json({ offers: listBuyerOffers(db, req.user) }))
+  app.post('/api/me/offers/:id/withdraw', allow('buyer'), (req, res) => res.json(withdrawOffer(db, req.user, parseUuid(req.params.id, 'offer'))))
+  app.post('/api/me/offers/:id/accept-counter', allow('buyer'), (req, res) => res.json(acceptCounter(db, req.user, parseUuid(req.params.id, 'offer'))))
+  app.post('/api/me/offers/:id/revise', allow('buyer'), (req, res) => res.json(reviseOffer(db, req.user, parseUuid(req.params.id, 'offer'), req.body || {})))
+  // The listing's owner (a seller, or the agent who owns the listing) sees only offers forwarded to them, and no buyer details.
+  app.get('/api/listing-offers', allow('seller', 'agent'), (req, res) => res.json({ offers: listOwnerOffers(db, req.user) }))
+  app.post('/api/listing-offers/:id/respond', allow('seller', 'agent'), (req, res) => res.json(respondToOffer(db, req.user, parseUuid(req.params.id, 'offer'), req.body || {})))
   // ---- The buyer's AI assistant (server/agent): a bounded loop over fixed, permission-checked tools. A viewing
   // request it prepares is sent only by the buyer's Confirm, and booked only when their agent confirms.
   app.post('/api/agent/messages', allow('buyer'), async (req, res) => {
@@ -179,6 +194,10 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   app.post('/api/pool/:id/claim', allow('agent'), (req, res) => res.json({ lead: claimLead(db, req.user, parseId(req.params.id)) }))
   app.get('/api/interests', allow('agent'), (req, res) => res.json({ interests: listAgentInterests(db, req.user, { status: req.query.status || 'open' }) }))
   app.post('/api/interests/:id/close', allow('agent'), (req, res) => res.json(closeInterest(db, req.user, parseUuid(req.params.id, 'interest'), req.body || {})))
+  app.get('/api/offers', allow('agent'), (req, res) => res.json({ offers: listAgentOffers(db, req.user, { status: req.query.status || 'active' }) }))
+  app.post('/api/offers/:id/forward', allow('agent'), (req, res) => res.json(forwardOffer(db, req.user, parseUuid(req.params.id, 'offer'), req.body || {})))
+  app.post('/api/offers/:id/close', allow('agent'), (req, res) => res.json(closeOffer(db, req.user, parseUuid(req.params.id, 'offer'), req.body || {})))
+  app.get('/api/leads/:id/offers', allow('agent'), (req, res) => { const id = parseId(req.params.id); requireAgentLead(db, req.user, id); res.json({ offers: listAgentOffers(db, req.user, { status: 'all', leadId: id }) }) })
   app.get('/api/leads/:id/interests', allow('agent'), (req, res) => res.json({ interests: leadInterests(db, req.user, parseId(req.params.id)) }))
   app.get('/api/events', allow('agent'), (req, res) => res.json({ events: listEvents(db, { agentId: req.user.id, status: ['failed', 'pending', 'done'].includes(req.query.status) ? req.query.status : null }) }))
   app.get('/api/deliveries', allow('agent'), (req, res) => res.json({ deliveries: listDeliveries(db, req.user.id) }))

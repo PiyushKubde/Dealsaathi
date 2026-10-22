@@ -1,6 +1,6 @@
 # DealSaathi architecture: a three-sided marketplace
 
-## Data model (schema v6; v7, v8 and v9 add tables, see below and server/db.js)
+## Data model (schema v6; v7 to v10 add tables, see below and server/db.js)
 
 ```
 users (role: buyer | seller | agent)
@@ -103,7 +103,40 @@ otherwise, as for the listing itself).
 - **Endpoints**: buyers `POST/GET /api/me/interests`, `POST /api/me/interests/:id/withdraw`; agents `GET /api/interests`
   (`?status=open|withdrawn|closed|all`), `GET /api/leads/:id/interests` (the lead's assigned agent only, 404 otherwise)
   and `POST /api/interests/:id/close`. Pages: buyer **My requests**, agent **Buyer interest** and the lead page.
-- Not in this phase: offers, applications, payments, agreements or any transaction status.
+- Offers build on an open request (next section).
+
+## Offers and rental applications (`server/offers/`, schema v10)
+
+An **offer** (sale listing) or **rental application** (rent listing, with an optional move-in date) is made from My
+requests on an open interest. It needs the buyer's saved requirements, an assigned agent (who passes it on) and an
+available listing with an owner in DealSaathi. At most one offer per lead and listing is active (partial unique index);
+a repeated submission returns the active one. Every move is a conditional update from an allowed state, recorded in
+`offer_events`, so a double click or a race changes nothing twice (409 otherwise).
+
+| From | Move | By | To |
+| --- | --- | --- | --- |
+| — | submit | buyer | `submitted` |
+| `submitted` | forward (optional note to the owner) | buyer's assigned agent | `forwarded` |
+| `forwarded` | accept in principle / decline / counter (amount) | the listing's owner: a seller, or the agent who owns it | `accepted` / `rejected` / `countered` |
+| `countered` | accept the counter / answer with a new amount | buyer | `accepted` / `submitted` (forwarded again by the agent) |
+| any active | withdraw | buyer | `withdrawn` |
+| `accepted` | record as agreed | buyer's agent | `closed_won` |
+| any active | not going ahead | buyer's agent | `closed_lost` |
+
+- **Privacy**: the owner sees only offers forwarded to them, with the amount, terms and the buyer's agent's name, never
+  the buyer. Other agents and sellers get 404. The buyer's agent sees everything for their own leads.
+- **Not a transaction**: "accepted" is accepted in principle. Every accepted or agreed offer carries the disclaimer that it
+  is not a sale or rental agreement, a payment or a transfer; nothing marks the listing sold, takes money or creates a
+  tenancy automatically (for rentals the agent sets up the tenancy in Rent as before).
+- **Notifications** (`offer.changed`, in the app only, deduplicated per change and recipient, never to whoever made the
+  change): the agent on submissions and the owner's or buyer's answers; the owner on forwarded offers and their outcome;
+  the buyer on the owner's answers and the recorded outcome.
+- While an offer is active, its interest cannot be withdrawn or closed.
+- **Endpoints**: buyers `POST/GET /api/me/offers`, `POST /api/me/offers/:id/withdraw|accept-counter|revise`; the buyer's agent
+  `GET /api/offers` (`?status=active|all|…`), `GET /api/leads/:id/offers`, `POST /api/offers/:id/forward|close`; owners
+  (sellers and listing-owning agents) `GET /api/listing-offers`, `POST /api/listing-offers/:id/respond`.
+- Not built: payments, deposits, e-signatures, agreements, or offers through the AI Assistant (its listing cards carry the
+  same "I'm interested" button, which only the buyer's click sends).
 
 ## The buyer's AI Assistant (agent runtime, `server/agent/`)
 

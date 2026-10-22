@@ -323,7 +323,7 @@ test('migration 9 adds property_interests to a v8 database built by the app: a b
     old.close()
 
     const logs = []
-    const db = openDatabase(file, { log: (l) => logs.push(l) })
+    let db = openDatabase(file, { log: (l) => logs.push(l), upTo: 9 })
     assert.equal(db.prepare('SELECT version FROM schema_version').get().version, 9)
     assert.match(logs.join('\n'), /Backed up the database before migrating v8 → v9/)
     assert.deepEqual(snapshot(db).property_interests, [])
@@ -338,7 +338,9 @@ test('migration 9 adds property_interests to a v8 database built by the app: a b
     assert.equal(copy.prepare('SELECT version FROM schema_version').get().version, 8)
     assert.deepEqual(snapshot(copy), before)
     copy.close()
-    // The migrated database works: the existing buyer shows interest on their existing lead.
+    // The migrated database works (brought up to the current schema): the existing buyer shows interest on their lead.
+    db.close()
+    db = openDatabase(file)
     const t2 = await startApp({ db, withUser: false })
     try {
       const r = await t2.call('/api/me/interests', { method: 'POST', body: { propertyId: property.id }, as: buyer })

@@ -658,6 +658,47 @@ const MIGRATIONS = [
   CREATE UNIQUE INDEX property_interests_one_open ON property_interests(lead_id, property_id) WHERE status = 'open';
   CREATE INDEX property_interests_buyer ON property_interests(buyer_user_id, created_at);
   CREATE INDEX property_interests_lead ON property_interests(lead_id, status);
+  `,
+
+  // 10: offers (sale) and rental applications, made on an open interest and passed on by the buyer's agent to the
+  // listing's owner, who accepts in principle, rejects or counters. Nothing here is a sale agreement, a payment or a
+  // transfer: "accepted" means accepted in principle. At most one active offer per lead and listing. offer_events is
+  // the history (who moved it, from what to what). New tables only.
+  `
+  CREATE TABLE offers (
+    id             TEXT PRIMARY KEY,
+    interest_id    TEXT    NOT NULL REFERENCES property_interests(id) ON DELETE CASCADE,
+    lead_id        INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    buyer_user_id  TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    property_id    INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+    kind           TEXT    NOT NULL CHECK (kind IN ('offer','application')),
+    amount         INTEGER NOT NULL CHECK (amount > 0),
+    terms          TEXT,
+    move_in_date   TEXT,
+    status         TEXT    NOT NULL CHECK (status IN ('submitted','forwarded','countered','accepted','rejected','withdrawn','closed_won','closed_lost')),
+    counter_amount INTEGER CHECK (counter_amount IS NULL OR counter_amount > 0),
+    owner_note     TEXT,
+    agent_note     TEXT,
+    forwarded      INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT    NOT NULL,
+    updated_at     TEXT    NOT NULL
+  );
+  CREATE UNIQUE INDEX offers_one_active ON offers(lead_id, property_id) WHERE status IN ('submitted','forwarded','countered','accepted');
+  CREATE INDEX offers_buyer ON offers(buyer_user_id, updated_at);
+  CREATE INDEX offers_property ON offers(property_id, status);
+
+  CREATE TABLE offer_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    offer_id    TEXT    NOT NULL REFERENCES offers(id) ON DELETE CASCADE,
+    actor_id    TEXT    REFERENCES users(id) ON DELETE SET NULL,
+    actor_role  TEXT    NOT NULL CHECK (actor_role IN ('buyer','agent','owner')),
+    from_status TEXT,
+    to_status   TEXT    NOT NULL,
+    amount      INTEGER,
+    note        TEXT,
+    created_at  TEXT    NOT NULL
+  );
+  CREATE INDEX offer_events_offer ON offer_events(offer_id, id);
   `
 ]
 

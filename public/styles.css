@@ -151,6 +151,9 @@ dl.details dd { margin: 0; }
 .interest-control .notice { flex-basis: 100%; margin: .35rem 0 0; }
 .request-row { justify-content: space-between; align-items: flex-start; }
 .request-main { flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
+.offer-box { margin-top: .5rem; padding: .6rem .75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.offer-box .row { margin-top: .4rem; }
+.offer-form { max-width: 32rem; margin-top: .5rem; }
 
 .toast { position: fixed; bottom: 1.25rem; right: 1.25rem; background: var(--text); color: var(--bg); padding: .65rem 1rem; border-radius: 8px; box-shadow: var(--shadow); max-width: 360px; font-size: .9rem; }
 dialog { border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; max-width: 420px; background: var(--surface); color: var(--text); }

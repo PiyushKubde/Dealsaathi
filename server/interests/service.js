@@ -10,6 +10,7 @@ import { emit } from '../events/bus.js'
 import { getLead, logActivity } from '../leads/service.js'
 import { getProperty, viewProperty } from '../properties/service.js'
 import { describeInZone } from '../time.js'
+import { buyerOfferView } from '../offers/service.js'
 
 export const STATUSES = ['open', 'withdrawn', 'closed']
 const NOTE_MAX = 300
@@ -45,8 +46,21 @@ function latestViewing(db, leadId, propertyId, { forBuyer }) {
   return { id: v.id, status: v.status === 'draft' ? 'requested' : v.status, when: describeInZone(v.start_at, v.timezone), startAt: v.start_at, feedbackGiven }
 }
 
-/** What the buyer can do next with this request, worked out from its state, the listing and the viewing. */
-function nextStep(row, { available, viewing, agentAssigned }) {
+const OFFER_ACTIVE = ['submitted', 'forwarded', 'countered', 'accepted']
+/** The newest offer made on this request, if any (an active offer always belongs to the open request). */
+const latestOffer = (db, row) => db.prepare('SELECT * FROM offers WHERE interest_id = ? ORDER BY created_at DESC, updated_at DESC LIMIT 1').get(row.id)
+const activeOffer = (db, row) => db.prepare(`SELECT id FROM offers WHERE lead_id = ? AND property_id = ? AND status IN (${OFFER_ACTIVE.map(() => '?').join(',')})`).get(row.lead_id, row.property_id, ...OFFER_ACTIVE)
+const OFFER_NEXT = {
+  submitted: 'Your agent has your offer and will pass it to the owner.',
+  forwarded: 'The owner is reviewing your offer.',
+  countered: 'The owner made a counter-offer: accept it, answer with a new amount, or withdraw.',
+  accepted: 'Accepted in principle. Your agent guides the next steps; nothing is final until an agreement is signed outside DealSaathi.',
+  closed_won: 'Your agent recorded this as agreed. Any agreement and payment happen outside DealSaathi.'
+}
+
+/** What the buyer can do next with this request, worked out from its state, the listing, any offer and the viewing. */
+function nextStep(row, { available, viewing, agentAssigned, offer }) {
+  if (offer && OFFER_NEXT[offer.status]) return { type: `offer_${offer.status}`, label: OFFER_NEXT[offer.status] }
   if (row.status === 'closed') return { type: 'closed', label: 'Your agent closed this request.' }
   if (!available) return { type: 'unavailable', label: 'This listing is no longer available.' }
   if (row.status === 'withdrawn') return { type: 'express_again', label: 'You withdrew this request. You can show interest again.' }
@@ -54,7 +68,7 @@ function nextStep(row, { available, viewing, agentAssigned }) {
   if (viewing?.status === 'requested') return { type: 'await_viewing', label: 'Your viewing request is waiting for your agent.' }
   if (viewing && ['booked', 'booking'].includes(viewing.status) && viewing.startAt > now()) return { type: 'viewing_booked', label: `Viewing booked for ${viewing.when}.` }
   if (viewing?.status === 'completed' && !viewing.feedbackGiven) return { type: 'give_feedback', label: 'Tell your agent how the viewing went.' }
-  return { type: 'request_viewing', label: 'Request a viewing, or wait for your agent to contact you.' }
+  return { type: 'request_viewing', label: 'Request a viewing, make an offer, or wait for your agent to contact you.' }
 }
 
 function listingSummary(db, viewer, propertyId) {
@@ -73,10 +87,14 @@ function forBuyer(db, buyer, row) {
   const agent = lead?.assigned_agent_id ? db.prepare('SELECT name FROM users WHERE id = ?').get(lead.assigned_agent_id) : null
   const { available, property } = listingSummary(db, buyer, row.property_id)
   const viewing = latestViewing(db, row.lead_id, row.property_id, { forBuyer: true })
+  const o = latestOffer(db, row)
+  const offer = o ? buyerOfferView(db, o) : null
+  const owner = getProperty(db, row.property_id)?.owner_user_id
   return {
     id: row.id, status: row.status, note: row.note, closedReason: row.closed_reason, createdAt: row.created_at, updatedAt: row.updated_at,
-    withdrawnAt: row.withdrawn_at, closedAt: row.closed_at, property, agentName: agent?.name ?? null, viewing,
-    next: nextStep(row, { available, viewing, agentAssigned: Boolean(agent) })
+    withdrawnAt: row.withdrawn_at, closedAt: row.closed_at, property, agentName: agent?.name ?? null, viewing, offer,
+    canOffer: row.status === 'open' && available && Boolean(agent) && Boolean(owner) && !(offer && OFFER_ACTIVE.includes(offer.status)),
+    next: nextStep(row, { available, viewing, agentAssigned: Boolean(agent), offer: offer && (OFFER_ACTIVE.includes(offer.status) || offer.status === 'closed_won') ? offer : null })
   }
 }
 
@@ -142,6 +160,7 @@ export function withdrawInterest(db, buyer, id) {
   if (!row) throw new AppError(404, 'interest_not_found', 'No such request.')
   if (row.status === 'withdrawn') return { interest: forBuyer(db, buyer, row) }
   if (row.status === 'closed') throw new AppError(409, 'interest_closed', 'Your agent already closed this request.')
+  if (activeOffer(db, row)) throw new AppError(409, 'offer_active', 'You have an active offer on this listing. Withdraw the offer first.')
   return transaction(db, () => {
     const ts = now()
     const changed = db.prepare("UPDATE property_interests SET status = 'withdrawn', withdrawn_at = ?, updated_at = ? WHERE id = ? AND status = 'open'").run(ts, ts, row.id).changes
@@ -178,6 +197,7 @@ export function closeInterest(db, agent, id, input = {}) {
   if (!row) throw new AppError(404, 'interest_not_found', 'No such request.')
   if (row.status === 'closed') return { interest: forAgent(db, agent, row) }
   if (row.status === 'withdrawn') throw new AppError(409, 'interest_not_open', 'The buyer already withdrew this request.')
+  if (activeOffer(db, row)) throw new AppError(409, 'offer_active', 'This buyer has an active offer on the listing. Record its outcome in Offers first.')
   return transaction(db, () => {
     const ts = now()
     const changed = db.prepare("UPDATE property_interests SET status = 'closed', closed_reason = ?, closed_at = ?, updated_at = ? WHERE id = ? AND status = 'open'").run(reason, ts, ts, row.id).changes
