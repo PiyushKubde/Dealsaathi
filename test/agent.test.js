@@ -22,9 +22,8 @@ const ASK = 'Find me a 2 BHK near Vijay Nagar under ₹50 lakh. Show me the best
 const L = (o) => ({ listing_type: 'sale', property_type: 'apartment', city: 'Indore', locality: 'Vijay Nagar', address: '7 Hidden Lane, Indore', ...o })
 
 /** An agent covering Indore with Google Calendar viewings on, a buyer with saved requirements, and listings. */
-async function setup({ ai = fakeAi() } = {}) {
-  const vs = fakeVs()
-  const t = await startApp({ vs, ai })
+async function setup({ ai = fakeAi(), db, vs = fakeVs() } = {}) {
+  const t = await startApp({ vs, ai, db })
   await t.call('/api/me/profile', { method: 'PATCH', body: { serviceAreas: ['Indore'] } })
   const cal = (await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: await vs.serviceIdFor('google-calendar'), authId: vs.connectApp(t.user.id, 'google-calendar') } })).body.connection
   await t.call('/api/automations/viewing_scheduler', { method: 'PUT', body: { enabled: true, config: { calendarConnectionId: cal.id, calendarId: 'primary', confirmation: 'none' } } })
@@ -556,4 +555,163 @@ test('review M2: dates, times, prices and areas are not mistaken for contact det
     assert.deepEqual(flagsOf(text), [], text)
   }
   for (const text of ['Call 98765 43210', '+91-98765-43210', 'owner@example.com', 'https://example.com/flat', 'wa.me/919876543210']) assert.equal(hasContact(text), true, text)
+})
+
+// ---- Stuck Confirm recovery: a crash between the claim and the result must not leave a request stuck,
+// create a second viewing request, or report success that was not verified.
+const { requestViewing } = await import('../server/viewings/service.js')
+const { openDatabase: openDb } = await import('../server/db.js')
+const STALE = () => new Date(Date.now() - 3 * 60 * 1000).toISOString()
+
+/** A prepared (awaiting) viewing request for listing `best`, through the assistant. */
+async function prepared(s) {
+  const day = addDays(todayIn('Asia/Kolkata'), 2)
+  s.ai.queue.push(tool('get_viewing_slots', { property_id: s.ids.best, date: day }), ask('Which time?'))
+  const r = await s.say(`listing ${s.ids.best} on ${day}`)
+  s.ai.queue.push(tool('propose_viewing_request', { property_ids: [s.ids.best], start: r.body.offer.slots[0].start }))
+  const p = await s.say('first time', r.body.conversationId)
+  assert.equal(p.body.status, 'awaiting_approval')
+  return { conversationId: r.body.conversationId, actionId: p.body.action.id, start: r.body.offer.slots[0].start }
+}
+const viewingsCount = (t) => t.db.prepare('SELECT COUNT(*) AS n FROM viewings').get().n
+const actionRow = (t, id) => t.db.prepare('SELECT status, result, error FROM agent_actions WHERE id = ?').get(id)
+const conversationAction = async (s, c) => (await s.b(`/api/agent/conversations/${c.conversationId}`)).body.messages.map((m) => m.action).filter(Boolean).find((a) => a.id === c.actionId)
+
+test('stuck Confirm: a crash before the viewing request is created recovers after a restart, without retrying on its own', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ds-stuck-'))
+  const file = join(dir, 'd.db')
+  const vs = fakeVs()
+  const a = await setup({ db: openDb(file), vs })
+  let release
+  let b
+  try {
+    const c = await prepared(a)
+    // Process A claims the request, then hangs in the calendar check (as if it crashed there).
+    const original = vs.runAction
+    vs.runAction = (...args) => new Promise((resolve, reject) => { release = () => original(...args).then(resolve, reject) })
+    const inflight = a.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })
+    while (actionRow(a.t, c.actionId).status !== 'executing') await new Promise((r) => setTimeout(r, 10))
+    vs.runAction = original
+    // Process B: a restart on the same database. The request is still "executing"; once stale it is recovered.
+    b = await startApp({ vs, ai: fakeAi(), db: openDb(file), withUser: false })
+    const asBuyer = (path, opts = {}) => b.call(path, { ...opts, as: a.buyer })
+    let card = (await asBuyer(`/api/agent/conversations/${c.conversationId}`)).body.messages.map((m) => m.action).find((x) => x?.id === c.actionId)
+    assert.equal(card.status, 'executing', 'not recovered while it may still be running')
+    b.db.prepare('UPDATE agent_actions SET updated_at = ? WHERE id = ?').run(STALE(), c.actionId)
+    card = (await asBuyer(`/api/agent/conversations/${c.conversationId}`)).body.messages.map((m) => m.action).find((x) => x?.id === c.actionId)
+    assert.equal(card.status, 'awaiting_confirmation', 'no viewing exists: back to Confirm, nothing retried automatically')
+    assert.equal(card.interrupted, true)
+    assert.equal(viewingsCount(b), 0)
+    const again = await asBuyer(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })
+    assert.equal(again.body.action.status, 'completed')
+    assert.equal(viewingsCount(b), 1)
+    // Process A wakes up after all: its claim was superseded, so it creates nothing.
+    release()
+    const late = await inflight
+    assert.equal(late.status, 200)
+    assert.equal(late.body.action.status, 'completed')
+    assert.equal(viewingsCount(b), 1, 'still exactly one viewing request')
+    assert.equal((await asBuyer(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })).body.repeated, true)
+    assert.equal(viewingsCount(b), 1)
+  } finally { release?.(); await b?.close(); await a.t.close(); rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('stuck Confirm: a crash after the viewing request was created recovers as completed, linked to that request', async () => {
+  const s = await setup()
+  try {
+    const c = await prepared(s)
+    // The insert committed but the result was never written (an interrupted Confirm from before this fix).
+    const made = await requestViewing(s.t.db, s.vs, s.buyer, { propertyIds: [s.ids.best], start: c.start })
+    s.t.db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ? WHERE id = ?").run(STALE(), c.actionId)
+    const card = await conversationAction(s, c)
+    assert.equal(card.status, 'completed')
+    assert.equal(card.result.viewingId, made.viewing.id, 'verified against the actual viewing request')
+    assert.equal(card.result.recovered, true)
+    assert.equal(viewingsCount(s.t), 1)
+    const repeat = await s.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })
+    assert.equal(repeat.body.repeated, true)
+    assert.equal(viewingsCount(s.t), 1, 'a Confirm after recovery creates nothing new')
+  } finally { await s.t.close() }
+})
+
+test('stuck Confirm: the same request already made from the listing page is recognised, not duplicated', async () => {
+  const s = await setup()
+  try {
+    const c = await prepared(s)
+    const page = await s.b('/api/me/viewings', { method: 'POST', body: { propertyId: s.ids.best, start: c.start } })
+    assert.equal(page.status, 201)
+    s.t.db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ? WHERE id = ?").run(STALE(), c.actionId)
+    const confirm = await s.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })
+    assert.equal(confirm.body.action.status, 'completed')
+    assert.equal(confirm.body.action.result.viewingId, page.body.viewing.id)
+    assert.equal(viewingsCount(s.t), 1)
+  } finally { await s.t.close() }
+})
+
+test('stuck Confirm: with no viewing request and the time window passed, it expires instead of being retried', async () => {
+  const s = await setup()
+  try {
+    const c = await prepared(s)
+    s.t.db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ?, expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(STALE(), c.actionId)
+    assert.equal((await conversationAction(s, c)).status, 'expired')
+    assert.equal((await s.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })).body.error.code, 'action_expired')
+    assert.equal(viewingsCount(s.t), 0)
+  } finally { await s.t.close() }
+})
+
+test('stuck Confirm: an outcome that cannot be determined is marked for review, never retried or reported as sent', async () => {
+  const s = await setup()
+  try {
+    const c = await prepared(s)
+    // A matching request exists but was cancelled: whether this Confirm created it cannot be told safely.
+    const made = await requestViewing(s.t.db, s.vs, s.buyer, { propertyIds: [s.ids.best], start: c.start })
+    await s.b(`/api/me/viewings/${made.viewing.id}/cancel`, { method: 'POST', body: {} })
+    s.t.db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ? WHERE id = ?").run(STALE(), c.actionId)
+    const card = await conversationAction(s, c)
+    assert.equal(card.status, 'needs_review')
+    assert.match(card.error, /could not confirm whether/i)
+    const confirm = await s.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })
+    assert.equal(confirm.status, 409)
+    assert.equal(confirm.body.error.code, 'action_needs_review')
+    assert.equal((await s.b(`/api/agent/actions/${c.actionId}/cancel`, { method: 'POST', body: {} })).status, 409)
+    assert.equal(s.t.db.prepare("SELECT COUNT(*) AS n FROM viewings WHERE status != 'cancelled'").get().n, 0, 'nothing was retried')
+  } finally { await s.t.close() }
+  const s2 = await setup()
+  try {
+    const c = await prepared(s2)
+    // The buyer's requirements record is gone: there is nothing to check against.
+    s2.t.db.prepare('UPDATE buyer_profiles SET lead_id = NULL WHERE user_id = ?').run(s2.buyer.id)
+    s2.t.db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ? WHERE id = ?").run(STALE(), c.actionId)
+    const confirm = await s2.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} })
+    assert.equal(confirm.body.error.code, 'action_needs_review')
+  } finally { await s2.t.close() }
+})
+
+test('stuck Confirm: concurrent recovery attempts settle once, with one viewing request', async () => {
+  const s = await setup()
+  try {
+    const c = await prepared(s)
+    await requestViewing(s.t.db, s.vs, s.buyer, { propertyIds: [s.ids.best], start: c.start })
+    s.t.db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ? WHERE id = ?").run(STALE(), c.actionId)
+    const all = await Promise.all([
+      s.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} }),
+      s.b(`/api/agent/conversations/${c.conversationId}`),
+      s.b(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {} }),
+      s.b(`/api/agent/actions/${c.actionId}/cancel`, { method: 'POST', body: {} })
+    ])
+    assert.ok(all.every((r) => [200, 409].includes(r.status)), JSON.stringify(all.map((r) => r.status)))
+    assert.equal(actionRow(s.t, c.actionId).status, 'completed')
+    assert.equal(viewingsCount(s.t), 1)
+  } finally { await s.t.close() }
+})
+
+test('stuck Confirm: another buyer cannot see, recover or confirm the request', async () => {
+  const s = await setup()
+  try {
+    const c = await prepared(s)
+    s.t.db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ? WHERE id = ?").run(STALE(), c.actionId)
+    const other = signedInUser(s.t.db, { name: 'Other Buyer', role: 'buyer' })
+    assert.equal((await s.t.call(`/api/agent/actions/${c.actionId}/confirm`, { method: 'POST', body: {}, as: other })).status, 404)
+    assert.equal(actionRow(s.t, c.actionId).status, 'executing', 'another buyer\'s request does not trigger recovery of this one')
+  } finally { await s.t.close() }
 })

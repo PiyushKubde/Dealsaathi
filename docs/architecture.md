@@ -103,6 +103,10 @@ gets SQL, HTTP, shell or other users' data.
 - **Approval**: only the buyer's Confirm (`POST /api/agent/actions/:id/confirm`) runs `requestViewing`, once (atomic
   claim; a repeat returns the first result; an identical request already sent is reused). That creates a *request*;
   the agent's own confirmation books it in Google Calendar, exactly as from the listing page.
+  Success is written in the same transaction as the viewing request, and every write is tied to the Confirm's own
+  claim. A Confirm still "executing" after 2 minutes (a crash or restart) is settled from the database on the buyer's
+  next visit: completed if the matching request exists, back to Confirm if none does (nothing is retried on its own),
+  or `needs_review` when it cannot be told.
 - **Limits**: 6 decisions, 4 tool calls and 2 errors per message; 30 s per AI call and 20 s per tool, both cut to the
   time left of 60 s per message (the conversation lock lasts the turn plus 30 s); no identical call twice; one message at
   a time per conversation; 20 messages per 10 minutes and 20 calendar checks per 15 minutes per buyer; prepared requests

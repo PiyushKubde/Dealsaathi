@@ -60,7 +60,8 @@ function describeAction(db, row) {
   return {
     id: row.id, type: row.type, status: row.status, expiresAt: row.expires_at,
     properties: params.propertyIds.map((id) => ({ id, title: getProperty(db, id)?.title ?? '(listing removed)' })),
-    start: params.start, when: params.timezone ? describeInZone(params.start, params.timezone) : params.start, result: parse(row.result), error: row.error
+    start: params.start, when: params.timezone ? describeInZone(params.start, params.timezone) : params.start, result: parse(row.result), error: row.error,
+    interrupted: row.status === 'awaiting_confirmation' && Boolean(parse(row.result)?.interrupted)
   }
 }
 
@@ -69,6 +70,43 @@ const stillVisible = (db, user, cards) => (cards || []).filter((c) => canViewPro
 
 function expireActions(db, userId) {
   db.prepare("UPDATE agent_actions SET status = 'expired', updated_at = ? WHERE user_id = ? AND status = 'awaiting_confirmation' AND expires_at < ?").run(now(), userId, now())
+  recoverStale(db, userId)
+}
+
+// A Confirm normally finishes in seconds. One still "executing" after this long was interrupted (a crash or a
+// restart): it is settled from the database, so this works after a restart too. Its own attempt, should it ever
+// resume, can no longer write anything (every write below is tied to the claim it made).
+export const STALE_MS = 2 * 60 * 1000
+const ACTIVE_VIEWING = ['draft', 'booking', 'booked', 'completed']
+
+/** The buyer's viewing request that a Confirm of these params would have created, if one exists. */
+function matchingViewing(db, userId, params) {
+  const prof = db.prepare('SELECT lead_id FROM buyer_profiles WHERE user_id = ?').get(userId)
+  if (!prof?.lead_id || !db.prepare('SELECT 1 FROM leads WHERE id = ?').get(prof.lead_id)) return { known: false }
+  const rows = db.prepare('SELECT id, status FROM viewings WHERE lead_id = ? AND requested_by = ? AND start_at = ? AND property_ids = ? ORDER BY created_at DESC')
+    .all(prof.lead_id, userId, new Date(params.start).toISOString(), JSON.stringify(params.propertyIds))
+  return { known: true, active: rows.find((r) => ACTIVE_VIEWING.includes(r.status)) || null, inactive: rows.find((r) => !ACTIVE_VIEWING.includes(r.status)) || null }
+}
+
+/**
+ * Settles this buyer's interrupted Confirms, without ever sending anything itself:
+ * - an active matching viewing request exists → completed, linked to it (verified, not assumed);
+ * - none exists → nothing was sent: back to awaiting the buyer's Confirm (or expired once its window has passed);
+ * - a matching request exists but is cancelled or failed, or there is nothing to check against → needs_review.
+ * Each update is conditional on the row being unchanged, so two concurrent recoveries settle it once.
+ */
+function recoverStale(db, userId) {
+  const cutoff = new Date(Date.now() - STALE_MS).toISOString()
+  for (const row of db.prepare("SELECT * FROM agent_actions WHERE user_id = ? AND status = 'executing' AND updated_at < ?").all(userId, cutoff)) {
+    const found = matchingViewing(db, userId, parse(row.params))
+    let status, result, error = null
+    if (found.known && found.active) { status = 'completed'; result = { viewingId: found.active.id, status: 'requested', recovered: true } }
+    else if (found.known && !found.inactive) { status = row.expires_at < now() ? 'expired' : 'awaiting_confirmation'; result = { interrupted: true } }
+    else { status = 'needs_review'; result = null; error = 'We could not confirm whether this request reached your agent. Check My viewings before requesting it again.' }
+    const changed = db.prepare("UPDATE agent_actions SET status = ?, result = ?, error = ?, updated_at = ? WHERE id = ? AND status = 'executing' AND updated_at = ?")
+      .run(status, result ? JSON.stringify(result) : null, error, now(), row.id, row.updated_at).changes
+    if (changed) console.log(`[agent] action ${row.id.slice(0, 8)} recovered after an interrupted Confirm: ${status}`)
+  }
 }
 
 /** What the model may read of a tool result or request: listing text cleaned (untrusted.js). */
@@ -280,6 +318,9 @@ function ownAction(db, user, id) {
 /**
  * The buyer's Confirm: sends the prepared viewing request, once. A second click (or a retry) gets the first
  * result back; it never creates a second request. The request is booked only when the agent confirms it.
+ * The claim (status executing, with its own timestamp) and every later write are tied together: success is
+ * written in the same transaction as the viewing request itself, so a crash leaves both or neither, and a claim
+ * that was taken over by recovery (recoverStale) can no longer write or create anything.
  */
 export async function confirmAgentAction(db, vs, user, id) {
   requireRole(user, 'buyer')
@@ -288,37 +329,52 @@ export async function confirmAgentAction(db, vs, user, id) {
   if (row.status === 'completed' || row.status === 'failed') return { action: describeAction(db, row), repeated: true }
   if (row.status === 'expired') throw new AppError(409, 'action_expired', 'This request expired. Ask the assistant to check free times again.')
   if (row.status === 'cancelled') throw new AppError(409, 'action_cancelled', 'This request was cancelled.')
+  if (row.status === 'needs_review') throw new AppError(409, 'action_needs_review', row.error || 'We could not confirm whether this request reached your agent. Check My viewings.')
   if (row.status === 'executing') throw new AppError(409, 'action_in_progress', 'This request is already being sent.')
-  const claimed = db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ? WHERE id = ? AND status = 'awaiting_confirmation'").run(now(), row.id).changes
+  const claim = now()
+  const claimed = db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ? WHERE id = ? AND status = 'awaiting_confirmation'").run(claim, row.id).changes
   if (!claimed) return confirmAgentAction(db, vs, user, id)
   const params = parse(row.params)
-  let status = 'completed'
+  // Writes only while this claim still holds; false when recovery (or anything else) has taken the row over.
+  const settle = (status, result, error = null) => db.prepare("UPDATE agent_actions SET status = ?, result = ?, error = ?, updated_at = ? WHERE id = ? AND status = 'executing' AND updated_at = ?")
+    .run(status, result ? JSON.stringify(result) : null, error, now(), row.id, claim).changes > 0
+  let settled = false
   let result = null
   let error = null
   try {
     // The same request already sent (from this card or the listing page): reuse it, do not create another.
-    const prof = db.prepare('SELECT lead_id FROM buyer_profiles WHERE user_id = ?').get(user.id)
-    const same = prof?.lead_id && db.prepare("SELECT id FROM viewings WHERE lead_id = ? AND requested_by = ? AND start_at = ? AND property_ids = ? AND status IN ('draft','booking','booked')")
-      .get(prof.lead_id, user.id, new Date(params.start).toISOString(), JSON.stringify(params.propertyIds))
-    if (same) result = { viewingId: same.id, status: 'requested', alreadyRequested: true }
-    else {
-      const r = await requestViewing(db, vs, user, { propertyIds: params.propertyIds, start: params.start, note: 'Requested through the DealSaathi assistant.' })
+    const found = matchingViewing(db, user.id, params)
+    if (found.known && found.active) {
+      result = { viewingId: found.active.id, status: 'requested', alreadyRequested: true }
+      settled = settle('completed', result)
+    } else {
+      const r = await requestViewing(db, vs, user, { propertyIds: params.propertyIds, start: params.start, note: 'Requested through the DealSaathi assistant.' }, {
+        within: (viewingId) => {
+          if (!settle('completed', { viewingId, status: 'requested' })) throw new AppError(409, 'action_superseded', 'This request was settled by another attempt.')
+        }
+      })
+      settled = true
       result = { viewingId: r.viewing.id, status: r.viewing.status, when: r.viewing.when, agentName: r.viewing.agentName }
+      db.prepare("UPDATE agent_actions SET result = ? WHERE id = ? AND status = 'completed'").run(JSON.stringify(result), row.id)
     }
   } catch (e) {
+    if (e?.code === 'action_superseded') return { action: describeAction(db, db.prepare('SELECT * FROM agent_actions WHERE id = ?').get(row.id)) }
     if (!(e instanceof AppError)) {
-      db.prepare("UPDATE agent_actions SET status = 'awaiting_confirmation', updated_at = ? WHERE id = ?").run(now(), row.id)
+      // Unexpected: release the claim only if it is still ours and nothing was created (a created request has
+      // already marked the action completed inside its own transaction, so this then changes nothing).
+      db.prepare("UPDATE agent_actions SET status = 'awaiting_confirmation', updated_at = ? WHERE id = ? AND status = 'executing' AND updated_at = ?").run(now(), row.id, claim)
       throw e
     }
-    status = 'failed'
     error = e.message
+    settled = settle('failed', null, error)
   }
-  db.prepare('UPDATE agent_actions SET status = ?, result = ?, error = ?, updated_at = ? WHERE id = ?').run(status, result ? JSON.stringify(result) : null, error, now(), row.id)
   row = db.prepare('SELECT * FROM agent_actions WHERE id = ?').get(row.id)
-  addMessage(db, row.conversation_id, 'assistant', status === 'completed'
+  if (!settled) return { action: describeAction(db, row) }
+  const done = row.status === 'completed'
+  addMessage(db, row.conversation_id, 'assistant', done
     ? `Your viewing request was sent to ${result.agentName || 'your agent'}${result.when ? ` for ${result.when}` : ''}. It is not booked yet: it is booked in their Google Calendar when they confirm it. You can follow it in My viewings.`
-    : `The viewing request was not sent: ${error}`, { status: status === 'completed' ? 'action_completed' : 'action_failed' })
-  console.log(`[agent] action ${row.id.slice(0, 8)} request_viewing ${status}`)
+    : `The viewing request was not sent: ${error}`, { status: done ? 'action_completed' : 'action_failed' })
+  console.log(`[agent] action ${row.id.slice(0, 8)} request_viewing ${row.status}`)
   return { action: describeAction(db, row) }
 }
 
@@ -327,6 +383,7 @@ export function cancelAgentAction(db, user, id) {
   expireActions(db, user.id)
   const row = ownAction(db, user, id)
   const changed = db.prepare("UPDATE agent_actions SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'awaiting_confirmation'").run(now(), row.id).changes
+  if (!changed && row.status === 'needs_review') throw new AppError(409, 'action_needs_review', row.error || 'Check My viewings: this request may have reached your agent.')
   // Nothing was sent for a cancelled or expired request: report its state. A sent one is cancelled in My viewings.
   if (!changed && !['cancelled', 'expired'].includes(row.status)) throw new AppError(409, 'action_not_pending', 'This request can no longer be cancelled here. Use My viewings.')
   return { action: describeAction(db, db.prepare('SELECT * FROM agent_actions WHERE id = ?').get(row.id)) }

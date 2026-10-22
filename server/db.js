@@ -628,7 +628,7 @@ const MIGRATIONS = [
     user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     type            TEXT NOT NULL CHECK (type IN ('request_viewing')),
     params          TEXT NOT NULL,
-    status          TEXT NOT NULL CHECK (status IN ('awaiting_confirmation','executing','completed','failed','cancelled','expired')),
+    status          TEXT NOT NULL CHECK (status IN ('awaiting_confirmation','executing','completed','failed','cancelled','expired','needs_review')),
     result          TEXT,
     error           TEXT,
     expires_at      TEXT NOT NULL,

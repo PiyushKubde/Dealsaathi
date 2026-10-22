@@ -154,7 +154,8 @@ function stillOnMarket(db, row) {
 }
 
 /** A viewing to review before booking. Nothing is sent to Google Calendar yet. */
-export function draftViewing(db, user, input, { requestedBy = null } = {}) {
+/** within(viewingId), when given, runs inside the same transaction as the insert: if it throws, nothing is saved. */
+export function draftViewing(db, user, input, { requestedBy = null, within = null } = {}) {
   const cfg = viewingSettings(db, user.id)
   const lead = requireLead(db, Number(input?.leadId))
   if (lead.assigned_agent_id !== user.id) throw new AppError(404, 'lead_not_found', 'No such lead.')
@@ -177,6 +178,7 @@ export function draftViewing(db, user, input, { requestedBy = null } = {}) {
       logActivity(db, lead.id, 'viewing_requested', `The buyer requested a viewing on ${describeInZone(new Date(start).toISOString(), cfg.timezone)}`, { viewingId: id }, 'buyer', requestedBy)
       emit(db, 'viewing.requested', { subjectType: 'viewing', subjectId: id, actorId: requestedBy, agentId: user.id, dedupeKey: `viewing.requested:${id}` })
     }
+    if (within) within(id)
   })
   return { viewing: getViewing(db, user.id, id), confirmationWillBeSent: cfg.confirmation === 'gmail' && Boolean(lead.email) }
 }
@@ -424,7 +426,7 @@ export async function buyerSlots(db, vs, buyer, { propertyId, date }) {
 }
 
 /** A requested viewing: free in the agent's calendar now, booked only when the agent confirms (re-checked then). */
-export async function requestViewing(db, vs, buyer, input) {
+export async function requestViewing(db, vs, buyer, input, { within = null } = {}) {
   const { lead, agent } = buyerContext(db, buyer)
   const ids = Array.isArray(input?.propertyIds) ? input.propertyIds : [input?.propertyId]
   const start = Date.parse(input?.start)
@@ -436,7 +438,7 @@ export async function requestViewing(db, vs, buyer, input) {
   const open = db.prepare("SELECT COUNT(*) AS n FROM viewings WHERE lead_id = ? AND status = 'draft' AND requested_by IS NOT NULL").get(lead.id).n
   if (open >= 5) throw new AppError(409, 'too_many_requests', 'You already have 5 viewing requests waiting for your agent.')
   const note = typeof input?.note === 'string' ? input.note.trim().slice(0, 300) : null
-  const { viewing } = draftViewing(db, agent, { leadId: lead.id, propertyIds: ids, start: new Date(start).toISOString(), inviteLead: Boolean(lead.email), note }, { requestedBy: buyer.id })
+  const { viewing } = draftViewing(db, agent, { leadId: lead.id, propertyIds: ids, start: new Date(start).toISOString(), inviteLead: Boolean(lead.email), note }, { requestedBy: buyer.id, within })
   return { viewing: buyerView(db, db.prepare('SELECT * FROM viewings WHERE id = ?').get(viewing.id)) }
 }
 

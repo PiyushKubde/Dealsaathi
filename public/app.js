@@ -2113,6 +2113,8 @@ function agentActionHtml(a) {
   if (!a) return ''
   return `<div class="card agent-action" data-action="${esc(a.id)}"><h2>Viewing request</h2>
     <p class="small">${a.properties.map((p) => esc(p.title)).join(', ')}<br><strong>${esc(a.when)}</strong></p>
+    ${a.interrupted ? '<div class="notice info small">Your last Confirm was interrupted before anything was sent. Press Confirm to try again.</div>' : ''}
+    ${a.status === 'needs_review' ? `<div class="notice warn small">${esc(a.error || 'We could not confirm whether this request reached your agent.')} <a href="#/my-viewings">Open My viewings</a></div>` : ''}
     ${a.status === 'awaiting_confirmation' ? `<p class="small muted">Confirm sends this request to your agent. It is booked in their Google Calendar only after they confirm it.</p>
       <div class="row"><button class="btn primary small" data-confirm>Confirm and send to my agent</button><button class="btn ghost small" data-cancel>Cancel</button></div>`
       : a.status === 'failed' ? `<div class="notice err small">Not sent: ${esc(a.error || 'it could not be sent')}</div>` : AGENT_ACTION_STATE[a.status] || ''}</div>`

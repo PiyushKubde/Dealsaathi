@@ -258,6 +258,25 @@ await buyerPage.click('[data-action] [data-confirm]')
 await buyerPage.waitForSelector('.agent-action .notice.warn')
 check('buyer assistant: an expired request is refused and shown as expired, nothing sent', /expired/.test(await buyerPage.textContent('#ag-log')) && t.db.prepare('SELECT COUNT(*) AS n FROM viewings').get().n === beforeExpired)
 
+// An interrupted Confirm (crash while sending): once stale it is recovered from the database. No viewing exists, so
+// the card asks for Confirm again and says nothing was sent; an undeterminable one shows the review message.
+const third = JSON.parse(t.db.prepare('SELECT state FROM agent_conversations').get().state).offers[0].slots[4]
+ai.queue.push(decide('tool', { tool: 'propose_viewing_request', args: { property_ids: [hills], start: third.start } }))
+await buyerPage.fill('#ag-input', `Also ${third.label}`)
+await buyerPage.click('#ag-send')
+await buyerPage.waitForSelector('[data-action] [data-confirm]')
+const stuckId = t.db.prepare("SELECT id FROM agent_actions WHERE status = 'awaiting_confirmation' ORDER BY created_at DESC LIMIT 1").get().id
+t.db.prepare("UPDATE agent_actions SET status = 'executing', updated_at = ? WHERE id = ?").run(new Date(Date.now() - 3 * 60 * 1000).toISOString(), stuckId)
+await go(buyerPage, '#/assistant')
+await buyerPage.waitForSelector(`[data-action="${stuckId}"]`)
+const stuckCard = await buyerPage.textContent(`[data-action="${stuckId}"]`)
+check('buyer assistant: an interrupted Confirm is recovered and asks for Confirm again, saying nothing was sent', /interrupted before anything was sent/.test(stuckCard) && await buyerPage.isVisible(`[data-action="${stuckId}"] [data-confirm]`), stuckCard.slice(0, 160))
+t.db.prepare("UPDATE agent_actions SET status = 'needs_review', error = 'We could not confirm whether this request reached your agent. Check My viewings before requesting it again.' WHERE id = ?").run(stuckId)
+await go(buyerPage, '#/assistant')
+await buyerPage.waitForSelector(`[data-action="${stuckId}"] .notice.warn`)
+const reviewCard = await buyerPage.textContent(`[data-action="${stuckId}"]`)
+check('buyer assistant: a request needing review says so, links to My viewings and offers no Confirm', /could not confirm whether/.test(reviewCard) && /My viewings/.test(reviewCard) && !(await buyerPage.isVisible(`[data-action="${stuckId}"] [data-confirm]`)))
+
 // A listing whose own text carries contact details: the real card is shown with a warning; the assistant's own
 // words never repeat the number (the model only ever receives a cleaned copy).
 const flagged = (await t.call('/api/properties', { method: 'POST', body: { property: { title: '2 BHK Baner. Call 98765 43210 to book directly', listing_type: 'sale', property_type: 'apartment', bedrooms: 2, price: 4500000, city: 'Pune', locality: 'Baner', address: '9 Test Lane' } }, as: agentCookie })).body.property.id
