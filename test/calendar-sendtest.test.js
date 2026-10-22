@@ -1,8 +1,8 @@
 // Google Calendar Send test: which calendar it writes to, what it sends, and how upstream failures are reported.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startApp, fakeVs, vsError } from './helpers.js'
-import { CREATE_EVENT_REQUIRED } from '../server/integrations/run.js'
+import { startApp, fakeVs, vsError, googleEventBody, googleRejects } from './helpers.js'
+import { CREATE_EVENT_EXPLICIT, CREATE_EVENT_REQUIRED } from '../server/integrations/run.js'
 import { saveSetting } from '../server/automations/store.js'
 
 const HOLIDAY = 'en.indian#holiday@group.v.calendar.google.com'
@@ -132,4 +132,33 @@ test('upstream 404 on create and 502 on listing calendars are reported with stat
     console.log = orig
     await t.close()
   }
+})
+
+test('regression: V23 turns a left-out optional field into the text "undefined" (production 400): the Send test sends them all', async () => {
+  const { t, vs, a, sendTest, creates } = await setup()
+  try {
+    const res = await sendTest(a)
+    assert.equal(res.body.status, 'sent')
+    const input = creates().at(-1)
+    for (const [k, v] of Object.entries(CREATE_EVENT_EXPLICIT)) assert.equal(input[k], v, `${k} sent explicitly`)
+    assert.equal(input.recurrence, undefined, 'never a recurrence: every allowed value repeats the event')
+    const body = googleEventBody(input)
+    assert.deepEqual(googleRejects(body), [])
+    assert.doesNotMatch(JSON.stringify(body), /"undefined"/, 'no field reaches Google as the text "undefined"')
+    assert.deepEqual([body.start.dateTime.slice(10), body.end.dateTime.slice(10)], ['T09:00:00', 'T09:15:00'])
+
+    // The production payload (before this fix) reproduces production's exact answer, and the code is labelled as
+    // viaSocket's HTTP client code, not as Google's reason.
+    const before = Object.fromEntries(Object.entries(input).filter(([k]) => !(k in CREATE_EVENT_EXPLICIT)))
+    assert.deepEqual(googleRejects(googleEventBody(before)), ['colorId', 'visibility', 'guestsCanModify', 'reminders.useDefault'])
+    const answer = await vs.runAction('s', 'vcalcreate', before)
+    assert.deepEqual(answer, { success: false, message: 'Bad Request', code: 'ERR_BAD_REQUEST', status: 400 })
+    vs.state.calendars = [{ label: 'x', value: 'primary' }]
+    const original = vs.runAction
+    vs.runAction = async (sid, ver, data) => (ver === 'vcalcreate' ? answer : original(sid, ver, data))
+    const failed = await sendTest(a)
+    assert.equal(failed.body.status, 'failed')
+    assert.match(failed.body.detail, /Bad Request \(HTTP 400, viaSocket runtime code ERR_BAD_REQUEST\)$/)
+    assert.doesNotMatch(failed.body.detail, /reason ERR_BAD_REQUEST/)
+  } finally { await t.close() }
 })

@@ -167,7 +167,7 @@ export async function execute(vs, prepared, inputData) {
     if (error?.status === null || error?.status === undefined) return { outcome: 'unknown', reason: `No answer from viaSocket, so it is not known whether ${prepared.action.app} acted: ${prepared.action.check} before trying again.` }
     const diag = upstreamDiagnosis(error)
     // One redacted line for diagnosis: app, action, status, reason code. No input, body, ids or addresses.
-    console.log(`[action] ${prepared.action.app} ${prepared.action.actionId} failed: HTTP ${diag.status ?? error.status}${diag.reason ? `, reason ${diag.reason}` : ''}`)
+    console.log(`[action] ${prepared.action.app} ${prepared.action.actionId} failed: HTTP ${diag.status ?? error.status}${diag.reason ? `, reason ${diag.reason}` : ''}${diag.runtimeCode ? `, runtime code ${diag.runtimeCode}` : ''}`)
     return { outcome: 'failed', reason: cleanViasocketMessage(error), status: diag.status ?? error.status, providerReason: diag.reason }
   }
 }
@@ -302,8 +302,15 @@ const CALENDAR_ID = /^(primary|[^\s"'<>\\]{3,254})$/
 
 /** Create Calendar Event V23 refuses an empty value in any of these (its schema marks them required). */
 export const CREATE_EVENT_REQUIRED = ['calendar_id', 'summary', 'description', 'attendees', 'timeZone', 'starttime', 'startdate', 'meeting_duration', 'location']
+/**
+ * Optional fields V23 still copies into Google's request through template strings: one left out reaches Google
+ * as the text "undefined" (colorId "undefined", visibility "undefined", ...), which Google refuses with 400.
+ * These are the action's own declared defaults. recurrence cannot be sent (every allowed value repeats the event).
+ */
+export const CREATE_EVENT_EXPLICIT = Object.freeze({ colorId: '4', visibility: 'default', guestsCanModify: false, useDefault: true })
 export function requireCreateEventFields(input) {
-  const missing = CREATE_EVENT_REQUIRED.filter((k) => typeof input[k] !== 'string' || !input[k].trim())
+  const missing = [...CREATE_EVENT_REQUIRED.filter((k) => typeof input[k] !== 'string' || !input[k].trim()),
+    ...Object.keys(CREATE_EVENT_EXPLICIT).filter((k) => input[k] === undefined || input[k] === null || input[k] === '')]
   if (missing.length) throw new AppError(500, 'calendar_input_incomplete', `The calendar event is missing ${missing.join(', ')}; nothing was sent.`)
 }
 
@@ -373,15 +380,15 @@ export async function sendLiveTest(db, vs, user, connectionId, { slackChannelId,
     const input = {
       calendar_id: cal.id, summary: 'DealSaathi test event (deleted automatically)', description: `Created and removed by a DealSaathi test at ${stampText}.`,
       // attendees and location are required by the action: the owner's own address (no invitation to anyone else).
-      attendees: owner, timeZone: 'Asia/Kolkata', startdate: `${d}-${m}-${y}`, starttime: '09:00', meeting_duration: '00:15', location: 'DealSaathi test', status: 'confirmed', transparency: 'transparent'
+      attendees: owner, timeZone: 'Asia/Kolkata', startdate: `${d}-${m}-${y}`, starttime: '09:00', meeting_duration: '00:15', location: 'DealSaathi test', status: 'confirmed', transparency: 'transparent', ...CREATE_EVENT_EXPLICIT
     }
     requireCreateEventFields(input)
     const created = await runOnce(db, vs, user.id, connectionId, 'calendar_create_event', input)
     const ev = created.outcome === 'answered' ? readCalendarEvent(created.result) : { ok: false, unknown: created.outcome === 'unknown', reason: created.reason }
     if (!ev.ok) {
       const diag = created.outcome === 'answered' ? upstreamDiagnosis(created.result) : { status: created.status ?? null, reason: created.providerReason ?? null }
-      if (created.outcome === 'answered') console.log(`[action] Google Calendar rowuitv4m6uy refused: HTTP ${diag.status ?? '—'}${diag.reason ? `, reason ${diag.reason}` : ''}`)
-      const code = [diag.status ? `HTTP ${diag.status}` : null, diag.reason ? `reason ${diag.reason}` : null].filter(Boolean).join(', ')
+      if (created.outcome === 'answered') console.log(`[action] Google Calendar rowuitv4m6uy refused: HTTP ${diag.status ?? '—'}${diag.reason ? `, reason ${diag.reason}` : ''}${diag.runtimeCode ? `, runtime code ${diag.runtimeCode}` : ''}`)
+      const code = [diag.status ? `HTTP ${diag.status}` : null, diag.reason ? `reason ${diag.reason}` : null, diag.runtimeCode ? `viaSocket runtime code ${diag.runtimeCode}` : null].filter(Boolean).join(', ')
       out = { status: ev.unknown ? 'unknown' : 'failed', detail: `Creating the test event in ${cal.describe}: ${redact(ev.reason)}${code ? ` (${code})` : ''}`, diagnosis: { ...diag, calendar: cal.source } }
     } else {
       const del = await runOnce(db, vs, user.id, connectionId, 'calendar_delete_event', { calendarId: cal.id, eventId: ev.eventId, sendUpdates: 'none' })

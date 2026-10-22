@@ -19,7 +19,7 @@ import { now, transaction } from '../db.js'
 import { AppError, validationError } from '../errors.js'
 import { getLead, logActivity, requireLead } from '../leads/service.js'
 import { getProperty } from '../properties/service.js'
-import { gmailInput, readCalendarEvent, readFreeBusy, readGmailResult, runOnce } from '../integrations/run.js'
+import { CREATE_EVENT_EXPLICIT, gmailInput, readCalendarEvent, readFreeBusy, readGmailResult, runOnce } from '../integrations/run.js'
 import { finishRun, getSetting, startRun } from '../automations/store.js'
 import { addDays, describeInZone, hhmm, todayIn, utcToZoned, zonedToUtc } from '../time.js'
 import { emit } from '../events/bus.js'
@@ -205,7 +205,8 @@ function eventInput(db, row) {
     meeting_duration: hhmm(minutes),
     location: row.location || 'Address shared by your agent',
     status: 'confirmed',
-    transparency: 'opaque'
+    transparency: 'opaque',
+    ...CREATE_EVENT_EXPLICIT
   }
 }
 

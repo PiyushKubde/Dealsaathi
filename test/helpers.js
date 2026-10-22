@@ -78,6 +78,39 @@ const VERSIONS = {
 }
 export const V = VERSIONS
 
+/** Create Calendar Event V23's own body construction (published perform code, rown3bkuc5jc), without the HTTP call. */
+export function googleEventBody(input) {
+  const [y, m, d] = [input.startdate.split('-')[2], input.startdate.split('-')[1], input.startdate.split('-')[0]]
+  const start = new Date(`${y}-${m}-${d}T${input.starttime}:00Z`)
+  const [h, min] = input.meeting_duration.split(':').map(Number)
+  const end = new Date(start.getTime() + h * 3600000 + min * 60000).toISOString().split('.')[0]
+  return {
+    summary: input.summary, status: input.status, recurrence: [input.recurrence],
+    location: `${input.location}`, description: `${input.description}`, guestsCanModify: `${input.guestsCanModify}`,
+    start: { dateTime: `${y}-${m}-${d}T${input.starttime}:00`, timeZone: `${input.timeZone}` }, end: { dateTime: end, timeZone: `${input.timeZone}` },
+    colorId: `${input.colorId}`, visibility: `${input.visibility}`, transparency: `${input.transparency}`,
+    reminders: { useDefault: `${input.useDefault}` },
+    attendees: input.attendees.split(',').map((email) => ({ email: email.trim() }))
+  }
+}
+
+/**
+ * Values Google Calendar's events.insert cannot accept (an assumption about Google, not something seen in a
+ * response body): colorId outside 1-11, unknown enum values, booleans that are neither true nor false.
+ * recurrence: [null] (left out) is accepted here: whether Google accepts it is not known.
+ */
+export function googleRejects(body) {
+  const bad = []
+  if (!/^([1-9]|1[01])$/.test(body.colorId)) bad.push('colorId')
+  if (!['default', 'public', 'private', 'confidential'].includes(body.visibility)) bad.push('visibility')
+  if (!['opaque', 'transparent'].includes(body.transparency)) bad.push('transparency')
+  if (body.status !== undefined && !['confirmed', 'tentative', 'cancelled'].includes(body.status)) bad.push('status')
+  if (!['true', 'false'].includes(body.guestsCanModify)) bad.push('guestsCanModify')
+  if (!['true', 'false'].includes(body.reminders.useDefault)) bad.push('reminders.useDefault')
+  if (body.recurrence.some((r) => r !== undefined && r !== null && !/^RRULE:/.test(r))) bad.push('recurrence')
+  return bad
+}
+
 export function fakeVs({ gmailServiceId = 'rowo0bqrhj5g' } = {}) {
   const state = {
     connections: {}, flows: {},
@@ -139,6 +172,13 @@ export function fakeVs({ gmailServiceId = 'rowo0bqrhj5g' } = {}) {
         // (an empty attendees list was answered "Bad Request" in production).
         const missing = ['calendar_id', 'summary', 'description', 'attendees', 'timeZone', 'starttime', 'startdate', 'meeting_duration', 'location'].filter((k) => !String(inputData[k] ?? '').trim())
         if (missing.length) throw vsError('Bad Request', 400)
+        // The request body V23's published perform code builds (confirmed from the action's code): every optional
+        // field goes through a template string, so one left out arrives at Google as the text "undefined".
+        const body = googleEventBody(inputData)
+        const invalid = googleRejects(body)
+        // What production saw: viaSocket's errorComponent answers with axios's code, not Google's error body.
+        if (invalid.length) return { success: false, message: 'Bad Request', code: 'ERR_BAD_REQUEST', status: 400 }
+        state.lastGoogleBody = body
         const id = `evt${++events}`
         state.events[id] = { id, ...inputData }
         return { id, status: 'confirmed', htmlLink: `https://calendar.google.com/event?eid=${id}` }

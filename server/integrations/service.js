@@ -52,8 +52,11 @@ export function upstreamDiagnosis(source) {
   walk(source?.body ?? source, 0)
   const numeric = [source?.status, source?.statusCode, source?.body?.status, source?.response?.status, source?.data?.response?.status, source?.error?.code]
     .map(Number).find((n) => Number.isInteger(n) && n >= 400 && n < 600)
-  const reason = codes.find((c) => !/^(error|failed|false|true)$/i.test(c)) || null
-  return { status: numeric ?? null, reason: reason ? redact(reason).slice(0, 40) : null }
+  // ERR_BAD_REQUEST, ECONNRESET...: codes from the HTTP client inside viaSocket's runtime (axios, Node), not the provider's reason.
+  const runtime = (c) => /^(ERR_[A-Z_]+|E[A-Z]{3,})$/.test(c)
+  const reason = codes.find((c) => !runtime(c) && !/^(error|failed|false|true)$/i.test(c)) || null
+  const runtimeCode = codes.find(runtime) || null
+  return { status: numeric ?? null, reason: reason ? redact(reason).slice(0, 40) : null, runtimeCode }
 }
 
 /** Turns a failed viaSocket call into an answer the broker can act on. */
@@ -63,7 +66,7 @@ export function viasocketError(error, what) {
   if (status === 401 || status === 403) return new AppError(502, 'viasocket_auth', `viaSocket refused ${what}: this app's viaSocket credentials were not accepted.`)
   if (status === null || status === undefined) return new AppError(504, 'viasocket_unreachable', `Could not reach viaSocket to ${what}. Try again in a moment.`)
   const diag = upstreamDiagnosis(error)
-  console.log(`[viasocket] could not ${what}: HTTP ${diag.status ?? status}${diag.reason ? `, reason ${diag.reason}` : ''}`)
+  console.log(`[viasocket] could not ${what}: HTTP ${diag.status ?? status}${diag.reason ? `, reason ${diag.reason}` : ''}${diag.runtimeCode ? `, runtime code ${diag.runtimeCode}` : ''}`)
   const message = cleanViasocketMessage(error)
   const extra = [!message.includes(String(diag.status ?? status)) ? `HTTP ${diag.status ?? status}` : null, diag.reason && !message.includes(diag.reason) ? `reason ${diag.reason}` : null].filter(Boolean).join(', ')
   return new AppError(502, 'viasocket_error', `viaSocket could not ${what}: ${message}${extra ? ` (${extra})` : ''}`)

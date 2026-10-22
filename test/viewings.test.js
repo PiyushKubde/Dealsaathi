@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startApp, fakeVs, signedInUser, vsError, V } from './helpers.js'
+import { startApp, fakeVs, signedInUser, vsError, V, googleEventBody, googleRejects } from './helpers.js'
 import { addDays, todayIn, zonedToUtc } from '../server/time.js'
 
 const LEAD = { full_name: 'Rahul Sharma', customer_type: 'buyer', email: 'rahul@example.com', phone: '9876543210', preferred_location: 'Baner, Pune', bedrooms: 2, budget_max: 5000000 }
@@ -75,6 +75,7 @@ test('review → confirm: re-checks, creates the event with the documented input
     assert.equal(input.meeting_duration, '01:30')
     assert.equal(input.timeZone, TZ)
     assert.equal(input.transparency, 'opaque', 'the viewing blocks the slot')
+    assert.deepEqual(googleRejects(googleEventBody(input)), [], 'V23 sends Google no "undefined" values')
     assert.equal(input.attendees, 'me@example.com', 'not inviting the lead: the calendar owner is the only attendee (the action requires one)')
     assert.ok(Object.values(input).every((x) => x !== ''), 'no required field is sent empty')
     assert.match(input.location, /12 Baner Road, Baner, Pune/)
