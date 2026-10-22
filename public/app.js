@@ -606,6 +606,7 @@ function renderLogin(view = session.hasUsers ? 'signin' : 'register') {
         <div id="auth-error"></div>
         <button class="btn primary" type="submit">${register ? 'Create account' : 'Sign in'}</button>
         <button class="btn ghost" type="button" id="auth-switch">${register ? 'I already have an account' : 'Create an account'}</button>
+        ${register ? '' : '<button class="btn link small" type="button" id="auth-forgot">Forgot your password?</button>'}
       </form>
     </div>`
   const form = document.getElementById('auth-form')
@@ -615,6 +616,7 @@ function renderLogin(view = session.hasUsers ? 'signin' : 'register') {
     if (code) code.hidden = form.elements.role.value !== 'agent'
   }))
   document.getElementById('auth-switch').addEventListener('click', () => renderLogin(register ? 'signin' : 'register'))
+  document.getElementById('auth-forgot')?.addEventListener('click', renderForgot)
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
     const body = Object.fromEntries(new FormData(form))
@@ -629,6 +631,68 @@ function renderLogin(view = session.hasUsers ? 'signin' : 'register') {
       document.getElementById('auth-error').innerHTML = `<div class="notice err">${esc(error.message)}</div>`
     }
   })
+}
+
+function renderForgot() {
+  main.innerHTML = `<div class="card" style="max-width:440px;margin:3rem auto"><h1>Reset your password</h1>
+    <p class="muted">Enter your account’s email. If it has an account, we send a link that works for 30 minutes.</p>
+    <form id="fg-form" class="stack" novalidate><div class="field" data-field="email"><label for="fg-email">Email</label><input id="fg-email" name="email" type="email" autocomplete="email"><div class="err"></div></div>
+      <div id="fg-msg"></div><button class="btn primary" type="submit">Send reset link</button><button class="btn ghost" type="button" id="fg-back">Back to sign in</button></form></div>`
+  document.getElementById('fg-back').addEventListener('click', () => renderLogin('signin'))
+  document.getElementById('fg-form').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const msg = document.getElementById('fg-msg')
+    try {
+      const r = await api('/api/session/password/forgot', { method: 'POST', body: { email: e.target.elements.email.value } })
+      msg.innerHTML = `<div class="notice ok">${esc(r.message)}</div>`
+    } catch (error) { msg.innerHTML = `<div class="notice ${error.status === 503 ? 'warn' : 'err'}">${esc(error.message)}</div>` }
+  })
+}
+
+async function renderResetPassword(token) {
+  main.innerHTML = `<div class="card" style="max-width:440px;margin:3rem auto"><h1>Choose a new password</h1>
+    <form id="rp-form" class="stack" novalidate><div class="field" data-field="password"><label for="rp-pw">New password</label><input id="rp-pw" name="password" type="password" autocomplete="new-password"><div class="hint">At least 10 characters. You will be signed out everywhere.</div><div class="err"></div></div>
+      <div id="rp-msg"></div><button class="btn primary" type="submit">Save new password</button></form></div>`
+  document.getElementById('rp-form').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    try {
+      await api('/api/session/password/reset', { method: 'POST', body: { token, password: e.target.elements.password.value } })
+      history.replaceState(null, '', '#/dashboard')
+      session.user = null
+      updateAccessUi()
+      renderLogin('signin')
+      toast('Password changed. Sign in with the new one.')
+    } catch (error) { showFieldErrors(e.target, error.details?.fields); document.getElementById('rp-msg').innerHTML = `<div class="notice err">${esc(error.message)}</div>` }
+  })
+}
+
+async function renderVerifyEmail(token) {
+  main.innerHTML = '<div class="card" style="max-width:440px;margin:3rem auto"><h1>Confirming your email…</h1></div>'
+  try {
+    const r = await api('/api/session/verify-email', { method: 'POST', body: { token } })
+    if (session.user) session.user.emailVerified = true
+    main.innerHTML = `<div class="card" style="max-width:440px;margin:3rem auto"><h1>Email confirmed</h1><p>Thank you.${r.tenanciesLinked ? ` ${r.tenanciesLinked} tenancy record(s) were linked to your account.` : ''}</p><a class="btn primary" href="#/dashboard">Continue</a></div>`
+    updateAccessUi()
+  } catch (error) {
+    main.innerHTML = `<div class="card" style="max-width:440px;margin:3rem auto"><h1>Link not valid</h1><div class="notice err">${esc(error.message)}</div><a href="#/dashboard">Continue</a></div>`
+  }
+  history.replaceState(null, '', '#/dashboard')
+}
+
+async function renderInvite(token) {
+  try {
+    const p = await api('/api/invites/preview', { method: 'POST', body: { token } })
+    const ok = p.state === 'pending' && p.matchesYourAccount
+    main.innerHTML = `<div class="card" style="max-width:520px;margin:3rem auto"><h1>Tenancy invitation</h1>
+      <p>${esc(p.agentName || 'An agent')} invited <strong>${esc(p.sentTo)}</strong> to see a tenancy as its ${esc(p.party)}${p.propertyLabel ? `: <strong>${esc(p.propertyLabel)}</strong>` : ''}.</p>
+      ${p.state !== 'pending' ? `<div class="notice warn">This invitation is ${esc(p.state)}. Ask your agent for a new one.</div>` : !p.matchesYourAccount ? `<div class="notice warn">You are signed in as ${esc(session.user.email)} (${esc(ROLE_LABEL[session.user.role])}). This invitation is for a ${p.party === 'tenant' ? 'buyer/tenant' : 'seller/landlord'} account with the invited email. Sign out and sign in with that account.</div>` : ''}
+      <div id="inv-msg"></div><div class="row end">${ok ? '<button class="btn primary" id="inv-accept">Accept</button>' : ''}<a class="btn ghost" href="#/dashboard">Not now</a></div></div>`
+    document.getElementById('inv-accept')?.addEventListener('click', async () => {
+      try { await api('/api/invites/accept', { method: 'POST', body: { token } }); store.set('pendingInvite', null); toast('Tenancy linked to your account.'); location.hash = '#/my-tenancies' } catch (error) { document.getElementById('inv-msg').innerHTML = `<div class="notice err">${esc(error.message)}</div>` }
+    })
+  } catch (error) {
+    main.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
+  }
 }
 
 function renderLocked() {
@@ -667,9 +731,14 @@ function updateAccessUi() {
   const box = document.createElement('div')
   box.id = 'account'
   box.className = 'account'
-  box.innerHTML = `<div class="small"><strong>${esc(session.user.name)}</strong> <span class="badge">${esc(ROLE_LABEL[session.user.role] || '')}</span><div class="muted">${esc(session.user.email)}</div></div>`
+  box.innerHTML = `<div class="small"><strong>${esc(session.user.name)}</strong> <span class="badge">${esc(ROLE_LABEL[session.user.role] || '')}</span><div class="muted">${esc(session.user.email)}</div>
+    ${session.user.emailVerified ? '' : '<div class="small" style="margin-top:.25rem"><span class="pill pill-setup">Email not verified</span> <button class="btn link small" type="button" id="verify-send">Send link</button></div>'}</div>`
+  box.querySelector('#verify-send')?.addEventListener('click', async () => {
+    try { await api('/api/me/verification/send', { method: 'POST', body: {} }); toast(`Verification link sent to ${session.user.email}.`) } catch (error) { toast(error.message) }
+  })
   const out = document.createElement('button')
   out.className = 'btn ghost small'
+  out.id = 'sign-out'
   out.textContent = 'Sign out'
   out.addEventListener('click', async () => {
     await api('/api/session/logout', { method: 'POST', body: {} }).catch(() => {})
@@ -791,8 +860,9 @@ async function renderIntegrations() {
         ${a.liveBlocked ? `<div class="notice warn small"><strong>Not available for live use.</strong> ${esc(a.liveBlocked)}</div>` : a.inUse ? '' : '<div class="notice info small">DealSaathi does not use this app yet. You can connect it now; nothing will run on it until that feature is built.</div>'}
         ${a.error ? `<div class="notice err small">${esc(a.error)}</div>` : ''}
         ${a.connections.length ? `<ul class="timeline">${a.connections.map((c) => `<li class="conn-row"><div style="flex:1;min-width:0"><strong>${esc(c.label || a.name)}</strong> ${STATUS_BADGE[c.status] || ''}
-            <div class="small muted">connected ${esc(fmtDate(c.createdAt))}${c.verification ? ` · access check ${esc(fmtDateTime(c.verification.at))}: <span style="color:${c.verification.status === 'ok' ? 'inherit' : 'var(--danger)'}">${esc(c.verification.detail)}</span>` : ' · access not checked yet'}</div></div>
+            <div class="small muted">connection #${c.id} · connected ${esc(fmtDate(c.createdAt))}${c.verification ? ` · access check ${esc(fmtDateTime(c.verification.at))}: <span style="color:${c.verification.status === 'ok' ? 'inherit' : 'var(--danger)'}">${esc(c.verification.detail)}</span>` : ' · access not checked yet'}</div></div>
             ${c.status === 'active' && a.inUse ? `<button class="btn ghost small" data-verify="${c.id}">Check access</button>` : ''}
+            ${c.status === 'active' && ['gmail', 'slack', 'google-calendar'].includes(a.slug) ? `<button class="btn ghost small" data-livetest="${c.id}" data-slug="${a.slug}">Send test</button>` : ''}
             ${c.status === 'expired' ? `<button class="btn ghost small" data-reconnect="${c.id}">Reconnect</button>` : ''}
             <button class="btn ghost small" data-disconnect="${c.id}" data-name="${esc(a.name)}">Disconnect</button></li>`).join('')}</ul>` : ''}
         <div><button class="btn ${active.length || !a.inUse ? 'ghost' : 'primary'} connect-btn" data-connect="${esc(a.slug)}" ${ready && a.serviceId ? '' : 'disabled'}>${appIcon(a.iconUrl, a.name)} ${active.length ? `Connect another ${esc(a.name)} account` : `Connect ${esc(a.name)}`}</button></div>
@@ -819,6 +889,28 @@ async function renderIntegrations() {
       try {
         const r = await api(`/api/integrations/connections/${b.dataset.verify}/verify`, { method: 'POST', body: {} })
         toast(r.status === 'ok' ? r.detail : `Access check failed: ${r.detail}`)
+      } catch (error) { toast(error.message) }
+      draw()
+    }))
+    grid.querySelectorAll('[data-livetest]').forEach((b) => b.addEventListener('click', async () => {
+      const slug = b.dataset.slug
+      const body = { confirm: true }
+      if (slug === 'slack') {
+        try {
+          const { options } = await api(`/api/automations/slack-channels?connectionId=${b.dataset.livetest}`)
+          const pick = prompt(`Post one test message to which channel?\n${options.map((o) => o.label).join(', ')}`, options[0]?.label || '')
+          const ch = options.find((o) => o.label === pick || o.value === pick)
+          if (!ch) return
+          body.slackChannelId = ch.value
+        } catch (error) { toast(error.message); return }
+      }
+      const what = { gmail: `send one real email to ${session.user.email}`, slack: 'post one real message to that channel', 'google-calendar': 'create a real 15-minute event tomorrow at 09:00 in your calendar and delete it again' }[slug]
+      if (!(await confirmDialog('Run a real test?', `This will ${what}, through your own connected account.`, 'Run test'))) return
+      b.disabled = true
+      b.textContent = 'Testing…'
+      try {
+        const r = await api(`/api/integrations/connections/${b.dataset.livetest}/test`, { method: 'POST', body })
+        toast(r.status === 'sent' ? `Real test passed: ${r.detail}` : `Test ${r.status}: ${r.detail}`)
       } catch (error) { toast(error.message) }
       draw()
     }))
@@ -1659,6 +1751,7 @@ const T_FIELDS = [
   { key: 'tenant_name', label: 'Tenant name', type: 'text', required: true },
   { key: 'tenant_email', label: 'Tenant email', type: 'email', hint: 'Reminders are emailed here.' },
   { key: 'tenant_phone', label: 'Tenant phone', type: 'tel' },
+  { key: 'landlord_email', label: 'Landlord email', type: 'email', hint: 'To invite the landlord to see this tenancy.' },
   { key: 'property_label', label: 'Property', type: 'text', required: true, hint: 'e.g. Flat 4B, Koramangala' },
   { key: 'rent_amount', label: 'Monthly rent (₹)', type: 'number', min: 1, max: 100000000, required: true },
   { key: 'due_day', label: 'Due on day of month', type: 'number', min: 1, max: 28, required: true },
@@ -1732,7 +1825,33 @@ async function renderTenancy(id) {
         ${x.reminders.length ? `<div class="small muted">Reminders: ${x.reminders.map((r) => `${esc(r.stage.replace('_', ' '))} ${esc(r.status)}`).join(', ')}</div>` : ''}</div>
       ${['open', 'partially_paid'].includes(x.status) ? `<div class="row"><button class="btn ghost small" data-pay>Record payment</button>${x.paymentLink ? '<button class="btn ghost small" data-check>Check Razorpay</button>' : ''}<button class="btn ghost small" data-waive>Waive</button></div>` : ''}</div>
       <div class="due-extra"></div></li>`).join('')}</ul>` : '<p class="muted">No rent obligations yet.</p>'}</section>
+    <section class="card" style="margin-top:1rem"><h2>Who else can see this tenancy</h2>
+      <p class="small muted">Only an account you invite (signed in with the email on the tenancy) or one whose email is verified can see it. Tenants see their rent; landlords also record rent they received.</p>
+      <ul class="timeline">${[['tenant', t.tenant_email], ['landlord', t.landlord_email]].map(([party, email]) => {
+        const p = d.parties[party]
+        return `<li class="conn-row" data-party="${party}"><div style="flex:1;min-width:0"><strong>${party === 'tenant' ? 'Tenant' : 'Landlord'}</strong> ${p.linked ? '<span class="pill pill-on">Linked</span>' : p.pendingInvite ? '<span class="pill pill-setup">Invited</span>' : '<span class="pill pill-off">Not linked</span>'}
+          <div class="small muted">${email ? esc(email) : `No ${party} email on the tenancy`}${p.pendingInvite ? ` · invitation valid until ${esc(fmtDate(p.pendingInvite.expires_at))}` : ''}</div><div class="invite-out"></div></div>
+          ${email && !p.linked ? `<button class="btn ghost small" data-invite>${p.pendingInvite ? 'New invitation link' : 'Invite'}</button>` : ''}
+          ${p.pendingInvite ? '<button class="btn ghost small" data-revoke>Withdraw invitation</button>' : ''}
+          ${p.linked ? '<button class="btn ghost small" data-unlink>Remove access</button>' : ''}</li>`
+      }).join('')}</ul></section>
     <section class="card" style="margin-top:1rem"><h2>History</h2><ul class="timeline">${d.events.map((e) => `<li class="small"><strong>${esc(e.detail)}</strong><div class="muted">${esc(fmtDateTime(e.created_at))}</div></li>`).join('')}</ul></section>`
+  main.querySelectorAll('[data-party]').forEach((li) => {
+    const party = li.dataset.party
+    li.querySelector('[data-invite]')?.addEventListener('click', async () => {
+      try {
+        const r = await api(`/api/rent/tenancies/${t.id}/invites`, { method: 'POST', body: { party } })
+        li.querySelector('.invite-out').innerHTML = `<div class="notice info small" style="margin-top:.5rem">Send this link to ${esc(r.email)} yourself (it is shown only now and works once, until ${esc(fmtDate(r.expiresAt))}):
+          <div class="row" style="margin-top:.35rem"><input readonly value="${esc(r.link)}" aria-label="Invitation link"><button class="btn ghost small" type="button" data-copy>Copy</button></div></div>`
+        li.querySelector('[data-copy]').addEventListener('click', () => { navigator.clipboard?.writeText(r.link).then(() => toast('Link copied.')).catch(() => toast('Select the link and copy it.')) })
+      } catch (error) { toast(error.details?.fields ? Object.values(error.details.fields).join(' ') : error.message) }
+    })
+    li.querySelector('[data-revoke]')?.addEventListener('click', async () => { try { await api(`/api/rent/tenancies/${t.id}/invites/revoke`, { method: 'POST', body: { party } }); renderTenancy(t.id) } catch (error) { toast(error.message) } })
+    li.querySelector('[data-unlink]')?.addEventListener('click', async () => {
+      if (!(await confirmDialog(`Remove the ${party}’s access?`, 'They will no longer see this tenancy in DealSaathi.', 'Remove access'))) return
+      try { await api(`/api/rent/tenancies/${t.id}/unlink`, { method: 'POST', body: { party } }); renderTenancy(t.id) } catch (error) { toast(error.message) }
+    })
+  })
   main.querySelectorAll('[data-due]').forEach((li) => {
     const dueId = li.dataset.due
     const extra = li.querySelector('.due-extra')
@@ -2006,7 +2125,7 @@ async function renderMyTenancies() {
       <p class="small">${rupees(t.rentAmount)} a month, due on day ${t.dueDay} · ${esc(t.status)}${landlord ? ` · tenant ${esc(t.tenantName)}` : ''}${t.agent ? ` · managed by ${esc(t.agent.name)}` : ''}</p>
       <ul class="timeline">${dues.map((d) => `<li data-due="${d.id}"><strong>${esc(d.period)}</strong> ${DUE_STATE[d.state]} <span class="small">due ${esc(d.dueDate)} · ${rupees(d.amount)}${d.amountPaid ? ` · ${rupees(d.amountPaid)} paid` : ''}${d.verificationSource ? ` (${d.verificationSource === 'razorpay' ? 'confirmed by Razorpay' : 'recorded'})` : ''}</span>
         ${safeUrl(d.paymentLink?.url) ? `<div class="small"><a href="${esc(d.paymentLink.url)}" target="_blank" rel="noopener noreferrer">Pay with Razorpay</a></div>` : ''}
-        ${d.canRecord ? '<button class="btn ghost small" data-pay>Record payment received</button><div class="due-extra"></div>' : ''}</li>`).join('')}</ul></section>`).join('') : `<p class="muted">No tenancy is linked to your account. ${landlord ? 'Your agent links one by entering your email as the landlord’s.' : 'Your agent links one by entering your email as the tenant’s.'}</p>`}`
+        ${d.canRecord ? '<button class="btn ghost small" data-pay>Record payment received</button><div class="due-extra"></div>' : ''}</li>`).join('')}</ul></section>`).join('') : `<p class="muted">No tenancy is linked to your account. Your agent can send you an invitation link, or link it once your email address is verified.</p>`}`
   main.querySelectorAll('[data-pay]').forEach((b) => b.addEventListener('click', () => {
     const li = b.closest('[data-due]')
     li.querySelector('.due-extra').innerHTML = `<form class="form-grid" novalidate style="margin-top:.5rem">
@@ -2048,9 +2167,15 @@ const ROUTES = {
 
 async function route() {
   if (session.mode === 'locked') return renderLocked()
-  if (!session.user) return renderLogin()
   const [path, query = ''] = location.hash.replace(/^#/, '').split('?')
   const parts = path.split('/').filter(Boolean)
+  // Links from emails work signed in or not; an invitation waits for sign-in.
+  if (parts[0] === 'verify-email' && parts[1]) return renderVerifyEmail(parts[1])
+  if (parts[0] === 'reset-password' && parts[1]) return renderResetPassword(parts[1])
+  if (parts[0] === 'invite' && parts[1]) store.set('pendingInvite', parts[1])
+  if (!session.user) return renderLogin()
+  const invite = store.get('pendingInvite')
+  if (invite) { store.set('pendingInvite', null); history.replaceState(null, '', '#/dashboard'); return renderInvite(invite) }
   const params = new URLSearchParams(query)
   const section = parts[0] || 'dashboard'
   document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === section))

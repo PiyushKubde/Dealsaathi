@@ -210,3 +210,5 @@ dialog.wide-dialog { max-width: 560px; width: calc(100% - 2rem); max-height: 85v
 .timeline li.unread { background: var(--accent-soft, rgba(15,118,110,.06)); border-radius: 6px; padding-left: .5rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 nav .badge { margin-left: .25rem; }
+
+.btn.link { background: none; border: 0; padding: 0; color: var(--accent, #0f766e); text-decoration: underline; cursor: pointer; }

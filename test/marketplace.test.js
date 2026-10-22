@@ -385,10 +385,14 @@ test('tenancies: the tenant and landlord see their own tenancy; only the landlor
     const res = await t.call('/api/rent/tenancies', { method: 'POST', body: { tenancy: { tenant_name: 'Rahul Sharma', tenant_email: 'rahul@example.com', landlord_email: 'sunita@example.com', property_label: 'Flat 4B', rent_amount: 28000, due_day: 5, lease_start: todayIn('Asia/Kolkata') } } })
     assert.equal(res.status, 201)
     const { tenancy } = res.body
-    assert.equal(tenancy.tenant_user_id, buyer.id)
-    assert.equal(tenancy.landlord_user_id, seller.id)
+    assert.equal(tenancy.tenant_user_id, null, 'a typed email alone links nobody')
+    // The agent invites both; each accepts while signed in with the invited email.
+    for (const [party, who] of [['tenant', buyer], ['landlord', seller]]) {
+      const link = (await t.call(`/api/rent/tenancies/${tenancy.id}/invites`, { method: 'POST', body: { party } })).body.link
+      assert.equal((await t.call('/api/invites/accept', { method: 'POST', body: { token: link.split('/').pop() }, as: who })).status, 200)
+    }
     await t.idle()
-    assert.equal(notes(t, buyer, 'rent').length, 1)
+    assert.equal(notes(t, buyer, 'rent').filter((n) => /linked to your account/.test(n.title)).length, 1, 'the tenant is told once that the tenancy is linked')
     const mine = (await t.call('/api/me/tenancies', { as: buyer })).body.tenancies
     assert.equal(mine.length, 1)
     assert.equal(mine[0].tenancy.role, 'tenant')
@@ -458,5 +462,72 @@ test('matching stays quick with a realistic volume (1,500 listings × 1,500 buye
     assert.equal(again.newMatches, 0)
     const order1 = db.prepare("SELECT property_id FROM property_matches WHERE lead_id = 750 AND status = 'suggested' ORDER BY score DESC, property_id").all().map((r) => r.property_id)
     assert.equal(order1.length, b.matched)
+  } finally { await t.close() }
+})
+
+test('notifications across 2 agents, 2 buyers and 2 sellers: each person sees only what concerns them', async () => {
+  const { t, agent, buyer, seller } = await market({ areas: ['Pune'] })
+  try {
+    const agent2 = signedInUser(t.db, { name: 'Bina Agent', email: 'bina@agency.in' })
+    await t.call('/api/me/profile', { method: 'PATCH', body: { serviceAreas: ['Mumbai'] }, as: agent2 })
+    const buyer2 = signedInUser(t.db, { name: 'Meera Iyer', email: 'meera@example.com', role: 'buyer' })
+    const seller2 = signedInUser(t.db, { name: 'Kabir Shah', email: 'kabir@example.com', role: 'seller' })
+    await saveReq(t, buyer) // Pune → Asha
+    await saveReq(t, buyer2, { customer_type: 'buyer', preferred_location: 'Andheri, Mumbai', bedrooms: 2, budget_max: 9000000 }) // Mumbai → Bina
+    const pune = (await t.call('/api/properties', { method: 'POST', body: { property: BANER }, as: seller })).body.property
+    const mumbai = (await t.call('/api/properties', { method: 'POST', body: { property: { ...BANER, title: 'Andheri 2 BHK', city: 'Mumbai', locality: 'Andheri', price: 8500000, address: '5 Link Road' } }, as: seller2 })).body.property
+    await t.call(`/api/properties/${pune.id}/publish`, { method: 'POST', body: {}, as: seller })
+    await t.call(`/api/properties/${mumbai.id}/publish`, { method: 'POST', body: {}, as: seller2 })
+    await t.idle()
+    const text = (u) => JSON.stringify(notes(t, u))
+    // Agents: their own buyers and listings only.
+    assert.match(text(agent), /Rahul Sharma/)
+    assert.doesNotMatch(text(agent), /Meera|Andheri|Kabir/)
+    assert.match(text(agent2), /Meera Iyer/)
+    assert.doesNotMatch(text(agent2), /Rahul|Baner|Sunita/)
+    // Buyers: their own matches only, never another buyer.
+    assert.match(text(buyer), /2 BHK in Baner/)
+    assert.doesNotMatch(text(buyer), /Andheri|Meera/)
+    assert.match(text(buyer2), /Andheri 2 BHK/)
+    assert.doesNotMatch(text(buyer2), /Baner|Rahul/)
+    // Sellers: that buyers match, never who; never the other seller's listing.
+    assert.match(text(seller), /Buyers are matching your listing 2 BHK in Baner/)
+    assert.doesNotMatch(text(seller), /Rahul|Meera|Andheri|rahul@/)
+    assert.doesNotMatch(text(seller2), /Rahul|Meera|Baner|meera@/)
+    // Nobody can read anyone else's notifications through the API.
+    const theirs = notes(t, buyer2)[0].id
+    for (const u of [agent, agent2, buyer, seller, seller2]) assert.equal((await t.call(`/api/notifications/${theirs}/read`, { method: 'POST', body: {}, as: u })).status, 404)
+    for (const u of [buyer, buyer2, seller, seller2]) assert.equal((await t.call('/api/events', { as: u })).status, 403)
+    // Agent 2's activity log holds nothing about agent 1's buyer.
+    assert.doesNotMatch(JSON.stringify((await t.call('/api/events', { as: agent2 })).body.events), new RegExp(`"leadId":${t.db.prepare('SELECT id FROM leads WHERE buyer_user_id = ?').get(buyer.id).id}[,}]`))
+  } finally { await t.close() }
+})
+
+test('Send test (stand-in for viaSocket): needs confirmation, records the provider’s ids, and fails honestly', async () => {
+  const vs = fakeVs()
+  const { t } = await market({ vs })
+  try {
+    const conn = async (slug) => (await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: await vs.serviceIdFor(slug), authId: slug === 'slack' ? vs.connectSlack(t.user.id) : vs.connectApp(t.user.id, slug) } })).body.connection
+    const gmail = await conn('gmail')
+    const cal = await conn('google-calendar')
+    const slack = await conn('slack')
+    assert.equal((await t.call(`/api/integrations/connections/${gmail.id}/test`, { method: 'POST', body: {} })).status, 400, 'nothing runs without confirmation')
+    const g = (await t.call(`/api/integrations/connections/${gmail.id}/test`, { method: 'POST', body: { confirm: true } })).body
+    assert.equal(g.status, 'sent')
+    assert.equal(g.providerIds.messageId, 'msg_123')
+    assert.equal(vs.calls.filter((c) => c.name === 'runAction').at(-1).args[2].to, t.user.email, 'only to the agent’s own address')
+    const c = (await t.call(`/api/integrations/connections/${cal.id}/test`, { method: 'POST', body: { confirm: true } })).body
+    assert.equal(c.status, 'sent')
+    assert.match(c.detail, /created event evt\d+ .* and deleted it again/)
+    assert.equal((await t.call(`/api/integrations/connections/${slack.id}/test`, { method: 'POST', body: { confirm: true } })).status, 400, 'Slack needs a channel')
+    vs.fail.runAction = vsError('channel_not_found', 404)
+    const s = (await t.call(`/api/integrations/connections/${slack.id}/test`, { method: 'POST', body: { confirm: true, slackChannelId: 'C0LEADS' } })).body
+    assert.equal(s.status, 'failed')
+    assert.match(s.detail, /channel_not_found/)
+    const deliveries = (await t.call('/api/deliveries')).body.deliveries
+    assert.ok(deliveries.some((d) => d.status === 'sent' && /msg_123/.test(d.detail)))
+    assert.ok(deliveries.some((d) => d.status === 'failed' && /channel_not_found/.test(d.detail)))
+    const other = signedInUser(t.db, { name: 'Other Agent' })
+    assert.equal((await t.call(`/api/integrations/connections/${gmail.id}/test`, { method: 'POST', body: { confirm: true }, as: other })).status, 404, 'only the connection’s owner')
   } finally { await t.close() }
 })

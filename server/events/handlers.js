@@ -170,8 +170,9 @@ export function createHandlers({ db, notifyThrough, leadAlertMessage }) {
     } else if (event.type === 'rent.reminder_sent') {
       tell(t.tenant_user_id, `Rent for ${p.period}: ${p.label}`, '#/my-tenancies')
     } else if (event.type === 'tenancy.linked') {
-      tell(t.tenant_user_id, 'A tenancy was linked to your account', '#/my-tenancies')
-      tell(t.landlord_user_id, 'A tenancy on your property was linked to your account', '#/my-tenancies')
+      // Only the person who was just linked is told.
+      if (p.tenantNew) tell(t.tenant_user_id, 'A tenancy was linked to your account', '#/my-tenancies')
+      if (p.landlordNew) tell(t.landlord_user_id, 'A tenancy on your property was linked to your account', '#/my-tenancies')
     }
     return { notified: done }
   }

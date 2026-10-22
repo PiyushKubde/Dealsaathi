@@ -4,6 +4,7 @@
 import { now } from '../db.js'
 import { AppError } from '../errors.js'
 import { cleanViasocketMessage, requireOwnConnection, requireViasocket, viasocketError } from './service.js'
+import { claimExternal, finishExternal } from '../notifications/service.js'
 
 /** The only actions DealSaathi runs. Code picks one of these by name; nothing else can be run. */
 export const ACTIONS = {
@@ -289,4 +290,59 @@ export async function verifyAccess(db, vs, userId, connectionId) {
   }
   db.prepare('UPDATE connections SET verified_at = ?, verify_status = ?, verify_detail = ? WHERE id = ?').run(new Date().toISOString(), status, detail, connectionId)
   return { status, detail, checkedAt: new Date().toISOString() }
+}
+
+/**
+ * A real test through one of the agent's own connections, started by the agent and confirmed by them first:
+ *   Gmail            sends one email to the agent's own address
+ *   Slack            posts one message to the channel they pick
+ *   Google Calendar  creates a 15-minute event tomorrow at 09:00 (India time) in the chosen calendar, then deletes it
+ * The provider's own ids are recorded (Deliveries); nothing is called a success without them.
+ */
+export async function sendLiveTest(db, vs, user, connectionId, { slackChannelId, calendarId } = {}) {
+  const row = db.prepare('SELECT * FROM connections WHERE id = ? AND user_id = ?').get(connectionId, user.id)
+  if (!row) throw new AppError(404, 'connection_not_found', 'No such connection.')
+  let slug = null
+  for (const s of ['gmail', 'slack', 'google-calendar']) {
+    try { if ((await vs.serviceIdFor(s)) === row.service_id) { slug = s; break } } catch { /* try the next */ }
+  }
+  if (!slug) throw new AppError(409, 'not_testable', 'Only Gmail, Slack and Google Calendar connections can be tested here.')
+  const stampText = new Date().toISOString()
+  // Email and Slack tests appear in the delivery log; every result is also kept on the connection.
+  const record = (status, detail) => {
+    if (slug === 'google-calendar') return
+    const id = claimExternal(db, user.id, slug, { kind: `live_test_${slug}`, title: `Live test: ${slug}`, dedupeKey: `live_test:${connectionId}:${stampText}` })
+    if (id) finishExternal(db, id, status, detail)
+  }
+  let out
+  if (slug === 'gmail') {
+    const ran = await runOnce(db, vs, user.id, connectionId, 'gmail_send_email', gmailInput({ to: user.email, subject: 'DealSaathi test email', body: `This is a test from DealSaathi (${stampText}). You asked for it on the Integrations page; no action is needed.`, fromName: user.name }))
+    const read = ran.outcome === 'answered' ? readGmailResult(ran.result) : { ok: false, unknown: ran.outcome === 'unknown', reason: ran.reason }
+    out = read.ok ? { status: 'sent', detail: `Gmail accepted the email to ${user.email}: message id ${read.messageId}`, providerIds: { messageId: read.messageId } } : { status: read.unknown ? 'unknown' : 'failed', detail: read.reason }
+  } else if (slug === 'slack') {
+    if (typeof slackChannelId !== 'string' || !/^[A-Za-z0-9_-]{2,40}$/.test(slackChannelId)) throw new AppError(400, 'validation_failed', 'Choose a Slack channel for the test message.')
+    const ran = await runOnce(db, vs, user.id, connectionId, 'slack_send_message', slackInput({ channelId: slackChannelId, text: `DealSaathi test message (${stampText}), sent by ${user.name} from the Integrations page.` }))
+    const read = ran.outcome === 'answered' ? readSlackResult(ran.result) : { ok: false, unknown: ran.outcome === 'unknown', reason: ran.reason }
+    out = read.ok ? { status: 'sent', detail: `Slack accepted the message: ts ${read.ts}`, providerIds: { ts: read.ts } } : { status: read.unknown ? 'unknown' : 'failed', detail: read.reason }
+  } else {
+    const calendars = await pickOptions(db, vs, user.id, connectionId, 'calendar_free_busy', 'calendar_id')
+    const cal = calendars.find((c) => c.value === calendarId) || calendars.find((c) => c.value === 'primary') || calendars[0]
+    if (!cal) throw new AppError(409, 'no_calendar', 'This Google account lists no calendar to test with.')
+    const tomorrow = new Date(Date.now() + 5.5 * 3600 * 1000 + 86400000).toISOString().slice(0, 10)
+    const [y, m, d] = tomorrow.split('-')
+    const created = await runOnce(db, vs, user.id, connectionId, 'calendar_create_event', {
+      calendar_id: cal.value, summary: 'DealSaathi test event (deleted automatically)', description: `Created and removed by a DealSaathi test at ${stampText}.`,
+      attendees: '', timeZone: 'Asia/Kolkata', startdate: `${d}-${m}-${y}`, starttime: '09:00', meeting_duration: '00:15', location: '', status: 'confirmed', transparency: 'transparent'
+    })
+    const ev = created.outcome === 'answered' ? readCalendarEvent(created.result) : { ok: false, unknown: created.outcome === 'unknown', reason: created.reason }
+    if (!ev.ok) out = { status: ev.unknown ? 'unknown' : 'failed', detail: `Creating the test event: ${ev.reason}` }
+    else {
+      const del = await runOnce(db, vs, user.id, connectionId, 'calendar_delete_event', { calendarId: cal.value, eventId: ev.eventId, sendUpdates: 'none' })
+      const deleted = del.outcome === 'answered' && !(del.result?.success === false || del.result?.error)
+      out = { status: deleted ? 'sent' : 'failed', detail: `Google Calendar created event ${ev.eventId} in ${cal.label}${deleted ? ' and deleted it again' : `, but deleting it failed (${del.reason || 'refused'}): remove it from the calendar yourself`}`, providerIds: { eventId: ev.eventId } }
+    }
+  }
+  record(out.status, out.detail)
+  db.prepare('UPDATE connections SET verified_at = ?, verify_status = ?, verify_detail = ? WHERE id = ?').run(now(), out.status === 'sent' ? 'ok' : 'failed', `Live test: ${out.detail}`.slice(0, 300), connectionId)
+  return { app: slug, ...out, at: now() }
 }

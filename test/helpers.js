@@ -40,8 +40,8 @@ export function signedInUser(db, { name = 'Asha Broker', email = `asha${Math.ran
  * The real app on a random port. By default every call is made as a signed-in user;
  * pass { as: otherUser } or { as: null } (no session) per call.
  */
-export async function startApp({ ai = fakeAi(), vs = { configured: false }, db = openDatabase(':memory:'), auth, withUser = true, scheduler } = {}) {
-  const app = createApp({ db, ai, vs, auth: auth || createAuth({ db }), scheduler })
+export async function startApp({ ai = fakeAi(), vs = { configured: false }, db = openDatabase(':memory:'), auth, withUser = true, scheduler, mailConnection, backups } = {}) {
+  const app = createApp({ db, ai, vs, auth: auth || createAuth({ db }), scheduler, mailConnection, backups })
   const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)) })
   const base = `http://127.0.0.1:${server.address().port}`
   const user = withUser ? signedInUser(db) : null

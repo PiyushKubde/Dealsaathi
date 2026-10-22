@@ -10,7 +10,10 @@ import { createHandlers } from './events/handlers.js'
 import { listDeliveries, listNotifications, markAllRead, markRead } from './notifications/service.js'
 import { agentForSeller, buyerRecommendations, claimLead, getProfile, listAgents, saveBuyerRequirements, transferLead, unassignedPool, updateAgentProfile, updateSellerProfile } from './profiles/service.js'
 import { storedMatchesForLead } from './matching/engine.js'
-import { verifyAccess } from './integrations/run.js'
+import { sendLiveTest, verifyAccess } from './integrations/run.js'
+import { createMailer } from './mail.js'
+import { requestPasswordReset, resetPassword, sendVerification, verificationState, verifyEmail } from './accounts.js'
+import { acceptInvite, createInvite, previewInvite, revokeInvites, unlinkParty } from './rent/service.js'
 import { cancelAction, confirmAction, handleMessage, loadConversation } from './assistant/service.js'
 import { createAuth } from './auth.js'
 import { createHash, timingSafeEqual } from 'node:crypto'
@@ -53,7 +56,8 @@ const sameHost = (origin, host) => {
  * `behindProxy`: hosted behind a TLS proxy, so trust its X-Forwarded-* headers.
  * `scheduler` is { available, secret }: the host's scheduler (Embarko) calls /tasks/automations with the secret.
  */
-export function createApp({ db, ai, vs = { configured: false }, auth = createAuth({ db }), behindProxy = false, scheduler = { available: false, secret: null } }) {
+export function createApp({ db, ai, vs = { configured: false }, auth = createAuth({ db }), behindProxy = false, scheduler = { available: false, secret: null }, mailConnection = null, backups = { enabled: false, due: () => null }, backupToken = null }) {
+  const mailer = createMailer({ db, vs, connectionId: mailConnection })
   const automations = createAutomationEngine({ db, vs, scheduler })
   setAgentForSeller(agentForSeller)
   // The processing path for platform events (see events/bus.js): kicked after each change, by the scheduler, and on start.
@@ -61,6 +65,7 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   const app = express()
   app.locals.automations = automations
   app.locals.events = events
+  app.locals.mailer = mailer
   // Any request that wrote something may have queued events: process them once the answer is on its way.
   app.use((req, res, next) => {
     if (req.method !== 'GET') res.on('finish', () => { if (res.statusCode < 400) events.kick() })
@@ -85,7 +90,25 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   app.post('/api/session/register', (req, res) => auth.register(req, res))
   app.post('/api/session/login', (req, res) => auth.login(req, res))
   app.post('/api/session/logout', (req, res) => auth.logout(req, res))
+  // Account links from email: verify the address, reset a forgotten password. Reachable without a session,
+  // rate-limited per address so they cannot be used to flood mailboxes or guess tokens.
+  const accountHits = new Map()
+  const limitAccount = (req, max = 10) => {
+    const key = `${req.path}:${req.ip || 'unknown'}`
+    const e = accountHits.get(key)
+    if (!e || e.reset < Date.now()) accountHits.set(key, { n: 1, reset: Date.now() + 15 * 60 * 1000 })
+    else if (++e.n > max) throw new AppError(429, 'too_many_requests', 'Too many requests. Try again in 15 minutes.')
+  }
+  app.get('/api/session/mail', (req, res) => res.json(mailer.status()))
+  app.post('/api/session/verify-email', (req, res) => { limitAccount(req, 20); res.json(verifyEmail(db, req.body?.token)) })
+  app.post('/api/session/password/forgot', async (req, res) => { limitAccount(req, 5); res.status(202).json(await requestPasswordReset(db, mailer, req.body?.email, baseUrl(req))) })
+  app.post('/api/session/password/reset', (req, res) => { limitAccount(req, 10); res.json(resetPassword(db, req.body?.token, req.body?.password)) })
   app.use('/api', (req, res, next) => auth.guard(req, res, next))
+  app.get('/api/me/verification', (req, res) => res.json({ ...verificationState(db, req.user.id), mail: mailer.status() }))
+  app.post('/api/me/verification/send', async (req, res) => res.json(await sendVerification(db, mailer, req.user, baseUrl(req))))
+  // Tenancy invitations: the invited person accepts while signed in with the invited email and role.
+  app.post('/api/invites/preview', (req, res) => { limitAccount(req, 30); res.json(previewInvite(db, req.user, req.body?.token)) })
+  app.post('/api/invites/accept', (req, res) => { limitAccount(req, 30); res.json(acceptInvite(db, req.user, req.body?.token)) })
 
   app.get('/api/health', (req, res) => {
     let database = 'ok'
@@ -268,6 +291,11 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   app.post('/api/integrations/connections/:id/reconnect', async (req, res) => res.json(await reconnectDetails(db, vs, req.user.id, parseId(req.params.id))))
   app.delete('/api/integrations/connections/:id', async (req, res) => res.json(await disconnect(db, vs, req.user.id, parseId(req.params.id))))
   app.post('/api/integrations/connections/:id/verify', async (req, res) => { requireViasocket(vs); res.json(await verifyAccess(db, vs, req.user.id, parseId(req.params.id))) })
+  app.post('/api/integrations/connections/:id/test', async (req, res) => {
+    requireViasocket(vs)
+    if (req.body?.confirm !== true) throw new AppError(400, 'confirm_required', 'Confirm the test: it sends a real email or message, or creates and deletes a real calendar event.')
+    res.json(await sendLiveTest(db, vs, req.user, parseId(req.params.id), { slackChannelId: req.body?.slackChannelId, calendarId: req.body?.calendarId }))
+  })
 
   // ---- Emails to a lead through the broker's Gmail: follow-ups and property recommendations
   const gmailId = async () => {
@@ -347,6 +375,13 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   // ---- Tenancies and rent (Rent and Payment Reminders)
   app.get('/api/rent', (req, res) => res.json(rentOverview(db, req.user.id)))
   app.post('/api/rent/tenancies', (req, res) => res.status(201).json(createTenancy(db, req.user, req.body?.tenancy)))
+  app.post('/api/rent/tenancies/:id/invites', (req, res) => {
+    const inv = createInvite(db, req.user, parseId(req.params.id), req.body?.party)
+    // The link is returned once, for the agent to pass on; it is not stored.
+    res.status(201).json({ party: inv.party, email: inv.email, expiresAt: inv.expiresAt, link: `${baseUrl(req)}/#/invite/${inv.token}` })
+  })
+  app.post('/api/rent/tenancies/:id/invites/revoke', (req, res) => res.json(revokeInvites(db, req.user, parseId(req.params.id), req.body?.party)))
+  app.post('/api/rent/tenancies/:id/unlink', (req, res) => res.json(unlinkParty(db, req.user, parseId(req.params.id), req.body?.party)))
   app.get('/api/rent/tenancies/:id', (req, res) => res.json(tenancyDetail(db, req.user.id, parseId(req.params.id))))
   app.patch('/api/rent/tenancies/:id', (req, res) => res.json(updateTenancy(db, req.user, parseId(req.params.id), req.body?.tenancy)))
   app.post('/api/rent/dues/:id/payments', async (req, res) => res.json(await recordManualPayment(db, vs, req.user, parseId(req.params.id), req.body)))
@@ -361,10 +396,28 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
 
   // The host's scheduler (Embarko schedules, every 15 minutes): runs Buyer Follow-Up Reminders for every broker
   // who switched them on. Only a caller holding the scheduler's secret gets in.
-  app.get('/tasks/automations', async (req, res) => {
+  const bearerIs = (req, secret) => {
     const given = Buffer.from(createHash('sha256').update(req.get('authorization') || '').digest('hex'))
-    const wanted = Buffer.from(createHash('sha256').update(`Bearer ${scheduler.secret || ''}`).digest('hex'))
-    if (!scheduler.secret || !timingSafeEqual(given, wanted)) return res.status(401).type('text').send('unauthorized')
+    const wanted = Buffer.from(createHash('sha256').update(`Bearer ${secret || ''}`).digest('hex'))
+    return Boolean(secret) && timingSafeEqual(given, wanted)
+  }
+  // Off-host copies: the owner downloads the newest verified backup with BACKUP_TOKEN (at least 32 characters).
+  const backupAllowed = (req) => typeof backupToken === 'string' && backupToken.length >= 32 && bearerIs(req, backupToken)
+  app.get('/tasks/backups', (req, res) => {
+    if (!backupAllowed(req)) return res.status(401).type('text').send('unauthorized')
+    res.set('Cache-Control', 'no-store').json({ enabled: backups.enabled, backups: backups.enabled ? backups.list() : [] })
+  })
+  app.get('/tasks/backups/latest', (req, res) => {
+    if (!backupAllowed(req)) return res.status(401).type('text').send('unauthorized')
+    const last = backups.enabled ? backups.latest() : null
+    if (!last) return res.status(404).type('text').send('no verified backup yet')
+    res.set({ 'Cache-Control': 'no-store', 'X-Backup-Sha256': last.sha256, 'Content-Disposition': `attachment; filename="${last.file}"` })
+    res.sendFile(last.path)
+  })
+
+  app.get('/tasks/automations', async (req, res) => {
+    if (!bearerIs(req, scheduler.secret)) return res.status(401).type('text').send('unauthorized')
+    const backup = backups.enabled ? backups.due() : null
     const before = await events.drain() // anything a crash or a failed attempt left in the queue
     const { reminders: t, viewingsEnded, rent } = await automations.runScheduled('Scheduled check')
     const after = await events.drain()
@@ -372,7 +425,8 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
     const failed = db.prepare("SELECT COUNT(*) AS n FROM domain_events WHERE status = 'failed'").get().n
     res.type('text').send(`Events: ${before.done + after.done} processed, ${before.retry + after.retry} to retry, ${pending} waiting, ${failed} failed in total. ` +
       `Follow-ups: ${t.brokers} agent(s), ${t.created} new reminder(s), ${t.notified} notification(s) sent, ${t.failed} failed. ` +
-      `Viewings ended: ${viewingsEnded}. Rent: ${rent.brokers} agent(s), ${rent.sent} reminder(s) sent, ${rent.failed} failed, ${rent.verified} payment(s) verified.`)
+      `Viewings ended: ${viewingsEnded}. Rent: ${rent.brokers} agent(s), ${rent.sent} reminder(s) sent, ${rent.failed} failed, ${rent.verified} payment(s) verified. ` +
+      `Backup: ${!backups.enabled ? 'not configured' : !backup ? `up to date (${backups.latest()?.file ?? 'none'})` : backup.error ? `FAILED (${backup.error})` : `${backup.file} verified`}.`)
   })
 
   // The buyer's feedback page: a standalone page with no app code. The token in its URL is never sent on as a referrer.

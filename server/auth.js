@@ -33,7 +33,7 @@ export function verifyPassword(password, stored) {
 }
 
 export const ROLES = ['buyer', 'seller', 'agent']
-const publicUser = (u) => (u ? { id: u.id, name: u.name, email: u.email, role: u.role } : null)
+const publicUser = (u) => (u ? { id: u.id, name: u.name, email: u.email, role: u.role, emailVerified: Boolean(u.email_verified_at) } : null)
 
 /**
  * Creates an account with its role and the matching profile, in one transaction.

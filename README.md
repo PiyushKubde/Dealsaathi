@@ -13,7 +13,8 @@ Every rule is enforced on the server (`server/access.js`); pages only hide what 
 
 | Area | What works | Status |
 | --- | --- | --- |
-| Accounts and roles | Signup with a role, role profiles, role dashboards, sessions (HttpOnly, SameSite=Strict), open signup capped per IP | Working |
+| Accounts and roles | Signup with a role, role profiles, role dashboards, sessions (HttpOnly, SameSite=Strict), open signup capped per IP, email verification and password reset (one-time links) | Working; emails need `SYSTEM_MAIL_CONNECTION` |
+| Backups | Daily verified copies, pruning, restore with `RESTORE_FROM`, download with `BACKUP_TOKEN` | Working; off-host copies are manual |
 | Assignment | Agent-added leads are theirs; registered buyers go to the least-loaded agent serving their area; otherwise a pool agents claim from; transfer between agents | Working |
 | Matching | Both directions, continuous, from the event queue; stored with reasons, fingerprints and status (suggested / dismissed / withdrawn) | Working |
 | Event queue | Every platform change writes a domain event in the same transaction; processed after the request, on start-up and every 15 minutes, with retries and dedupe | Working |
@@ -129,8 +130,11 @@ The skill's test-connection step, for proving Gmail · Send Email works before a
 
 ## Known limits
 
-- Email addresses are not verified. A tenancy links to accounts by the email the agent types, so an account
-  registered with someone else's email could see that tenancy's rent. Email verification is the top open item.
+- Email verification and password reset need a system Gmail account (`SYSTEM_MAIL_CONNECTION`, see
+  [docs/operations.md](docs/operations.md)). A tenancy is shown to a tenant or landlord only after they accept the
+  agent's invitation, or when their verified email matches.
+- Backups are written daily on the same host; download them off the host with `BACKUP_TOKEN`
+  ([docs/operations.md](docs/operations.md)).
 - Matching runs in the server process; the queue is in SQLite. One server instance only.
 - viaSocket's slug lookup does not find `gmail` today (reported to viaSocket). DealSaathi then finds the slug in
   `catalog.list()`, which does list it; the check script still reports it.

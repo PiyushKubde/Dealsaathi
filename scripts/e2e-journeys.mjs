@@ -17,7 +17,9 @@ const problems = []
 const check = (name, ok, detail = '') => { results.push({ name, ok, detail }); if (!ok) problems.push(`${name}${detail ? `: ${detail}` : ''}`) }
 
 const vs = fakeVs()
-const t = await startApp({ vs, withUser: false })
+const mail = { id: null } // system email goes through the agent's (stand-in) Gmail once connected below
+const t = await startApp({ vs, withUser: false, mailConnection: () => mail.id })
+const sentMail = () => vs.calls.filter((c) => c.name === 'runAction' && c.args[2]?.messageBody).map((c) => c.args[2]).at(-1)
 const B = t.base
 const browser = await chromium.launch()
 
@@ -209,13 +211,40 @@ await go(buyerPage, `#/recommendations`)
 await buyerPage.waitForTimeout(500)
 check('buyer: the rejected listing is no longer recommended', !/2 BHK in Baner<\/a>/.test(await buyerPage.innerHTML('#recs')))
 
-// ---- Rent: the agent links the buyer as tenant and the seller as landlord
+// ---- System email through the agent's Gmail (stand-in): verification for the buyer
+const agentId = t.db.prepare("SELECT id FROM users WHERE role = 'agent'").get().id
+mail.id = (await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: await vs.serviceIdFor('gmail'), authId: vs.connectApp(agentId, 'gmail') }, as: agentCookie })).body.connection.id
+await go(buyerPage, '#/dashboard')
+check('buyer: unverified email is shown', /Email not verified/.test(await buyerPage.textContent('#account')))
+await buyerPage.click('#verify-send')
+await buyerPage.waitForTimeout(500)
+const verifyLink = /#\/verify-email\/[A-Za-z0-9_-]+/.exec(sentMail()?.messageBody || '')?.[0]
+check('buyer: verification email sent to their own address', Boolean(verifyLink) && sentMail().to === 'rahul@example.com')
+await go(buyerPage, verifyLink)
+await buyerPage.waitForSelector('text=Email confirmed')
+await go(buyerPage, '#/dashboard')
+check('buyer: account shows the email as verified', !/Email not verified/.test(await buyerPage.textContent('#account')))
+
+// ---- Rent: nobody is linked by email alone; the agent invites the landlord, who accepts in the browser
 await t.call('/api/rent/tenancies', { method: 'POST', body: { tenancy: { tenant_name: 'Rahul Sharma', tenant_email: 'rahul@example.com', landlord_email: 'sunita@example.com', property_label: 'Flat 4B', rent_amount: 28000, due_day: 5, lease_start: todayIn('Asia/Kolkata') } }, as: agentCookie })
 await idle()
-await go(buyerPage, `#/my-tenancies`)
-await buyerPage.waitForTimeout(400)
-check('tenant: sees the tenancy, cannot record payments', /Flat 4B/.test(await buyerPage.textContent('main')) && !(await buyerPage.$('[data-pay]')))
-await go(sellerPage, `#/my-tenancies`)
+await go(sellerPage, '#/my-tenancies')
+check('landlord: not linked before accepting an invitation', /No tenancy is linked/.test(await sellerPage.textContent('main')))
+await go(buyerPage, '#/my-tenancies')
+check('tenant: linked because their email is verified', /Flat 4B/.test(await buyerPage.textContent('main')) && !(await buyerPage.$('[data-pay]')))
+const tid = t.db.prepare('SELECT id FROM tenancies').get().id
+await go(agentPage, `#/rent/${tid}`)
+await agentPage.locator('[data-party=landlord] [data-invite]').click()
+await agentPage.waitForSelector('[data-party=landlord] .invite-out input')
+const inviteLink = await agentPage.inputValue('[data-party=landlord] .invite-out input')
+check('agent: invitation link shown once', /#\/invite\/[A-Za-z0-9_-]{40,}/.test(inviteLink))
+await go(buyerPage, inviteLink.slice(inviteLink.indexOf('#')))
+await buyerPage.waitForSelector('main h1')
+check('wrong account: invitation cannot be accepted and reveals no property', !(await buyerPage.$('#inv-accept')) && !/Flat 4B/.test(await buyerPage.textContent('main')))
+await go(sellerPage, inviteLink.slice(inviteLink.indexOf('#')))
+await sellerPage.waitForSelector('#inv-accept')
+await sellerPage.click('#inv-accept')
+await sellerPage.waitForURL(/my-tenancies/)
 await sellerPage.waitForSelector('[data-pay]')
 await sellerPage.locator('[data-pay]').first().click()
 await sellerPage.fill('.due-extra [name=amount]', '28000')
@@ -223,6 +252,29 @@ await sellerPage.fill('.due-extra [name=note]', 'UPI ref 8812')
 await sellerPage.click('.due-extra button')
 await sellerPage.waitForTimeout(600)
 check('landlord: records a payment received', /Paid/.test(await sellerPage.textContent('main')))
+
+// ---- Password reset from the sign-in page
+const resetPage = await newPage()
+await resetPage.goto(`${B}/`)
+await resetPage.waitForSelector('#auth-forgot')
+await resetPage.click('#auth-forgot')
+await resetPage.fill('#fg-email', 'asha@agency.in')
+await resetPage.click('#fg-form button[type=submit]')
+await resetPage.waitForSelector('#fg-msg .notice')
+check('reset: neutral confirmation shown', /If an account uses that email/.test(await resetPage.textContent('#fg-msg')))
+const resetLink = /#\/reset-password\/[A-Za-z0-9_-]+/.exec(sentMail()?.messageBody || '')?.[0]
+await go(resetPage, resetLink)
+await resetPage.fill('#rp-pw', 'a-new-password-22')
+await resetPage.click('#rp-form button[type=submit]')
+await resetPage.waitForSelector('#auth-form')
+check('reset: the agent’s old browser session is signed out', (await agentPage.evaluate(async () => (await fetch('/api/me')).status)) === 401)
+await resetPage.fill('#a-email', 'asha@agency.in')
+await resetPage.fill('#a-password', 'a-new-password-22')
+await resetPage.click('#auth-form button[type=submit]')
+await resetPage.waitForSelector('#nav a')
+check('reset: signs in with the new password', /Asha Broker/.test(await resetPage.textContent('#account')))
+await agentPage.close()
+const agentPage2 = resetPage
 
 // ---- Keyboard and accessibility basics on the sign-in page
 const anon = await newPage()
@@ -239,7 +291,7 @@ await anon.waitForTimeout(400)
 check('sign-in: wrong password gives a readable error', /do not match/.test(await anon.textContent('#auth-error')))
 
 // ---- Phone width: no horizontal scroll on the main pages of each role
-for (const [who, page, hrefs] of [['buyer', buyerPage, ['#/dashboard', '#/recommendations', '#/my-viewings']], ['seller', sellerPage, ['#/dashboard', '#/my-listings']], ['agent', agentPage, ['#/dashboard', '#/leads', '#/viewings', '#/activity']]]) {
+for (const [who, page, hrefs] of [['buyer', buyerPage, ['#/dashboard', '#/recommendations', '#/my-viewings']], ['seller', sellerPage, ['#/dashboard', '#/my-listings']], ['agent', agentPage2, ['#/dashboard', '#/leads', '#/viewings', '#/activity']]]) {
   await page.setViewportSize({ width: 390, height: 800 })
   for (const h of hrefs) {
     await go(page, h)
@@ -252,7 +304,7 @@ for (const [who, page, hrefs] of [['buyer', buyerPage, ['#/dashboard', '#/recomm
 await shot(buyerPage, '53-buyer-mobile')
 
 // ---- Sign out ends the session
-await sellerPage.click('#account button')
+await sellerPage.click('#sign-out')
 await sellerPage.waitForSelector('#auth-form')
 check('sign-out: back to sign-in, API refuses the old session', (await sellerPage.evaluate(async () => (await fetch('/api/me')).status)) === 401)
 

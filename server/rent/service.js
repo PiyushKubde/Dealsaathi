@@ -10,6 +10,7 @@
 //   contact} from the tenancy · accept_partial false (one link settles the month) · notes { dealsaathi_due }
 //   expiry_mode/expire_by_*, configure_sections, notifications, callback: left out on purpose (DealSaathi sends the
 //   reminders itself and verifies by reading the link's status, so no callback is needed)
+import { createHash, randomBytes } from 'node:crypto'
 import { now, transaction } from '../db.js'
 import { AppError, validationError } from '../errors.js'
 import { getProperty } from '../properties/service.js'
@@ -98,21 +99,123 @@ function cleanTenancy(db, input, current = {}) {
 }
 
 /**
- * Links the tenancy to the tenant's and landlord's DealSaathi accounts, by the emails the agent entered (a seller
- * listing's owner is its landlord when no landlord email is given). Linked people see the tenancy in the app;
- * they never manage it.
+ * Who may see a tenancy besides its agent. A link is made only by:
+ *   - an invitation the agent created and the invited person accepted while signed in with that email, or
+ *   - an account whose email is VERIFIED and matches the email on the tenancy, or
+ *   - (landlord) the seller who owns the linked listing, when that agent is responsible for the listing.
+ * An email typed by the agent alone never grants access. A link is dropped when the email on the tenancy changes.
  */
+const PARTY = { tenant: { col: 'tenant_user_id', email: 'tenant_email', role: 'buyer' }, landlord: { col: 'landlord_user_id', email: 'landlord_email', role: 'seller' } }
+
 function linkParties(db, id, actorId) {
   const t = db.prepare('SELECT * FROM tenancies WHERE id = ?').get(id)
-  const tenant = t.tenant_email ? db.prepare("SELECT id FROM users WHERE email = ? AND role = 'buyer'").get(t.tenant_email.toLowerCase()) : null
-  let landlord = t.landlord_email ? db.prepare("SELECT id FROM users WHERE email = ? AND role = 'seller'").get(t.landlord_email) : null
-  if (!landlord && !t.landlord_email && t.property_id) landlord = db.prepare("SELECT u.id FROM properties p JOIN users u ON u.id = p.owner_user_id WHERE p.id = ? AND u.role = 'seller'").get(t.property_id)
-  const tenantId = tenant?.id ?? null
-  const landlordId = landlord?.id ?? null
-  if (tenantId === t.tenant_user_id && landlordId === t.landlord_user_id) return
-  db.prepare('UPDATE tenancies SET tenant_user_id = ?, landlord_user_id = ? WHERE id = ?').run(tenantId, landlordId, id)
-  event(db, id, null, 'parties_linked', `Linked accounts: tenant ${tenantId ? 'linked' : 'not linked'}, landlord ${landlordId ? 'linked' : 'not linked'}`, actorId)
-  emit(db, 'tenancy.linked', { subjectType: 'tenancy', subjectId: id, actorId, agentId: t.user_id, payload: { key: `${tenantId}:${landlordId}` }, dedupeKey: `tenancy.linked:${id}:${tenantId}:${landlordId}` })
+  const next = {}
+  for (const [party, p] of Object.entries(PARTY)) {
+    const email = t[p.email]?.toLowerCase() || null
+    const current = t[p.col] ? db.prepare('SELECT id, email FROM users WHERE id = ?').get(t[p.col]) : null
+    if (current && email && current.email === email) { next[party] = current.id; continue }
+    const verified = email ? db.prepare('SELECT id FROM users WHERE email = ? AND role = ? AND email_verified_at IS NOT NULL').get(email, p.role) : null
+    next[party] = verified?.id ?? null
+    // A pending invitation for an address that is no longer on the tenancy stops working.
+    db.prepare("UPDATE tenancy_invites SET status = 'revoked' WHERE tenancy_id = ? AND party = ? AND status = 'pending' AND email != ?").run(id, party, email || '')
+  }
+  if (!next.landlord && !t.landlord_email && t.property_id) {
+    next.landlord = db.prepare("SELECT u.id FROM properties p JOIN users u ON u.id = p.owner_user_id WHERE p.id = ? AND u.role = 'seller' AND p.agent_id = ?").get(t.property_id, t.user_id)?.id ?? null
+  }
+  setLinks(db, t, next.tenant, next.landlord, actorId, 'Linked accounts updated')
+}
+
+function setLinks(db, t, tenantId, landlordId, actorId, why) {
+  if (tenantId === t.tenant_user_id && landlordId === t.landlord_user_id) return false
+  db.prepare('UPDATE tenancies SET tenant_user_id = ?, landlord_user_id = ? WHERE id = ?').run(tenantId, landlordId, t.id)
+  event(db, t.id, null, 'parties_linked', `${why}: tenant ${tenantId ? 'linked' : 'not linked'}, landlord ${landlordId ? 'linked' : 'not linked'}`, actorId)
+  const tenantNew = Boolean(tenantId) && tenantId !== t.tenant_user_id
+  const landlordNew = Boolean(landlordId) && landlordId !== t.landlord_user_id
+  if (tenantNew || landlordNew) emit(db, 'tenancy.linked', { subjectType: 'tenancy', subjectId: t.id, actorId, agentId: t.user_id, payload: { key: `${tenantId}:${landlordId}`, tenantNew, landlordNew }, dedupeKey: `tenancy.linked:${t.id}:${tenantId}:${landlordId}` })
+  return true
+}
+
+/** After someone verifies their email: tenancies that name that verified address are linked to them. */
+export function linkVerifiedAccount(db, userId) {
+  const u = db.prepare('SELECT email FROM users WHERE id = ? AND email_verified_at IS NOT NULL').get(userId)
+  if (!u) return 0
+  const ids = db.prepare('SELECT id FROM tenancies WHERE lower(tenant_email) = ? OR lower(landlord_email) = ?').all(u.email, u.email).map((r) => r.id)
+  let n = 0
+  for (const id of ids) transaction(db, () => { const before = db.prepare('SELECT tenant_user_id, landlord_user_id FROM tenancies WHERE id = ?').get(id); linkParties(db, id, userId); const after = db.prepare('SELECT tenant_user_id, landlord_user_id FROM tenancies WHERE id = ?').get(id); if (before.tenant_user_id !== after.tenant_user_id || before.landlord_user_id !== after.landlord_user_id) n++ })
+  return n
+}
+
+const inviteHash = (t) => createHash('sha256').update(t).digest('hex')
+const INVITE_TTL = 7 * 24 * 3600 * 1000
+
+/** The agent invites the tenant or landlord named on the tenancy. The link is shown once and only its hash is kept. */
+export function createInvite(db, user, tenancyId, party) {
+  const p = PARTY[party]
+  if (!p) throw validationError({ party: 'Invite the tenant or the landlord.' })
+  const t = ownTenancy(db, user.id, tenancyId)
+  const email = t[p.email]?.toLowerCase()
+  if (!email) throw validationError({ [p.email]: `Add the ${party}’s email to the tenancy first: only an account with that email can accept.` })
+  const token = randomBytes(32).toString('base64url')
+  const expires = new Date(Date.now() + INVITE_TTL).toISOString()
+  transaction(db, () => {
+    db.prepare("UPDATE tenancy_invites SET status = 'revoked' WHERE tenancy_id = ? AND party = ? AND status = 'pending'").run(t.id, party)
+    db.prepare('INSERT INTO tenancy_invites (tenancy_id, party, email, token_hash, expires_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(t.id, party, email, inviteHash(token), expires, user.id, now())
+    event(db, t.id, null, 'invite_created', `Invitation for the ${party} (${email}) created; it works once, until ${expires.slice(0, 10)}`, user.id)
+  })
+  return { token, party, email, expiresAt: expires }
+}
+
+export function revokeInvites(db, user, tenancyId, party) {
+  const t = ownTenancy(db, user.id, tenancyId)
+  const n = db.prepare("UPDATE tenancy_invites SET status = 'revoked' WHERE tenancy_id = ? AND party = ? AND status = 'pending'").run(t.id, party).changes
+  if (n) event(db, t.id, null, 'invite_revoked', `Invitation for the ${party} revoked`, user.id)
+  return tenancyDetail(db, user.id, t.id)
+}
+
+/** The agent removes a linked person's access. */
+export function unlinkParty(db, user, tenancyId, party) {
+  const p = PARTY[party]
+  if (!p) throw validationError({ party: 'Unlink the tenant or the landlord.' })
+  const t = ownTenancy(db, user.id, tenancyId)
+  transaction(db, () => {
+    db.prepare(`UPDATE tenancies SET ${p.col} = NULL WHERE id = ?`).run(t.id)
+    db.prepare("UPDATE tenancy_invites SET status = 'revoked' WHERE tenancy_id = ? AND party = ? AND status = 'pending'").run(t.id, party)
+    event(db, t.id, null, 'party_unlinked', `The ${party}’s account was unlinked by the agent`, user.id)
+  })
+  return tenancyDetail(db, user.id, t.id)
+}
+
+function findInvite(db, token) {
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{40,60}$/.test(token)) return null
+  return db.prepare('SELECT i.*, t.property_label, t.user_id AS agent_id, t.tenant_email, t.landlord_email FROM tenancy_invites i JOIN tenancies t ON t.id = i.tenancy_id WHERE i.token_hash = ?').get(inviteHash(token))
+}
+const masked = (email) => email.replace(/^(.).*(@.*)$/, '$1•••$2')
+
+/** What an invitation is for, before accepting. Shown only to a signed-in person. */
+export function previewInvite(db, user, token) {
+  const inv = findInvite(db, token)
+  if (!inv) throw new AppError(404, 'invite_not_found', 'This invitation link is not valid.')
+  const state = inv.status !== 'pending' ? inv.status : inv.expires_at < now() ? 'expired' : 'pending'
+  const agent = db.prepare('SELECT name FROM users WHERE id = ?').get(inv.agent_id)
+  const fits = user.email === inv.email && user.role === PARTY[inv.party].role
+  return { state, party: inv.party, sentTo: masked(inv.email), agentName: agent?.name ?? null, propertyLabel: fits ? inv.property_label : null, matchesYourAccount: fits }
+}
+
+/** Accepts once, only for the invited email and role. A wrong account learns nothing about the tenancy. */
+export function acceptInvite(db, user, token) {
+  const inv = findInvite(db, token)
+  if (!inv) throw new AppError(404, 'invite_not_found', 'This invitation link is not valid.')
+  if (inv.status !== 'pending' || inv.expires_at < now()) throw new AppError(409, 'invite_closed', 'This invitation was already used, withdrawn or has expired. Ask your agent for a new one.')
+  const p = PARTY[inv.party]
+  if (user.role !== p.role || user.email !== inv.email) throw new AppError(403, 'invite_wrong_account', `This invitation is for a ${p.role} account with a different email address. Sign in with the invited account.`)
+  if ((inv[p.email] || '').toLowerCase() !== inv.email) throw new AppError(409, 'invite_closed', 'The email on this tenancy changed, so the invitation no longer applies. Ask your agent for a new one.')
+  return transaction(db, () => {
+    const r = db.prepare("UPDATE tenancy_invites SET status = 'accepted', accepted_by = ?, accepted_at = ? WHERE id = ? AND status = 'pending'").run(user.id, now(), inv.id)
+    if (!r.changes) throw new AppError(409, 'invite_closed', 'This invitation was already used.')
+    const t = db.prepare('SELECT * FROM tenancies WHERE id = ?').get(inv.tenancy_id)
+    setLinks(db, t, inv.party === 'tenant' ? user.id : t.tenant_user_id, inv.party === 'landlord' ? user.id : t.landlord_user_id, user.id, `Invitation accepted by the ${inv.party}`)
+    return { accepted: true, tenancyId: inv.tenancy_id }
+  })
 }
 
 const ownTenancy = (db, userId, id) => {
@@ -201,7 +304,11 @@ export function tenancyDetail(db, userId, id) {
   return {
     tenancy: { ...t, reminders_opt_out: Boolean(t.reminders_opt_out) },
     dues: db.prepare('SELECT * FROM rent_dues WHERE tenancy_id = ? ORDER BY due_date DESC').all(id).map((d) => duePublic(db, d, today)),
-    events: db.prepare('SELECT type, detail, created_at FROM rent_events WHERE tenancy_id = ? ORDER BY created_at DESC, id DESC LIMIT 100').all(id)
+    events: db.prepare('SELECT type, detail, created_at FROM rent_events WHERE tenancy_id = ? ORDER BY created_at DESC, id DESC LIMIT 100').all(id),
+    parties: Object.fromEntries(Object.entries(PARTY).map(([party, p]) => [party, {
+      linked: Boolean(t[p.col]),
+      pendingInvite: db.prepare("SELECT email, expires_at FROM tenancy_invites WHERE tenancy_id = ? AND party = ? AND status = 'pending' AND expires_at > ? ORDER BY id DESC LIMIT 1").get(id, party, now()) || null
+    }]))
   }
 }
 

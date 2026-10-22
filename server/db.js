@@ -521,6 +521,56 @@ const MIGRATIONS = [
   ALTER TABLE connections ADD COLUMN verified_at TEXT;
   ALTER TABLE connections ADD COLUMN verify_status TEXT;
   ALTER TABLE connections ADD COLUMN verify_detail TEXT;
+  `,
+  // 7: verified email, password reset, explicit tenancy invitations. A tenancy was linked to accounts by an
+  // unverified email (v6); those links are removed here and must be re-made by invitation or a verified email.
+  `
+  ALTER TABLE users ADD COLUMN email_verified_at TEXT;
+
+  -- One-time tokens sent by email (verification, password reset). Only the SHA-256 is stored.
+  CREATE TABLE auth_tokens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    purpose    TEXT NOT NULL CHECK (purpose IN ('verify_email','reset_password')),
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used_at    TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX auth_tokens_user ON auth_tokens(user_id, purpose);
+
+  -- An agent's explicit invitation for one person to see a tenancy as its tenant or landlord.
+  CREATE TABLE tenancy_invites (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenancy_id  INTEGER NOT NULL REFERENCES tenancies(id) ON DELETE CASCADE,
+    party       TEXT NOT NULL CHECK (party IN ('tenant','landlord')),
+    email       TEXT NOT NULL,
+    token_hash  TEXT NOT NULL UNIQUE,
+    status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','revoked','expired')),
+    expires_at  TEXT NOT NULL,
+    created_by  TEXT REFERENCES users(id) ON DELETE SET NULL,
+    accepted_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    accepted_at TEXT,
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX tenancy_invites_tenancy ON tenancy_invites(tenancy_id, party, status);
+
+  INSERT INTO rent_events (tenancy_id, type, detail, created_at)
+    SELECT id, 'parties_unlinked', 'Account links made from an unverified email were removed by a security update; the agent can invite the tenant or landlord again.', datetime('now')
+    FROM tenancies WHERE tenant_user_id IS NOT NULL OR landlord_user_id IS NOT NULL;
+  UPDATE tenancies SET tenant_user_id = NULL, landlord_user_id = NULL WHERE tenant_user_id IS NOT NULL OR landlord_user_id IS NOT NULL;
+
+  CREATE TABLE backups (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    file       TEXT NOT NULL UNIQUE,
+    size       INTEGER NOT NULL,
+    sha256     TEXT NOT NULL,
+    schema     INTEGER NOT NULL,
+    counts     TEXT NOT NULL,
+    status     TEXT NOT NULL CHECK (status IN ('verified','failed','pruned')),
+    detail     TEXT,
+    created_at TEXT NOT NULL
+  );
   `
 ]
 
