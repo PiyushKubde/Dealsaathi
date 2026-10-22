@@ -172,6 +172,8 @@ export function updateLead(db, id, input, { via = 'form', allowSameName = false,
 export function deleteLead(db, id) {
   return transaction(db, () => {
     const lead = requireLead(db, id)
+    // A registered buyer's lead is their own requirements record: an agent may not erase it.
+    if (lead.buyer_user_id) throw new AppError(409, 'registered_buyer', 'This lead is a registered buyer’s own requirements record, so it cannot be deleted. Mark it lost, or transfer it to another agent.')
     db.prepare('DELETE FROM leads WHERE id = ?').run(id)
     return lead
   })

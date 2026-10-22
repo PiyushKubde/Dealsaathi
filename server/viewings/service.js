@@ -142,6 +142,15 @@ function checkProperties(db, propertyIds) {
 
 const locationOf = (props) => props.map((p) => [p.address, p.locality, p.city].filter(Boolean).join(', ')).join(' | ').slice(0, 300)
 
+/** The listings must still be on the market when the viewing is booked or moved (they may have sold since). */
+function stillOnMarket(db, row) {
+  try {
+    checkProperties(db, JSON.parse(row.property_ids))
+  } catch (error) {
+    throw new AppError(409, 'listing_unavailable', `${error.details?.fields?.properties || 'A listing in this viewing is no longer available.'} Cancel this viewing, or create a new one without it.`)
+  }
+}
+
 /** A viewing to review before booking. Nothing is sent to Google Calendar yet. */
 export function draftViewing(db, user, input, { requestedBy = null } = {}) {
   const cfg = viewingSettings(db, user.id)
@@ -234,6 +243,7 @@ export async function bookViewing(db, vs, user, id, { confirmNotInCalendar = fal
   if (row.status === 'unknown' && !confirmNotInCalendar) throw new AppError(409, 'outcome_unknown', 'The last booking attempt got no answer. Check your Google Calendar first; if the viewing is not there, confirm and book again.')
   if (!['draft', 'failed', 'unknown'].includes(row.status)) throw new AppError(409, 'viewing_closed', `This viewing is ${row.status}.`)
   if (Date.parse(row.start_at) < Date.now() + LEAD_TIME_MS) throw new AppError(409, 'slot_past', 'This slot is too soon or has passed. Choose another time.')
+  stillOnMarket(db, row)
 
   await recheck(db, vs, user, row, cfg)
   try {
@@ -320,6 +330,7 @@ export async function rescheduleViewing(db, vs, user, id, { start, durationMinut
   const s = Date.parse(start)
   if (!Number.isFinite(s) || s < Date.now() + LEAD_TIME_MS) throw validationError({ start: 'Choose a slot at least 30 minutes from now.' })
   const minutes = checkDuration(durationMinutes ?? Math.round((Date.parse(row.end_at) - Date.parse(row.start_at)) / 60000))
+  stillOnMarket(db, row)
   const moved = { ...row, start_at: new Date(s).toISOString(), end_at: new Date(s + minutes * 60000).toISOString() }
   await recheck(db, vs, user, moved, cfg, row)
   const local = utcToZoned(moved.start_at, row.timezone)

@@ -276,6 +276,31 @@ check('reset: signs in with the new password', /Asha Broker/.test(await resetPag
 await agentPage.close()
 const agentPage2 = resetPage
 
+// ---- Hostile text: every role's pages show it as text, never run it
+const XSS = '<img src=x onerror="window.__xss=1">'
+const asAgent = { cookie: (await agentPage2.context().cookies()).map((c) => `${c.name}=${c.value}`).join('; ') }
+await t.call('/api/properties', { method: 'POST', body: { property: { title: `Flat ${XSS}`, listing_type: 'sale', property_type: 'apartment', bedrooms: 2, price: 4600000, city: 'Pune', locality: 'Baner', notes: XSS, amenities: [XSS] } }, as: asAgent })
+await t.call('/api/leads', { method: 'POST', body: { lead: { full_name: `Evil ${XSS}`, customer_type: 'buyer', phone: '9000000099', notes: XSS, preferred_location: 'Baner, Pune', bedrooms: 2, budget_max: 5000000 } }, as: asAgent })
+await idle()
+const xssPages = [[agentPage2, ['#/properties', '#/leads', '#/notifications', '#/activity', '#/dashboard']], [buyerPage, ['#/browse', '#/recommendations', '#/notifications']], [sellerPage, ['#/dashboard', '#/notifications']]]
+for (const [page, hrefs] of xssPages) {
+  for (const h of hrefs) {
+    await go(page, h)
+    await page.waitForTimeout(300)
+    const ran = await page.evaluate(() => window.__xss === 1)
+    const shown = (await page.textContent('main')).includes('<img src=x')
+    check(`xss: ${h} shows hostile text inert`, !ran, shown ? 'shown as text' : 'not on this page')
+  }
+}
+const leadId = t.db.prepare("SELECT id FROM leads WHERE full_name LIKE 'Evil%'").get().id
+await go(agentPage2, `#/leads/${leadId}`)
+await agentPage2.waitForTimeout(400)
+check('xss: lead detail page', !(await agentPage2.evaluate(() => window.__xss === 1)) && (await agentPage2.textContent('main')).includes('<img src=x'))
+const xssPid = t.db.prepare("SELECT id FROM properties WHERE title LIKE 'Flat <img%'").get().id
+await go(agentPage2, `#/properties/${xssPid}`)
+await agentPage2.waitForTimeout(400)
+check('xss: listing detail page', !(await agentPage2.evaluate(() => window.__xss === 1)) && (await agentPage2.textContent('main')).includes('<img src=x'))
+
 // ---- Keyboard and accessibility basics on the sign-in page
 const anon = await newPage()
 await anon.goto(`${B}/`)
