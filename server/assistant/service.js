@@ -34,7 +34,7 @@ function pendingAction(db, conversationId) {
 }
 
 /** The review card the browser renders: the draft, what is missing, and anything to double-check. */
-function describeAction(db, action) {
+function describeAction(db, action, userId) {
   const { draft, sources, uncertain, warnings } = action.params
   return {
     id: action.id,
@@ -45,7 +45,7 @@ function describeAction(db, action) {
     missing: missingForCreate(draft),
     uncertain,
     warnings,
-    duplicates: findDuplicates(db, draft)
+    duplicates: findDuplicates(db, draft, null, userId)
   }
 }
 
@@ -94,7 +94,7 @@ export async function handleMessage(db, ai, { conversationId, message, userId })
   const respond = (status, reply, action = null) => {
     addMessage(db, cid, 'assistant', reply, { status, actionId: action?.id ?? null })
     db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?').run(now(), cid)
-    return { conversationId: cid, status, reply, action: action ? describeAction(db, action) : null }
+    return { conversationId: cid, status, reply, action: action ? describeAction(db, action, userId) : null }
   }
 
   const { intent } = extraction
@@ -198,5 +198,5 @@ export function loadConversation(db, id, userId) {
   const messages = db.prepare('SELECT role, content, payload, created_at FROM messages WHERE conversation_id = ? ORDER BY id').all(id)
     .map((m) => ({ ...m, payload: parse(m.payload) }))
   const pending = pendingAction(db, id)
-  return { conversationId: id, messages, action: pending ? describeAction(db, pending) : null }
+  return { conversationId: id, messages, action: pending ? describeAction(db, pending, userId) : null }
 }

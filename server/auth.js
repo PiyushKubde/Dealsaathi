@@ -9,6 +9,7 @@ import { AppError, validationError } from './errors.js'
 const COOKIE = 'ds_session'
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000
 const MAX_ATTEMPTS = 10
+const MAX_SIGNUPS = 20 // new accounts per IP address per hour
 const WINDOW_MS = 15 * 60 * 1000
 export const MIN_ACCESS_CODE = 12
 const MIN_PASSWORD = 10
@@ -31,22 +32,32 @@ export function verifyPassword(password, stored) {
   return timingSafeEqual(expected, actual)
 }
 
-const publicUser = (u) => (u ? { id: u.id, name: u.name, email: u.email } : null)
+export const ROLES = ['buyer', 'seller', 'agent']
+const publicUser = (u) => (u ? { id: u.id, name: u.name, email: u.email, role: u.role } : null)
 
-/** Creates an account. Throws 400 for bad fields and 409 if the email is taken. */
-export function createUser(db, { name, email, password }) {
+/**
+ * Creates an account with its role and the matching profile, in one transaction.
+ * Throws 400 for bad fields and 409 if the email is taken.
+ */
+export function createUser(db, { name, email, password, role = 'agent', phone = null }) {
   const errors = {}
   const cleanName = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : ''
   const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
   if (cleanName.length < 2 || cleanName.length > 80) errors.name = 'Enter your name.'
   if (!EMAIL_RE.test(cleanEmail) || cleanEmail.length > 200) errors.email = 'Enter a valid email address.'
   if (typeof password !== 'string' || password.length < MIN_PASSWORD || password.length > 200) errors.password = `Use at least ${MIN_PASSWORD} characters.`
+  if (!ROLES.includes(role)) errors.role = 'Choose Buyer, Seller or Agent.'
+  const cleanPhone = typeof phone === 'string' && phone.trim() ? phone.trim().slice(0, 20) : null
+  if (cleanPhone && !/^[+\d][\d\s-]{6,19}$/.test(cleanPhone)) errors.phone = 'Enter a valid phone number.'
   if (Object.keys(errors).length) throw validationError(errors)
   return transaction(db, () => {
     if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(cleanEmail)) throw new AppError(409, 'email_taken', 'An account with this email already exists. Sign in instead.')
-    const user = { id: `usr_${randomBytes(9).toString('hex')}`, email: cleanEmail, name: cleanName }
-    db.prepare('INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(user.id, user.email, user.name, hashPassword(password), now())
+    const user = { id: `usr_${randomBytes(9).toString('hex')}`, email: cleanEmail, name: cleanName, role }
+    const ts = now()
+    db.prepare('INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(user.id, user.email, user.name, hashPassword(password), role, ts)
+    const table = { agent: 'agent_profiles', buyer: 'buyer_profiles', seller: 'seller_profiles' }[role]
+    db.prepare(`INSERT INTO ${table} (user_id, phone, created_at, updated_at) VALUES (?, ?, ?, ?)`).run(user.id, cleanPhone, ts, ts)
     return user
   })
 }
@@ -69,6 +80,7 @@ export function createAuth({ db, accessCode, hosted = false }) {
   const codeUsable = typeof accessCode === 'string' && accessCode.length >= MIN_ACCESS_CODE
   const mode = hosted && !codeUsable ? 'locked' : 'accounts'
   const attempts = new Map()
+  const signups = new Map() // ip → { count, resetAt }: open signup for buyers and sellers is capped per address
 
   function tokenFrom(req) {
     const raw = (req.get('cookie') || '').split(';').map((c) => c.trim()).find((c) => c.startsWith(`${COOKIE}=`))
@@ -114,7 +126,7 @@ export function createAuth({ db, accessCode, hosted = false }) {
 
     status(req) {
       const users = db.prepare('SELECT COUNT(*) AS n FROM users').get().n
-      return { mode, hosted, user: mode === 'locked' ? null : currentUser(req), hasUsers: users > 0, registrationNeedsCode: hosted }
+      return { mode, hosted, user: mode === 'locked' ? null : currentUser(req), hasUsers: users > 0, registrationNeedsCode: hosted, agentCodeRequired: hosted }
     },
 
     /** Guards /api: health and the session routes are always reachable. Sets req.user. */
@@ -131,15 +143,21 @@ export function createAuth({ db, accessCode, hosted = false }) {
       if (mode === 'locked') throw lockedError()
       const ip = req.ip || 'unknown'
       checkRate(ip)
-      const { name, email, password, accessCode: given } = req.body || {}
-      if (hosted) {
+      const { name, email, password, phone, role, accessCode: given } = req.body || {}
+      // Agents see leads' contact details, so on a hosted copy only people with the team access code can be agents.
+      // Buyers and sellers sign up openly.
+      if (hosted && role === 'agent') {
         const ok = typeof given === 'string' && given.length <= 200 && timingSafeEqual(sha256(given), sha256(accessCode))
         if (!ok) {
           recordFailure(ip)
           throw new AppError(401, 'wrong_access_code', 'That team access code is not right. Ask the person who set up DealSaathi.')
         }
       }
-      const user = createUser(db, { name, email, password })
+      const s = signups.get(ip)
+      if (s && s.resetAt > Date.now() && s.count >= MAX_SIGNUPS) throw new AppError(429, 'too_many_signups', 'Too many new accounts from this network. Try again in an hour.')
+      const user = createUser(db, { name, email, password, phone, role })
+      if (!s || s.resetAt < Date.now()) signups.set(ip, { count: 1, resetAt: Date.now() + 60 * 60 * 1000 })
+      else s.count++
       startSession(req, res, user)
     },
 

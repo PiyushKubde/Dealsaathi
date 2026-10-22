@@ -18,7 +18,7 @@ const ai = {
 // Embarko creates CRON_SECRET for an app with schedules (embarko.json) and calls /tasks/automations with it.
 const scheduler = { available: Boolean(process.env.CRON_SECRET), secret: process.env.CRON_SECRET || null }
 
-const db = openDatabase()
+const db = openDatabase(databaseFile(), { log: (line) => console.log(line.replace(process.env.DATA_DIR || '\u0000', 'DATA_DIR')) })
 const interrupted = markInterruptedRuns(db)
 const auth = createAuth({ db, accessCode: process.env.APP_PASSWORD, hosted })
 const app = createApp({ db, ai, vs: createViasocketGateway(), auth, behindProxy: hosted, scheduler })
@@ -27,9 +27,11 @@ const host = process.env.HOST || (hosted ? '0.0.0.0' : '127.0.0.1') // locally: 
 
 const count = (table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n
 app.listen(port, host, () => {
+  app.locals.events.kick() // events left pending by a restart are processed now, not at the next schedule
   console.log(`DealSaathi is running at ${hosted ? `port ${port}` : `http://localhost:${port}`}`)
-  console.log(`Database: ${hosted ? 'DATA_DIR/dealsaathi.db' : databaseFile()} (${count('users')} users, ${count('leads')} leads, ${count('connections')} connections)`)
+  const roles = Object.fromEntries(db.prepare('SELECT role, COUNT(*) AS n FROM users GROUP BY role').all().map((r) => [r.role, r.n]))
+  console.log(`Database: ${hosted ? 'DATA_DIR/dealsaathi.db' : databaseFile()} schema v${db.prepare('SELECT version FROM schema_version').get().version} (${count('users')} users ${JSON.stringify(roles)}, ${count('leads')} leads, ${count('properties')} properties, ${count('connections')} connections, ${count('domain_events')} events)`)
   console.log(viasocketConfigured ? 'viaSocket: configured (AI, integrations, automations).' : 'viaSocket: not configured (add the viaSocket values). Leads still work.')
   console.log(`Scheduler: ${scheduler.available ? 'on (/tasks/automations, every 15 minutes)' : 'off (no CRON_SECRET; reminders run only with "Run check now")'}${interrupted ? `; ${interrupted} interrupted run(s) marked unknown` : ''}`)
-  console.log(`Access: ${auth.mode === 'locked' ? 'LOCKED until APP_PASSWORD is set' : hosted ? 'accounts; new accounts need the team access code' : 'accounts (this computer only)'}`)
+  console.log(`Access: ${auth.mode === 'locked' ? 'LOCKED until APP_PASSWORD is set' : hosted ? 'accounts; buyers and sellers sign up openly, new agents need the team access code' : 'accounts (this computer only)'}`)
 })

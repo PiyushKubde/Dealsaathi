@@ -23,7 +23,7 @@ test('setup shows the lead’s saved address and only my Gmail connections', asy
     const mine = (await t.call(`/api/leads/${lead.id}/followups`)).body
     assert.equal(mine.recipient, 'rahul@example.com')
     assert.deepEqual(mine.connections.map((c) => c.id), [connection.id])
-    assert.deepEqual((await t.call(`/api/leads/${lead.id}/followups`, { as: other })).body.connections, [])
+    assert.equal((await t.call(`/api/leads/${lead.id}/followups`, { as: other })).status, 404, 'another agent cannot open my lead')
   } finally { await t.close() }
 })
 

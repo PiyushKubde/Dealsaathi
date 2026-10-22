@@ -110,12 +110,13 @@ test('leads persist in the database file across restarts', async () => {
   const file = join(dir, 'test.db')
   try {
     let t = await startApp({ db: openDatabase(file) })
+    const agent = t.user
     await t.call('/api/leads', { method: 'POST', body: { lead: RAHUL } })
     await t.close()
     t.db.close()
 
     t = await startApp({ db: openDatabase(file) })
-    const { body } = await t.call('/api/leads')
+    const { body } = await t.call('/api/leads', { as: agent })
     assert.equal(body.total, 1)
     assert.equal(body.leads[0].full_name, 'Rahul Sharma')
     await t.close()

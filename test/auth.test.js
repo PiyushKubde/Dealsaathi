@@ -26,7 +26,7 @@ test('every API call needs a signed-in user', async () => {
 test('register → stable usr_ id (not the email) → sign out revokes the session → sign in again', async () => {
   const t = await startApp({ withUser: false })
   try {
-    const res = await register(t, { name: 'Priya Desai', email: 'Priya@Example.com', password: 'a-long-password' })
+    const res = await register(t, { name: 'Priya Desai', email: 'Priya@Example.com', password: 'a-long-password', role: 'agent' })
     assert.equal(res.status, 200)
     assert.match(res.body.user.id, /^usr_[0-9a-f]{18}$/)
     assert.equal(res.body.user.email, 'priya@example.com')
@@ -51,11 +51,11 @@ test('register → stable usr_ id (not the email) → sign out revokes the sessi
 test('registration validates fields and refuses a second account for one email', async () => {
   const t = await startApp({ withUser: false })
   try {
-    const bad = await register(t, { name: 'P', email: 'nope', password: 'short' })
+    const bad = await register(t, { name: 'P', email: 'nope', password: 'short', role: 'admin' })
     assert.equal(bad.status, 400)
-    assert.deepEqual(Object.keys(bad.body.error.details.fields).sort(), ['email', 'name', 'password'])
-    assert.equal((await register(t, { name: 'Priya', email: 'p@example.com', password: 'a-long-password' })).status, 200)
-    assert.equal((await register(t, { name: 'Other', email: 'P@example.com', password: 'a-long-password' })).status, 409)
+    assert.deepEqual(Object.keys(bad.body.error.details.fields).sort(), ['email', 'name', 'password', 'role'])
+    assert.equal((await register(t, { name: 'Priya', email: 'p@example.com', password: 'a-long-password', role: 'buyer' })).status, 200)
+    assert.equal((await register(t, { name: 'Other', email: 'P@example.com', password: 'a-long-password', role: 'seller' })).status, 409, 'one account per email, whatever the role')
   } finally { await t.close() }
 })
 
@@ -84,14 +84,19 @@ test('hosted: creating an account needs the team access code; signing in does no
   const base = await startApp({ withUser: false })
   const t = await startApp({ withUser: false, db: base.db, auth: createAuth({ db: base.db, hosted: true, accessCode: CODE }) })
   try {
-    const noCode = await register(t, { name: 'Priya', email: 'p@example.com', password: 'a-long-password' })
+    const noCode = await register(t, { name: 'Priya', email: 'p@example.com', password: 'a-long-password', role: 'agent' })
     assert.equal(noCode.status, 401)
     assert.equal(noCode.body.error.code, 'wrong_access_code')
-    assert.equal((await register(t, { name: 'Priya', email: 'p@example.com', password: 'a-long-password', accessCode: 'wrong-code-here' })).status, 401)
-    const ok = await register(t, { name: 'Priya', email: 'p@example.com', password: 'a-long-password', accessCode: CODE })
+    assert.equal((await register(t, { name: 'Priya', email: 'p@example.com', password: 'a-long-password', role: 'agent', accessCode: 'wrong-code-here' })).status, 401)
+    const ok = await register(t, { name: 'Priya', email: 'p@example.com', password: 'a-long-password', role: 'agent', accessCode: CODE })
     assert.equal(ok.status, 200)
     assert.equal((await t.call('/api/session/login', { method: 'POST', body: { email: 'p@example.com', password: 'a-long-password' }, as: null })).status, 200)
     assert.equal((await t.call('/api/session', { as: null })).body.registrationNeedsCode, true)
+    // Buyers and sellers sign up openly on the hosted copy; only agents need the team code.
+    const buyer = await register(t, { name: 'Open Buyer', email: 'buyer@example.com', password: 'a-long-password', role: 'buyer' })
+    assert.equal(buyer.status, 200)
+    assert.equal(buyer.body.user.role, 'buyer')
+    assert.equal((await register(t, { name: 'Open Seller', email: 'seller@example.com', password: 'a-long-password', role: 'seller' })).status, 200)
   } finally { await base.close(); await t.close() }
 })
 

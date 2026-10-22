@@ -31,8 +31,8 @@ export function extraction(intent, lead = {}, uncertain = []) {
 }
 
 /** A user with a live session; `cookie` goes in a request's Cookie header. */
-export function signedInUser(db, { name = 'Asha Broker', email = `asha${Math.random().toString(36).slice(2, 8)}@example.com` } = {}) {
-  const user = createUser(db, { name, email, password: 'test-password-123' })
+export function signedInUser(db, { name = 'Asha Broker', email = `asha${Math.random().toString(36).slice(2, 8)}@example.com`, role = 'agent' } = {}) {
+  const user = createUser(db, { name, email, password: 'test-password-123', role })
   return { ...user, cookie: sessionCookie(createSession(db, user.id)) }
 }
 
@@ -55,8 +55,12 @@ export async function startApp({ ai = fakeAi(), vs = { configured: false }, db =
     const text = await res.text()
     return { status: res.status, body: text ? JSON.parse(text) : null, text, headers: res.headers }
   }
-  const idle = () => app.locals.automations.idle()
-  return { db, ai, vs, user, base, call, idle, engine: app.locals.automations, close: async () => { await idle(); await new Promise((r) => server.close(r)) } }
+  // Waits until background work is done: queued platform events (processed after each write) and automation sends.
+  const idle = async () => {
+    await new Promise((r) => setImmediate(r))
+    for (let i = 0; i < 5; i++) { await app.locals.events.idle(); await app.locals.automations.idle() }
+  }
+  return { db, ai, vs, user, base, call, idle, events: app.locals.events, engine: app.locals.automations, close: async () => { await idle(); await new Promise((r) => server.close(r)) } }
 }
 
 /** An error shaped like viasocket-apps' ViaSocketError. */

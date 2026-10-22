@@ -26,6 +26,8 @@ const FIELDS = [
 ]
 
 // ---------- helpers ----------
+/** Links that come from providers (payment, calendar) are shown only when they are plain https addresses. */
+const safeUrl = (u) => (/^https:\/\/[^\s"'<>]+$/.test(String(u || '')) ? u : null)
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const label = (group, v) => (v ? LABELS[group][v] || v : '')
 
@@ -51,7 +53,7 @@ function lookingFor(l) {
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '')
 const typeBadge = (t) => (t ? `<span class="badge ${esc(t)}">${esc(label('customer_type', t))}</span>` : '')
-const VIA_LABELS = { form: 'form', assistant: 'AI assistant (confirmed by you)', gmail: 'Gmail via viaSocket', matching: 'automatic matching', automation: 'Buyer Follow-Up Reminders', calendar: 'Google Calendar via viaSocket', feedback: 'the buyer’s feedback' }
+const VIA_LABELS = { buyer: 'the buyer (their own account)', assignment: 'assignment', form: 'form', assistant: 'AI assistant (confirmed by you)', gmail: 'Gmail via viaSocket', matching: 'automatic matching', automation: 'Buyer Follow-Up Reminders', calendar: 'Google Calendar via viaSocket', feedback: 'the buyer’s feedback' }
 const dash = (v) => (v == null || v === '' ? '<span class="muted">Unknown</span>' : esc(v))
 
 class ApiError extends Error {
@@ -152,10 +154,12 @@ function bindMoneyHints(form) {
 }
 
 function showFieldErrors(form, fields = {}) {
-  form.querySelectorAll('.field').forEach((el) => { el.classList.remove('invalid'); el.querySelector('.err').textContent = '' })
-  for (const [key, message] of Object.entries(fields)) {
+  form.querySelectorAll('.field').forEach((el) => { el.classList.remove('invalid'); const err = el.querySelector('.err'); if (err) err.textContent = '' })
+  for (const [key, message] of Object.entries(fields || {})) {
     const el = form.querySelector(`[data-field="${key}"]`)
-    if (el) { el.classList.add('invalid'); el.querySelector('.err').textContent = message }
+    const err = el?.querySelector('.err')
+    if (el) el.classList.add('invalid')
+    if (err) err.textContent = message
   }
   form.querySelector('.invalid input, .invalid select')?.focus()
 }
@@ -163,7 +167,9 @@ function showFieldErrors(form, fields = {}) {
 function duplicatesHtml(duplicates, { canOverride }) {
   if (!duplicates?.length) return ''
   const strong = duplicates.some((d) => d.strong)
-  const items = duplicates.map((d) => `<li><a href="#/leads/${d.lead.id}">${esc(d.lead.full_name)}</a> <span class="code">${esc(d.lead.code)}</span> (${esc(d.reasons.join(', '))})</li>`).join('')
+  const items = duplicates.map((d) => d.lead
+    ? `<li><a href="#/leads/${d.lead.id}">${esc(d.lead.full_name)}</a> <span class="code">${esc(d.lead.code)}</span> (${esc(d.reasons.join(', '))})</li>`
+    : `<li>A lead managed by another agent (${esc(d.reasons.join(', '))})</li>`).join('')
   return `<div class="notice ${strong ? 'err' : 'warn'}"><strong>${strong ? 'This lead already exists.' : 'A lead with the same name exists.'}</strong>
     <ul>${items}</ul>${strong ? '<div>Use the existing lead, or change the phone/email.</div>' : canOverride ? '<div>If this is a different person, choose <em>Save anyway</em>.</div>' : ''}</div>`
 }
@@ -276,7 +282,8 @@ async function renderLeadDetail(id) {
     ['Lead ID', `<span class="code">${esc(l.code)}</span>`], ['Customer type', typeBadge(l.customer_type)], ['Phone', dash(l.phone)], ['Email', dash(l.email)],
     ['Preferred location', dash(l.preferred_location)], ['Property type', dash(label('property_type', l.property_type))], ['Interested in', dash(l.property_interest)],
     ['Bedrooms', dash(l.bedrooms)], ['Budget', dash(budgetText(l))], ['Lead source', dash(label('source', l.source))], ['Status', esc(label('status', l.status))],
-    ['Assigned broker', dash(l.assigned_broker)], ['Follow-up date', dash(l.follow_up_on)], ['Notes', dash(l.notes)], ['Created', esc(fmtDateTime(l.created_at))], ['Last updated', esc(fmtDateTime(l.updated_at))],
+    ['Assigned to', l.buyer_user_id ? 'You (registered buyer, assigned by service area or claimed)' : 'You'], ['How assigned', dash((l.assignment_rule || '').replace(/_/g, ' '))],
+    ['Self-registered buyer', l.buyer_user_id ? 'Yes: they manage their own requirements' : 'No'], ['Follow-up date', dash(l.follow_up_on)], ['Notes', dash(l.notes)], ['Created', esc(fmtDateTime(l.created_at))], ['Last updated', esc(fmtDateTime(l.updated_at))],
     ['Stored in', esc(storedIn())]
   ]
   main.innerHTML = `
@@ -287,13 +294,23 @@ async function renderLeadDetail(id) {
       <section class="card"><h2>Activity</h2><ul class="timeline">${activities.map((a) => `<li><strong>${esc(a.summary)}</strong>
         <div class="small muted">${esc(fmtDateTime(a.created_at))} · via ${esc(VIA_LABELS[a.via] || a.via)}${a.user_name ? ` · by ${esc(a.user_name)}` : ''}</div></li>`).join('')}</ul></section>
     </div>
-    <section class="card" style="margin-top:1rem"><h2>Matching properties</h2><div id="lead-matches"><p class="muted">Loading…</p></div></section>
+    <section class="card" style="margin-top:1rem"><h2>Matching properties</h2><p class="small muted">Kept up to date automatically when this lead’s requirements or any listing change.</p><div id="lead-matches"><p class="muted">Loading…</p></div></section>
+    <section class="card" style="margin-top:1rem"><h2>Transfer to another agent</h2><form id="transfer" class="row"><label for="t-agent" class="sr-only">Agent</label><select id="t-agent" name="agentId" style="width:auto"><option value="">Choose an agent</option></select><button class="btn ghost" type="submit">Transfer</button></form><div id="transfer-msg"></div></section>
     <section class="card" style="margin-top:1rem"><h2>Email this lead</h2>
       <p class="small muted">A follow-up or property recommendation, sent from your own connected Gmail through viaSocket (Gmail · Send Email). You review it before anything is sent.</p>
       <div id="followup"><p class="muted">Loading…</p></div></section>`
   const followupBox = document.getElementById('followup')
   renderLeadMatches(l, document.getElementById('lead-matches'), (preset) => renderFollowupPanel(l, followupBox, preset))
   renderFollowupPanel(l, followupBox)
+  api('/api/agents').then(({ agents }) => {
+    document.getElementById('t-agent').insertAdjacentHTML('beforeend', agents.filter((a) => a.id !== session.user.id).map((a) => `<option value="${esc(a.id)}">${esc(a.name)}${a.agency ? ` (${esc(a.agency)})` : ''}</option>`).join(''))
+  }).catch(() => {})
+  document.getElementById('transfer').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const agentId = e.target.elements.agentId.value
+    if (!agentId || !(await confirmDialog(`Transfer ${l.full_name}?`, 'The other agent becomes responsible and is notified. You will no longer see this lead.', 'Transfer'))) return
+    try { await api(`/api/leads/${l.id}/transfer`, { method: 'POST', body: { agentId } }); toast('Lead transferred.'); location.hash = '#/leads' } catch (error) { document.getElementById('transfer-msg').innerHTML = `<div class="notice err">${esc(error.message)}</div>` }
+  })
   document.getElementById('delete').addEventListener('click', async () => {
     const ok = await confirmDialog(`Delete ${l.full_name}?`, 'This permanently removes the lead and its activity history from DealSaathi\'s database. It cannot be undone.', 'Delete permanently')
     if (!ok) return
@@ -574,12 +591,18 @@ function renderLogin(view = session.hasUsers ? 'signin' : 'register') {
   main.innerHTML = `
     <div class="card" style="max-width:440px;margin:3rem auto">
       <h1>${register ? 'Create your account' : 'Sign in'}</h1>
-      <p class="muted">${register ? 'Each broker has their own account, so their connected apps and automations stay their own.' : 'Sign in to DealSaathi.'}</p>
+      <p class="muted">${register ? 'DealSaathi connects buyers, sellers and the agents who help them.' : 'Sign in to DealSaathi.'}</p>
       <form id="auth-form" class="stack" novalidate>
-        ${register ? '<div class="field" data-field="name"><label for="a-name">Your name</label><input id="a-name" name="name" autocomplete="name" required><div class="err"></div></div>' : ''}
+        ${register ? `<fieldset class="field role-pick" data-field="role"><legend>I am a…</legend>
+          <label class="radio"><input type="radio" name="role" value="buyer"> <span><strong>Buyer or tenant</strong><br><span class="small muted">Save what you are looking for and get matching properties</span></span></label>
+          <label class="radio"><input type="radio" name="role" value="seller"> <span><strong>Seller or landlord</strong><br><span class="small muted">List your property and see interest</span></span></label>
+          <label class="radio"><input type="radio" name="role" value="agent"> <span><strong>Agent</strong><br><span class="small muted">Manage leads, listings, viewings and rent${session.registrationNeedsCode ? ' (needs your team’s access code)' : ''}</span></span></label>
+          <div class="err"></div></fieldset>
+          <div class="field" data-field="name"><label for="a-name">Your name</label><input id="a-name" name="name" autocomplete="name" required><div class="err"></div></div>
+          <div class="field" data-field="phone"><label for="a-phone">Phone (optional)</label><input id="a-phone" name="phone" type="tel" autocomplete="tel"><div class="err"></div></div>` : ''}
         <div class="field" data-field="email"><label for="a-email">Email</label><input id="a-email" name="email" type="email" autocomplete="email" required><div class="err"></div></div>
         <div class="field" data-field="password"><label for="a-password">Password</label><input id="a-password" name="password" type="password" autocomplete="${register ? 'new-password' : 'current-password'}" required>${register ? '<div class="hint">At least 10 characters.</div>' : ''}<div class="err"></div></div>
-        ${register && session.registrationNeedsCode ? '<div class="field" data-field="accessCode"><label for="a-code">Team access code</label><input id="a-code" name="accessCode" type="password" autocomplete="off" required><div class="hint">Ask the person who set up DealSaathi.</div><div class="err"></div></div>' : ''}
+        ${register && session.registrationNeedsCode ? '<div class="field" data-field="accessCode" id="code-field" hidden><label for="a-code">Team access code</label><input id="a-code" name="accessCode" type="password" autocomplete="off"><div class="hint">Agents only. Ask the person who set up DealSaathi.</div><div class="err"></div></div>' : ''}
         <div id="auth-error"></div>
         <button class="btn primary" type="submit">${register ? 'Create account' : 'Sign in'}</button>
         <button class="btn ghost" type="button" id="auth-switch">${register ? 'I already have an account' : 'Create an account'}</button>
@@ -587,10 +610,15 @@ function renderLogin(view = session.hasUsers ? 'signin' : 'register') {
     </div>`
   const form = document.getElementById('auth-form')
   form.querySelector('input').focus()
+  form.querySelectorAll('input[name=role]').forEach((r) => r.addEventListener('change', () => {
+    const code = document.getElementById('code-field')
+    if (code) code.hidden = form.elements.role.value !== 'agent'
+  }))
   document.getElementById('auth-switch').addEventListener('click', () => renderLogin(register ? 'signin' : 'register'))
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
     const body = Object.fromEntries(new FormData(form))
+    if (register && !body.role) { showFieldErrors(form, { role: 'Choose Buyer, Seller or Agent.' }); return }
     try {
       const res = await api(register ? '/api/session/register' : '/api/session/login', { method: 'POST', body })
       Object.assign(session, { user: res.user, hasUsers: true })
@@ -609,14 +637,37 @@ function renderLocked() {
     <p class="muted">The owner adds <strong>APP_PASSWORD</strong> (at least 12 characters) in the hosting settings, then reloads this page. Brokers then use that code once, to create their own accounts.</p></div>`
 }
 
+const ROLE_LABEL = { buyer: 'Buyer', seller: 'Seller', agent: 'Agent' }
+/** Each role's sections, in nav order. The server enforces the same split; this only decides what is shown. */
+const NAV = {
+  agent: [['dashboard', 'Dashboard'], ['notifications', 'Notifications'], ['assistant', 'Add with AI'], ['leads', 'Leads'], ['pool', 'Lead pool'], ['properties', 'Properties'], ['viewings', 'Viewings'], ['feedback', 'Feedback'], ['rent', 'Rent'], ['integrations', 'Integrations'], ['automations', 'Automations'], ['activity', 'Activity log'], ['profile', 'Profile']],
+  buyer: [['dashboard', 'Home'], ['requirements', 'My requirements'], ['recommendations', 'Recommendations'], ['browse', 'Browse listings'], ['my-viewings', 'My viewings'], ['my-tenancies', 'My rent'], ['notifications', 'Notifications']],
+  seller: [['dashboard', 'Home'], ['my-listings', 'My listings'], ['listing-viewings', 'Viewings'], ['my-tenancies', 'My rentals'], ['notifications', 'Notifications'], ['profile', 'Profile']]
+}
+function renderNav() {
+  const nav = document.getElementById('nav')
+  const items = session.user ? NAV[session.user.role] || [] : []
+  nav.innerHTML = items.map(([key, text]) => `<a href="#/${key}" data-nav="${key}">${esc(text)}${key === 'notifications' ? ' <span class="badge" id="unread" hidden></span>' : ''}</a>`).join('')
+}
+async function refreshUnread() {
+  const el = document.getElementById('unread')
+  if (!el || !session.user) return
+  try {
+    const { unread } = await api('/api/notifications?unread=1&limit=1')
+    el.textContent = unread
+    el.hidden = !unread
+  } catch { /* the page shows its own error */ }
+}
+
 function updateAccessUi() {
   const foot = document.querySelector('.sidebar-foot')
   document.getElementById('account')?.remove()
+  renderNav()
   if (!session.user) return
   const box = document.createElement('div')
   box.id = 'account'
   box.className = 'account'
-  box.innerHTML = `<div class="small"><strong>${esc(session.user.name)}</strong><div class="muted">${esc(session.user.email)}</div></div>`
+  box.innerHTML = `<div class="small"><strong>${esc(session.user.name)}</strong> <span class="badge">${esc(ROLE_LABEL[session.user.role] || '')}</span><div class="muted">${esc(session.user.email)}</div></div>`
   const out = document.createElement('button')
   out.className = 'btn ghost small'
   out.textContent = 'Sign out'
@@ -737,10 +788,11 @@ async function renderIntegrations() {
         <div class="row">${appIcon(a.iconUrl, a.name)}<h2 style="margin:0;flex:1">${esc(a.name)}</h2>${pill}</div>
         <p class="small">${esc(a.purpose)}</p>
         <p class="small muted">Used by: ${esc(a.usedBy.join(', '))}</p>
-        ${a.inUse ? '' : '<div class="notice info small">DealSaathi does not use this app yet. You can connect it now; nothing will run on it until that feature is built.</div>'}
+        ${a.liveBlocked ? `<div class="notice warn small"><strong>Not available for live use.</strong> ${esc(a.liveBlocked)}</div>` : a.inUse ? '' : '<div class="notice info small">DealSaathi does not use this app yet. You can connect it now; nothing will run on it until that feature is built.</div>'}
         ${a.error ? `<div class="notice err small">${esc(a.error)}</div>` : ''}
         ${a.connections.length ? `<ul class="timeline">${a.connections.map((c) => `<li class="conn-row"><div style="flex:1;min-width:0"><strong>${esc(c.label || a.name)}</strong> ${STATUS_BADGE[c.status] || ''}
-            <div class="small muted">connected ${esc(fmtDate(c.createdAt))}</div></div>
+            <div class="small muted">connected ${esc(fmtDate(c.createdAt))}${c.verification ? ` · access check ${esc(fmtDateTime(c.verification.at))}: <span style="color:${c.verification.status === 'ok' ? 'inherit' : 'var(--danger)'}">${esc(c.verification.detail)}</span>` : ' · access not checked yet'}</div></div>
+            ${c.status === 'active' && a.inUse ? `<button class="btn ghost small" data-verify="${c.id}">Check access</button>` : ''}
             ${c.status === 'expired' ? `<button class="btn ghost small" data-reconnect="${c.id}">Reconnect</button>` : ''}
             <button class="btn ghost small" data-disconnect="${c.id}" data-name="${esc(a.name)}">Disconnect</button></li>`).join('')}</ul>` : ''}
         <div><button class="btn ${active.length || !a.inUse ? 'ghost' : 'primary'} connect-btn" data-connect="${esc(a.slug)}" ${ready && a.serviceId ? '' : 'disabled'}>${appIcon(a.iconUrl, a.name)} ${active.length ? `Connect another ${esc(a.name)} account` : `Connect ${esc(a.name)}`}</button></div>
@@ -760,6 +812,15 @@ async function renderIntegrations() {
         toast(`${b.dataset.name} disconnected.`)
         draw()
       } catch (error) { toast(error.message) }
+    }))
+    grid.querySelectorAll('[data-verify]').forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true
+      b.textContent = 'Checking…'
+      try {
+        const r = await api(`/api/integrations/connections/${b.dataset.verify}/verify`, { method: 'POST', body: {} })
+        toast(r.status === 'ok' ? r.detail : `Access check failed: ${r.detail}`)
+      } catch (error) { toast(error.message) }
+      draw()
     }))
     grid.querySelectorAll('[data-reconnect]').forEach((b) => b.addEventListener('click', async () => {
       try {
@@ -850,7 +911,7 @@ async function renderAutomations() {
     }
     const channelFields = (prefix, channel, allowNone) => `
       <div class="field"><label>${prefix === 'notify' ? 'Notify me' : 'Send through'}</label>
-        <div class="row">${allowNone ? `<label class="radio"><input type="radio" name="ch" value="none" ${channel === 'none' || !channel ? 'checked' : ''}> Don’t notify (reminders appear in DealSaathi)</label>` : ''}
+        <div class="row">${allowNone ? `<label class="radio"><input type="radio" name="ch" value="none" ${channel === 'none' || !channel ? 'checked' : ''}> Only in DealSaathi</label>` : ''}
           <label class="radio"><input type="radio" name="ch" value="gmail" ${channel === 'gmail' ? 'checked' : ''}> Email (Gmail)</label>
           <label class="radio"><input type="radio" name="ch" value="slack" ${channel === 'slack' ? 'checked' : ''}> Slack</label></div></div>
       <div data-ch="gmail" class="stack">
@@ -864,9 +925,10 @@ async function renderAutomations() {
 
     let body = ''
     if (a.key === 'new_lead_alert') body = channelFields('send', cfg.channel || 'gmail', false) + '<p class="small muted">The message includes the lead’s name, phone, email, source, budget, location and requirements as saved. Anything not on record says “not given”.</p>'
-    if (a.key === 'buyer_matching') body = `<p>When you save a property, DealSaathi checks every saved buyer and tenant against its location, price, bedrooms and type, and lists who fits on the property page with the reasons.</p>
-      <label class="radio muted"><input type="checkbox" disabled> Also send the match to buyers automatically</label>
-      <div class="notice info small">Not available: sending to buyers needs WhatsApp Business with an approved message template, which DealSaathi does not support yet. You can email a buyer recommendations from their lead page instead.</div>`
+    if (a.key === 'buyer_matching') body = `<p>Matching runs for the whole marketplace on its own: whenever a listing is published or changed, or a buyer saves or changes requirements. Each match is stored with its reasons, and nobody is told twice about the same unchanged match.</p>
+      <p class="small">While this is on, you get an in-app notice for new matches involving your buyers and listings. You can also get one message per change, listing every new match for your buyers:</p>
+      ${channelFields('notify', cfg.notify || 'none', true)}
+      <div class="notice info small">Registered buyers see their matches in the app automatically. Sending to buyers on WhatsApp needs a WhatsApp Business account with an approved message template, which is not available yet.</div>`
     if (a.key === 'property_recommendations') body = `<div class="field"><label>Send from Gmail account</label>${accountSelect('gmail', 'gmailConnectionId', cfg.connectionId)}</div>
       <div class="notice info small">You always review and approve each recommendation before it is sent. This cannot be turned off.</div>
       <p class="small muted">Open a lead, tick the matching listings, and choose “Email these to the lead”. Sample listings can never be sent.</p>`
@@ -995,7 +1057,7 @@ async function renderAutomations() {
         })
       }
       if (ch) {
-        config[a.key === 'followup_reminders' ? 'notify' : 'channel'] = ch
+        config[['followup_reminders', 'buyer_matching'].includes(a.key) ? 'notify' : 'channel'] = ch
         if (ch === 'gmail') Object.assign(config, { connectionId: form.elements.gmailConnectionId?.value || null, emailTo: form.elements.emailTo.value })
         if (ch === 'slack') {
           const sel = form.elements.slackChannelId
@@ -1066,10 +1128,18 @@ const P_FIELDS = [
 const priceText = (p) => `${formatINR(p.price)}${p.listing_type === 'rent' ? '/month' : ''}`
 const sampleBadge = (p) => (p.is_sample ? ' <span class="badge draft" title="Not real inventory">Sample</span>' : '')
 
-async function renderProperties(params) {
+const STATE_BADGE = { draft: '<span class="badge draft">Draft</span>', published: '<span class="pill pill-on">Published</span>', unpublished: '<span class="pill pill-off">Unpublished</span>', archived: '<span class="pill pill-off">Archived</span>' }
+
+async function renderProperties(params, { scope = params.get('scope') || 'mine' } = {}) {
+  const role = session.user.role
+  const base = role === 'seller' ? '#/my-listings' : role === 'buyer' ? '#/browse' : '#/properties'
+  const heading = role === 'buyer' ? ['Browse listings', 'Published, available properties. Your best matches are on Recommendations.']
+    : role === 'seller' ? ['My listings', 'Drafts are private. Publishing matches a listing against buyers’ saved requirements; you see how many match, never who.']
+      : ['Properties', scope === 'market' ? 'Every published listing on DealSaathi, including sellers’ listings.' : 'Listings you own or are the agent for. Publishing one matches it against every saved buyer requirement in the background.']
   main.innerHTML = `
-    <div class="page-head"><div><h1>Properties</h1><p>Your listings. Saving one matches it against saved buyers and tenants straight away.</p></div>
-      <div class="row"><button class="btn ghost" id="load-samples">Load sample listings</button><a class="btn primary" href="#/properties/new">New property</a></div></div>
+    <div class="page-head"><div><h1>${heading[0]}</h1><p>${heading[1]}</p></div>
+      <div class="row">${role === 'agent' ? `<a class="btn ${scope === 'mine' ? 'primary' : 'ghost'} small" href="#/properties?scope=mine">My listings</a><a class="btn ${scope === 'market' ? 'primary' : 'ghost'} small" href="#/properties?scope=market">All published</a><button class="btn ghost" id="load-samples">Load sample listings</button>` : ''}
+        ${role !== 'buyer' ? `<a class="btn primary" href="${role === 'seller' ? '#/my-listings/new' : '#/properties/new'}">New listing</a>` : ''}</div></div>
     <form class="filters" id="p-filters" role="search">
       <div class="field"><label for="pq">Search</label><input id="pq" name="q" type="search" value="${esc(params.get('q') || '')}" placeholder="Title, locality or city"></div>
       <div class="field"><label for="pl">Listing</label><select id="pl" name="listing_type"><option value="">All</option>${Object.entries(P_LABELS.listing_type).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
@@ -1082,14 +1152,16 @@ async function renderProperties(params) {
     const qs = new URLSearchParams(Object.entries(Object.fromEntries(new FormData(form))).filter(([, v]) => v))
     const box = document.getElementById('p-results')
     try {
+      qs.set('scope', role === 'buyer' ? 'market' : role === 'seller' ? 'mine' : scope)
       const { properties } = await api(`/api/properties?${qs}`)
-      box.innerHTML = properties.length ? `<table><thead><tr><th>Listing</th><th>Type</th><th>Where</th><th>Price</th><th>Status</th><th>Matched buyers</th></tr></thead><tbody>
+      const showState = qs.get('scope') === 'mine'
+      box.innerHTML = properties.length ? `<table><thead><tr><th>Listing</th><th>Type</th><th>Where</th><th>Price</th><th>Status</th>${showState ? '<th>Listing state</th>' : ''}${role !== 'buyer' ? '<th>Matched buyers</th>' : ''}</tr></thead><tbody>
         ${properties.map((p) => `<tr data-id="${p.id}" tabindex="0"><td><div class="cell-name">${esc(p.title)}${sampleBadge(p)}</div><div class="code">${esc(p.code)}</div></td>
           <td>${esc(P_LABELS.listing_type[p.listing_type])} · ${esc(label('property_type', p.property_type))}${p.bedrooms != null ? ` · ${p.bedrooms} BHK` : ''}</td>
-          <td>${esc([p.locality, p.city].filter(Boolean).join(', '))}</td><td>${esc(priceText(p))}</td><td>${esc(P_LABELS.status[p.status])}</td><td>${p.match_count}</td></tr>`).join('')}</tbody></table>`
-        : `<p class="empty">${qs.toString() ? 'No listings match these filters.' : 'No listings yet. Add one, or load the sample listings to try matching.'}</p>`
+          <td>${esc([p.locality, p.city].filter(Boolean).join(', '))}</td><td>${esc(priceText(p))}</td><td>${esc(P_LABELS.status[p.status])}</td>${showState ? `<td>${STATE_BADGE[p.listing_state]}</td>` : ''}${role !== 'buyer' ? `<td>${p.match_count}</td>` : ''}</tr>`).join('')}</tbody></table>`
+        : `<p class="empty">${qs.has('q') || qs.has('city') || qs.has('status') || qs.has('listing_type') ? 'No listings match these filters.' : role === 'buyer' ? 'No listings are published yet.' : 'No listings yet. Add your first one.'}</p>`
       box.querySelectorAll('tr[data-id]').forEach((tr) => {
-        const go = () => { location.hash = `#/properties/${tr.dataset.id}` }
+        const go = () => { location.hash = `${base}/${tr.dataset.id}` }
         tr.addEventListener('click', go)
         tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') go() })
       })
@@ -1100,7 +1172,7 @@ async function renderProperties(params) {
   let timer
   form.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 250) })
   form.addEventListener('submit', (e) => { e.preventDefault(); load() })
-  document.getElementById('load-samples').addEventListener('click', async () => {
+  document.getElementById('load-samples')?.addEventListener('click', async () => {
     try {
       const { properties } = await api('/api/properties/samples', { method: 'POST', body: {} })
       toast(`Loaded ${properties.length} sample listings (labelled Sample, not real inventory).`)
@@ -1111,41 +1183,65 @@ async function renderProperties(params) {
 }
 
 async function renderPropertyDetail(id) {
+  const role = session.user.role
+  const base = role === 'seller' ? '#/my-listings' : role === 'buyer' ? '#/browse' : '#/properties'
   let data
   try {
     data = await api(`/api/properties/${encodeURIComponent(id)}`)
   } catch (error) {
-    main.innerHTML = `<div class="notice err">${esc(error.message)}</div><a href="#/properties">Back to properties</a>`
+    main.innerHTML = `<div class="notice err">${esc(error.message)}</div><a href="${base}">Back to listings</a>`
     return
   }
-  const { property: p, matches } = data
+  const { property: p, matches = [], otherBuyers = 0 } = data
   const rows = [['Listing ID', `<span class="code">${esc(p.code)}</span>`], ['Listing', esc(P_LABELS.listing_type[p.listing_type])], ['Type', esc(label('property_type', p.property_type))],
-    ['Bedrooms', dash(p.bedrooms)], ['Price', esc(priceText(p))], ['Where', esc([p.locality, p.city].filter(Boolean).join(', '))], ['Address', dash(p.address)],
+    ['Bedrooms', dash(p.bedrooms)], ['Price', esc(priceText(p))], ['Where', esc([p.locality, p.city].filter(Boolean).join(', '))], ...(p.address != null || p.mine ? [['Address', dash(p.address)]] : []),
     ['Area', p.area_sqft ? `${esc(p.area_sqft)} sq ft` : dash(null)], ['Amenities', p.amenities.length ? esc(p.amenities.join(', ')) : dash(null)],
-    ['Status', esc(P_LABELS.status[p.status])], ['Notes', dash(p.notes)], ['Updated', esc(fmtDateTime(p.updated_at))]]
-  main.innerHTML = `
-    <div class="page-head"><div><a href="#/properties" class="small">← All properties</a><h1>${esc(p.title)}${sampleBadge(p)}</h1>
-      ${p.is_sample ? '<p class="small muted">A sample listing for trying DealSaathi. It is not real inventory.</p>' : ''}</div>
-      <div class="row"><a class="btn ghost" href="#/properties/${p.id}/edit">Edit</a><button class="btn danger" id="p-delete">Delete</button></div></div>
-    <div class="grid two-col">
-      <section class="card"><h2>Details</h2><dl class="details">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></section>
-      <section class="card"><h2>Matched buyers</h2>
-        <p class="small muted">Worked out when the listing was saved, from each lead’s saved location, budget, bedrooms and property type. Leads whose stated needs it does not meet are left out.</p>
+    ['Status', esc(P_LABELS.status[p.status])], ...(p.mine ? [['Listing state', STATE_BADGE[p.listing_state]], ['Notes', dash(p.notes)]] : []), ['Updated', esc(fmtDateTime(p.updated_at))]]
+  const actions = p.mine ? [
+    p.listing_state !== 'archived' ? `<a class="btn ghost" href="${base}/${p.id}/edit">Edit</a>` : '',
+    ['draft', 'unpublished'].includes(p.listing_state) ? '<button class="btn primary" data-state="publish">Publish</button>' : '',
+    p.listing_state === 'published' ? '<button class="btn ghost" data-state="unpublish">Unpublish</button>' : '',
+    p.listing_state !== 'archived' && p.published_at && !p.is_sample ? '<button class="btn ghost" data-state="archive">Archive</button>' : '',
+    !p.published_at || p.is_sample ? '<button class="btn danger" id="p-delete">Delete</button>' : ''
+  ].join('') : role === 'buyer' ? '<button class="btn primary" id="p-view">Request a viewing</button>' : ''
+  const matchSection = role === 'buyer' ? '' : role === 'seller' ? `<section class="card"><h2>Interest</h2>
+      <p>${p.listing_state === 'published' ? `<strong>${otherBuyers}</strong> saved buyer requirement${otherBuyers === 1 ? ' matches' : 's match'} this listing.` : 'Publish the listing to match it against buyers’ requirements.'}</p>
+      <p class="small muted">Buyers’ identities stay private; your agent contacts interested buyers.</p></section>`
+    : `<section class="card"><h2>Matched buyers</h2>
+        <p class="small muted">Recalculated from the event queue whenever this listing or a buyer’s requirements change. You see your own buyers by name${otherBuyers ? `; ${otherBuyers} other agents’ buyer${otherBuyers === 1 ? '' : 's'} also match` : ''}.</p>
         ${matches.length ? `<ul class="timeline">${matches.map((m) => `<li${m.status === 'dismissed' ? ' class="muted"' : ''}><a href="#/leads/${m.leadId}"><strong>${esc(m.name)}</strong></a> ${typeBadge(m.customerType)} <span class="badge">${m.score}/100</span>${m.status === 'dismissed' ? ' <span class="badge">Dismissed</span>' : ''}
           <ul class="small">${m.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}${m.gaps.map((g) => `<li class="muted">Unknown: ${esc(g)}</li>`).join('')}</ul>
           ${m.status === 'suggested' ? `<button class="btn ghost small" data-dismiss="${m.leadId}">Not a fit</button>` : ''}</li>`).join('')}</ul>`
-          : `<p class="muted">No saved ${p.listing_type === 'rent' ? 'tenant' : 'buyer'} fits this listing${p.status !== 'available' ? ' (it is not marked available)' : ''}.</p>`}
-        <div class="notice info small">Sending these to buyers on WhatsApp needs a connected WhatsApp Business account with an approved template. See Integrations.</div></section>
-    </div>`
+          : `<p class="muted">None of your ${p.listing_type === 'rent' ? 'tenants' : 'buyers'} fit this listing${p.listing_state !== 'published' ? ' (it is not published)' : p.status !== 'available' ? ' (it is not marked available)' : ''}.</p>`}
+        <div class="notice info small">Sending listings on WhatsApp needs a WhatsApp Business account with an approved template; it is not available yet.</div></section>`
+  main.innerHTML = `
+    <div class="page-head"><div><a href="${base}" class="small">← Listings</a><h1>${esc(p.title)}${sampleBadge(p)}</h1>
+      ${p.is_sample ? '<p class="small muted">A sample listing for trying DealSaathi. It is not real inventory.</p>' : ''}</div>
+      <div class="row">${actions}</div></div>
+    <div class="grid two-col">
+      <section class="card"><h2>Details</h2><dl class="details">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></section>
+      ${matchSection}
+    </div><div id="p-extra"></div>`
   main.querySelectorAll('[data-dismiss]').forEach((b) => b.addEventListener('click', async () => {
     try { await api(`/api/properties/${p.id}/matches/${b.dataset.dismiss}/dismiss`, { method: 'POST', body: {} }); renderPropertyDetail(p.id) } catch (error) { toast(error.message) }
   }))
-  document.getElementById('p-delete').addEventListener('click', async () => {
-    if (!(await confirmDialog(`Delete ${p.title}?`, 'This removes the listing and its buyer matches. It cannot be undone.', 'Delete permanently'))) return
-    try { await api(`/api/properties/${p.id}`, { method: 'DELETE' }); toast('Listing deleted.'); location.hash = '#/properties' } catch (error) { toast(error.message) }
+  main.querySelectorAll('[data-state]').forEach((b) => b.addEventListener('click', async () => {
+    const action = b.dataset.state
+    if (action === 'archive' && !(await confirmDialog(`Archive ${p.title}?`, 'It leaves the market for good, its matches are withdrawn, and it can no longer be edited. Its history is kept.', 'Archive'))) return
+    try {
+      await api(`/api/properties/${p.id}/${action}`, { method: 'POST', body: {} })
+      toast(action === 'publish' ? 'Published. Matching runs in the background.' : action === 'unpublish' ? 'Unpublished. Its matches are withdrawn.' : 'Archived.')
+      renderPropertyDetail(p.id)
+    } catch (error) { toast(error.message) }
+  }))
+  document.getElementById('p-delete')?.addEventListener('click', async () => {
+    if (!(await confirmDialog(`Delete ${p.title}?`, 'This removes the draft. It cannot be undone.', 'Delete permanently'))) return
+    try { await api(`/api/properties/${p.id}`, { method: 'DELETE' }); toast('Listing deleted.'); location.hash = base } catch (error) { toast(error.message) }
   })
+  document.getElementById('p-view')?.addEventListener('click', () => viewingRequestPanel(p, document.getElementById('p-extra')))
 }
 
+const listBase = () => (session.user.role === 'seller' ? '#/my-listings' : '#/properties')
 async function renderPropertyForm(id) {
   let p = { status: 'available', listing_type: 'sale' }
   if (id) {
@@ -1156,11 +1252,12 @@ async function renderPropertyForm(id) {
   }
   const values = { ...p, amenities: Array.isArray(p.amenities) ? p.amenities.join(', ') : p.amenities }
   main.innerHTML = `
-    <div class="page-head"><div><a href="${id ? `#/properties/${id}` : '#/properties'}" class="small">← Back</a><h1>${id ? `Edit ${esc(p.title)}` : 'New property'}</h1>
+    <div class="page-head"><div><a href="${id ? `${listBase()}/${id}` : listBase()}" class="small">← Back</a><h1>${id ? `Edit ${esc(p.title)}` : 'New listing'}</h1>
       <p>Fields marked * are required. Price is the total for a sale, or the monthly rent.</p></div></div>
     <form class="card" id="p-form" novalidate><div id="p-notice"></div>
-      <div class="form-grid">${P_FIELDS.map((f) => fieldHtml(f, values[f.key])).join('')}</div>
-      <div class="row end" style="margin-top:1rem"><a class="btn ghost" href="${id ? `#/properties/${id}` : '#/properties'}">Cancel</a><button class="btn primary" type="submit" id="p-save">${id ? 'Save changes' : 'Save property'}</button></div></form>`
+      <div class="form-grid">${P_FIELDS.map((f) => fieldHtml(f, values[f.key])).join('')}
+        ${id ? '' : `<div class="field wide"><label class="radio"><input type="checkbox" name="publish" ${session.user.role === 'agent' ? 'checked' : ''}> Publish now (otherwise it is saved as a private draft)</label></div>`}</div>
+      <div class="row end" style="margin-top:1rem"><a class="btn ghost" href="${id ? `${listBase()}/${id}` : listBase()}">Cancel</a><button class="btn primary" type="submit" id="p-save">${id ? 'Save changes' : 'Save listing'}</button></div></form>`
   const form = document.getElementById('p-form')
   bindMoneyHints(form)
   let busy = false
@@ -1176,9 +1273,9 @@ async function renderPropertyForm(id) {
       property[f.key] = raw === '' ? null : (f.type === 'number' || f.type === 'money') ? Number(raw) : raw
     }
     try {
-      const res = id ? await api(`/api/properties/${id}`, { method: 'PATCH', body: { property } }) : await api('/api/properties', { method: 'POST', body: { property } })
-      toast(`Saved. ${res.matching.matched} matching buyer${res.matching.matched === 1 ? '' : 's'}${res.matching.newMatches ? ` (${res.matching.newMatches} new)` : ''}.`)
-      location.hash = `#/properties/${res.property.id}`
+      const res = id ? await api(`/api/properties/${id}`, { method: 'PATCH', body: { property } }) : await api('/api/properties', { method: 'POST', body: { property, publish: form.elements.publish.checked } })
+      toast(res.property.listing_state === 'published' ? 'Saved. Matching against buyers runs in the background.' : 'Saved as a draft. Publish it when it is ready.')
+      location.hash = `${listBase()}/${res.property.id}`
     } catch (error) {
       showFieldErrors(form, error.details?.fields)
       document.getElementById('p-notice').innerHTML = `<div class="notice err">${esc(error.message)} Nothing was saved.</div>`
@@ -1454,15 +1551,16 @@ async function loadViewingList() {
   try {
     const { viewings } = await api('/api/viewings')
     list.innerHTML = viewings.length ? `<ul class="timeline">${viewings.map((v) => `<li data-v="${v.id}">
-      <div class="row" style="justify-content:space-between"><div><a href="#/leads/${v.leadId}"><strong>${esc(v.leadName)}</strong></a> ${VIEW_STATUS[v.status]}
+      <div class="row" style="justify-content:space-between"><div><a href="#/leads/${v.leadId}"><strong>${esc(v.leadName)}</strong></a> ${v.status === 'draft' && v.requestedByBuyer ? '<span class="pill pill-setup">Requested by the buyer</span>' : VIEW_STATUS[v.status]}
         <div class="small">${esc(v.when)} · ${v.durationMinutes} min · ${v.properties.map((p) => esc(p.title)).join(', ')}</div>
-        <div class="small muted">Confirmation: ${esc(CONF_STATUS[v.confirmationStatus])}${v.confirmationDetail ? ` (${esc(v.confirmationDetail)})` : ''}${v.eventLink ? ` · <a href="${esc(v.eventLink)}" target="_blank" rel="noopener">Open in Google Calendar</a>` : ''}${v.feedback ? ` · Feedback: ${esc(v.feedback.status.replace('_', ' '))}` : ''}</div>
+        <div class="small muted">Confirmation: ${esc(CONF_STATUS[v.confirmationStatus])}${v.confirmationDetail ? ` (${esc(v.confirmationDetail)})` : ''}${safeUrl(v.eventLink) ? ` · <a href="${esc(v.eventLink)}" target="_blank" rel="noopener noreferrer">Open in Google Calendar</a>` : ''}${v.feedback ? ` · Feedback: ${esc(v.feedback.status.replace('_', ' '))}` : ''}</div>
         ${v.error ? `<div class="small" style="color:var(--danger)">${esc(v.error)}</div>` : ''}
         ${v.status === 'booked' && v.ended ? '<div class="notice warn small" style="margin-top:.35rem">This viewing has ended. Did it take place?</div>' : ''}</div>
       <div class="row">
         ${v.status === 'booked' && Date.parse(v.startAt) <= Date.now() ? '<button class="btn primary small" data-act="completed">It took place</button><button class="btn ghost small" data-act="no_show">No-show</button>' : ''}
         ${v.status === 'booked' && !v.ended ? '<button class="btn ghost small" data-act="move">Move</button>' : ''}
         ${v.status === 'booked' && v.confirmationStatus === 'failed' ? '<button class="btn ghost small" data-act="resend">Resend confirmation</button>' : ''}
+        ${v.status === 'draft' && v.requestedByBuyer ? '<button class="btn primary small" data-act="confirm">Confirm booking</button><button class="btn ghost small" data-act="cancel">Decline</button>' : ''}
         ${['failed', 'unknown'].includes(v.status) ? '<button class="btn ghost small" data-act="retry">Try booking again</button>' : ''}
         ${['booked', 'failed', 'unknown'].includes(v.status) && !v.ended ? '<button class="btn ghost small" data-act="cancel">Cancel</button>' : ''}
       </div></div><div class="v-extra"></div></li>`).join('')}</ul>` : '<p class="muted">No viewings yet.</p>'
@@ -1485,6 +1583,10 @@ async function viewingAction(v, act, btn) {
     } else if (act === 'resend') {
       const r = await api(`/api/viewings/${v.id}/confirmation`, { method: 'POST', body: {} })
       toast(`Confirmation: ${CONF_STATUS[r.viewing.confirmationStatus]}.`)
+    } else if (act === 'confirm') {
+      btn.disabled = true
+      const r = await api(`/api/viewings/${v.id}/book`, { method: 'POST', body: {} })
+      toast(r.viewing.status === 'booked' ? 'Booked in your Google Calendar; the buyer is notified.' : `Not booked: ${r.viewing.error}`)
     } else if (act === 'retry') {
       if (v.status === 'unknown' && !(await confirmDialog('Is it missing from your calendar?', 'The last attempt got no answer, so it may already be in your Google Calendar. Book again only if it is not there.', 'Book again'))) return
       const r = await api(`/api/viewings/${v.id}/book`, { method: 'POST', body: { confirmNotInCalendar: v.status === 'unknown' } })
@@ -1625,7 +1727,7 @@ async function renderTenancy(id) {
       <a class="btn ghost" href="#/rent/${t.id}/edit">Edit</a></div>
     <section class="card"><h2>Rent</h2>${d.dues.length ? `<ul class="timeline">${d.dues.map((x) => `<li data-due="${x.id}">
       <div class="row" style="justify-content:space-between"><div><strong>${esc(x.period)}</strong> ${DUE_STATE[x.state]} <span class="small">due ${esc(x.dueDate)} · ${rupees(x.amount)}${x.amountPaid ? ` · ${rupees(x.amountPaid)} paid` : ''}${x.verificationSource ? ` (${x.verificationSource === 'razorpay' ? 'confirmed by Razorpay' : 'recorded by you'})` : ''}</span>
-        ${x.paymentLink ? `<div class="small">Payment link: <a href="${esc(x.paymentLink.url)}" target="_blank" rel="noopener">${esc(x.paymentLink.url)}</a> (Razorpay status: ${esc(x.paymentLink.status)})</div>` : ''}
+        ${x.paymentLink ? `<div class="small">Payment link: ${safeUrl(x.paymentLink.url) ? `<a href="${esc(x.paymentLink.url)}" target="_blank" rel="noopener noreferrer">${esc(x.paymentLink.url)}</a>` : esc(x.paymentLink.url)} (Razorpay status: ${esc(x.paymentLink.status)})</div>` : ''}
         ${x.paymentLinkError ? `<div class="small" style="color:var(--danger)">Payment link: ${esc(x.paymentLinkError)}</div>` : ''}
         ${x.reminders.length ? `<div class="small muted">Reminders: ${x.reminders.map((r) => `${esc(r.stage.replace('_', ' '))} ${esc(r.status)}`).join(', ')}</div>` : ''}</div>
       ${['open', 'partially_paid'].includes(x.status) ? `<div class="row"><button class="btn ghost small" data-pay>Record payment</button>${x.paymentLink ? '<button class="btn ghost small" data-check>Check Razorpay</button>' : ''}<button class="btn ghost small" data-waive>Waive</button></div>` : ''}</div>
@@ -1666,7 +1768,284 @@ async function renderTenancy(id) {
   })
 }
 
+// ---------- every role: notifications and profile ----------
+async function renderNotifications() {
+  main.innerHTML = `<div class="page-head"><div><h1>Notifications</h1><p>What DealSaathi told you, newest first. Each fact reaches you once.</p></div>
+    <button class="btn ghost" id="n-all">Mark all as read</button></div><section class="card"><div id="n-list"><p class="muted">Loading…</p></div></section>`
+  const box = document.getElementById('n-list')
+  const load = async () => {
+    const { notifications } = await api('/api/notifications?limit=100')
+    box.innerHTML = notifications.length ? `<ul class="timeline">${notifications.map((n) => `<li class="conn-row${n.status === 'unread' ? ' unread' : ''}"><div style="flex:1;min-width:0">
+        ${n.link ? `<a href="${esc(n.link)}" data-read="${n.id}"><strong>${esc(n.title)}</strong></a>` : `<strong>${esc(n.title)}</strong>`} ${n.status === 'unread' ? '<span class="badge draft">New</span>' : ''}
+        ${n.body ? `<div class="small">${esc(n.body)}</div>` : ''}<div class="small muted">${esc(fmtDateTime(n.createdAt))}</div></div>
+        ${n.status === 'unread' ? `<button class="btn ghost small" data-mark="${n.id}">Mark read</button>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nothing yet.</p>'
+    box.querySelectorAll('[data-mark]').forEach((b) => b.addEventListener('click', async () => { await api(`/api/notifications/${b.dataset.mark}/read`, { method: 'POST', body: {} }).catch(() => {}); load(); refreshUnread() }))
+    box.querySelectorAll('[data-read]').forEach((a) => a.addEventListener('click', () => { api(`/api/notifications/${a.dataset.read}/read`, { method: 'POST', body: {} }).then(refreshUnread).catch(() => {}) }))
+  }
+  document.getElementById('n-all').addEventListener('click', async () => { await api('/api/notifications/read-all', { method: 'POST', body: {} }); load(); refreshUnread() })
+  load().catch((error) => { box.innerHTML = `<div class="notice err">${esc(error.message)}</div>` })
+}
+
+async function renderProfile() {
+  const { profile } = await api('/api/me')
+  const agent = session.user.role === 'agent'
+  main.innerHTML = `<div class="page-head"><div><h1>Profile</h1><p>${agent ? 'Your service areas decide which self-registered buyers and sellers are assigned to you.' : 'Your contact details and notification settings.'}</p></div></div>
+    <form class="card" id="pr-form" novalidate><div id="pr-msg"></div><div class="form-grid">
+      <div class="field" data-field="phone"><label for="pr-phone">Phone</label><input id="pr-phone" name="phone" type="tel" value="${esc(profile.phone || '')}"><div class="err"></div></div>
+      ${agent ? `<div class="field" data-field="agency"><label for="pr-agency">Agency</label><input id="pr-agency" name="agency" value="${esc(profile.agency || '')}"><div class="err"></div></div>
+      <div class="field wide" data-field="serviceAreas"><label for="pr-areas">Service areas</label><input id="pr-areas" name="serviceAreas" value="${esc(profile.serviceAreas.join(', '))}" placeholder="e.g. Pune, Baner, Wakad"><div class="hint">Cities or localities, comma separated. A buyer whose preferred location names one of them can be assigned to you.</div><div class="err"></div></div>
+      <div class="field"><label class="radio"><input type="checkbox" name="acceptingLeads" ${profile.acceptingLeads ? 'checked' : ''}> Accepting new leads</label></div>`
+      : `<div class="field"><label class="radio"><input type="checkbox" name="notifyInApp" ${profile.notifyInApp ? 'checked' : ''}> Notify me in DealSaathi when buyers match or viewings change</label></div>
+      <div class="field wide"><strong>Your agent:</strong> ${profile.agent ? `${esc(profile.agent.name)} (${esc(profile.agent.email)})` : 'Not assigned yet: one is assigned when you list a property in an area an agent serves.'}</div>`}
+    </div><div class="row end" style="margin-top:1rem"><button class="btn primary" type="submit">Save</button></div></form>`
+  const form = document.getElementById('pr-form')
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const body = { phone: form.elements.phone.value }
+    if (agent) Object.assign(body, { agency: form.elements.agency.value, serviceAreas: form.elements.serviceAreas.value, acceptingLeads: form.elements.acceptingLeads.checked })
+    else body.notifyInApp = form.elements.notifyInApp.checked
+    try { await api('/api/me/profile', { method: 'PATCH', body }); toast('Profile saved.') } catch (error) { showFieldErrors(form, error.details?.fields); document.getElementById('pr-msg').innerHTML = `<div class="notice err">${esc(error.message)}</div>` }
+  })
+}
+
+// ---------- agents: the unassigned pool and the activity log ----------
+async function renderPool() {
+  main.innerHTML = `<div class="page-head"><div><h1>Lead pool</h1><p>Leads no agent is responsible for yet (for example, buyers in an area no agent serves). Nobody is notified about them; claim one to see its contact details.</p></div></div>
+    <section class="card"><div id="pool"><p class="muted">Loading…</p></div></section>`
+  const box = document.getElementById('pool')
+  const { leads } = await api('/api/pool')
+  box.innerHTML = leads.length ? `<ul class="timeline">${leads.map((l) => `<li class="conn-row"><div style="flex:1;min-width:0"><strong>${esc(l.firstName)}</strong> ${typeBadge(l.customerType)} ${l.selfRegistered ? '<span class="badge">Registered buyer</span>' : ''}
+      <div class="small muted">${esc([l.preferredLocation, l.bedrooms != null ? `${l.bedrooms} BHK` : null, l.budgetMax ? `up to ${formatINR(l.budgetMax)}` : null, label('property_type', l.propertyType)].filter(Boolean).join(' · ') || 'No requirements yet')} · ${esc(fmtDate(l.createdAt))}</div></div>
+      <button class="btn primary small" data-claim="${l.id}">Claim</button></li>`).join('')}</ul>` : '<p class="muted">The pool is empty: every lead has an agent.</p>'
+  box.querySelectorAll('[data-claim]').forEach((b) => b.addEventListener('click', async () => {
+    try { const { lead } = await api(`/api/pool/${b.dataset.claim}/claim`, { method: 'POST', body: {} }); toast(`${lead.full_name} is now yours.`); location.hash = `#/leads/${lead.id}` } catch (error) { toast(error.message); renderPool() }
+  }))
+}
+
+const EVENT_LABEL = {
+  'lead.created': 'Lead created', 'lead.assigned': 'Lead assigned', 'lead.requirements_changed': 'Requirements changed', 'property.published': 'Listing published', 'property.changed': 'Listing changed',
+  'property.unpublished': 'Listing taken down', 'match.created': 'Match found', 'match.digest': 'Match notice', 'viewing.requested': 'Viewing requested', 'viewing.booked': 'Viewing booked',
+  'viewing.rescheduled': 'Viewing moved', 'viewing.cancelled': 'Viewing cancelled', 'viewing.completed': 'Viewing took place', 'feedback.submitted': 'Feedback received',
+  'rent.payment_recorded': 'Rent payment recorded', 'rent.reminder_sent': 'Rent reminder sent', 'tenancy.linked': 'Tenancy linked'
+}
+async function renderActivity(params) {
+  const status = params.get('status') || ''
+  main.innerHTML = `<div class="page-head"><div><h1>Activity log</h1><p>Every platform event about your leads and listings, and what processing it did. Failed events are retried automatically up to 5 times; then you can retry them here.</p></div>
+    <div class="row">${[['', 'All'], ['failed', 'Failed'], ['pending', 'Waiting']].map(([k, v]) => `<a class="btn ${status === k ? 'primary' : 'ghost'} small" href="#/activity${k ? `?status=${k}` : ''}">${v}</a>`).join('')}</div></div>
+    <section class="card" style="padding:0"><div class="table-wrap" id="ev"><p class="empty">Loading…</p></div></section>`
+  const { events } = await api(`/api/events${status ? `?status=${status}` : ''}`)
+  const box = document.getElementById('ev')
+  box.innerHTML = events.length ? `<table><thead><tr><th>When</th><th>Event</th><th>Status</th><th>Result</th></tr></thead><tbody>${events.map((e) => `<tr>
+      <td class="small">${esc(fmtDateTime(e.createdAt))}</td><td>${esc(EVENT_LABEL[e.type] || e.type)} <span class="code">#${e.id}</span></td>
+      <td>${e.status === 'done' ? '<span class="pill pill-on">Done</span>' : e.status === 'failed' ? '<span class="pill pill-err">Failed</span>' : e.status === 'skipped' ? '<span class="pill pill-off">Recorded</span>' : '<span class="pill pill-setup">Waiting</span>'}${e.attempts > 1 ? ` <span class="small muted">${e.attempts} attempts</span>` : ''}</td>
+      <td class="small">${e.lastError ? `<span style="color:var(--danger)">${esc(e.lastError)}</span>` : esc(summarizeResult(e.result))}${e.status === 'failed' ? ` <button class="btn ghost small" data-retry="${e.id}">Retry</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">No events yet.</p>'
+  box.querySelectorAll('[data-retry]').forEach((b) => b.addEventListener('click', async () => {
+    try { await api(`/api/events/${b.dataset.retry}/retry`, { method: 'POST', body: {} }); toast('Queued again.'); setTimeout(() => renderActivity(params), 800) } catch (error) { toast(error.message) }
+  }))
+}
+function summarizeResult(r) {
+  if (!r) return ''
+  if (r.matching) return `${r.matching.matched} match(es), ${r.matching.newMatches} new or changed, ${r.matching.withdrawn} withdrawn${r.matching.reason ? ` (${r.matching.reason})` : ''}${r.alert ? `; alert: ${r.alert}` : ''}`
+  if (r.notified) return r.notified.length ? `Notified: ${r.notified.join(', ').replace(/_/g, ' ')}` : 'Nobody new to notify'
+  if (r.alert) return `Alert: ${r.alert}${r.note ? ` — ${r.note}` : ''}`
+  if (r.external) return `External notice: ${r.external.replace(/_/g, ' ')}`
+  return r.skipped || r.note || ''
+}
+
+// ---------- buyers ----------
+const REQ_FIELDS = [
+  { key: 'customer_type', label: 'I want to', type: 'select', options: { buyer: 'Buy', tenant: 'Rent' }, noEmpty: true },
+  { key: 'preferred_location', label: 'Preferred location', type: 'text', hint: 'Locality and city, e.g. Baner, Pune' },
+  { key: 'property_type', label: 'Property type', type: 'select', options: LABELS.property_type },
+  { key: 'bedrooms', label: 'Bedrooms (BHK)', type: 'number', min: 0, max: 20 },
+  { key: 'budget_min', label: 'Min budget (₹)', type: 'money' },
+  { key: 'budget_max', label: 'Max budget (₹)', type: 'money', hint: 'For renting, the monthly rent.' },
+  { key: 'phone', label: 'Phone', type: 'tel' },
+  { key: 'property_interest', label: 'Anything else', type: 'text', wide: true, hint: 'e.g. near the metro, east facing' }
+]
+
+async function renderBuyerHome() {
+  const [{ profile }, recs, { viewings }, { notifications, unread }] = await Promise.all([api('/api/me'), api('/api/me/recommendations'), api('/api/me/viewings'), api('/api/notifications?limit=5')])
+  const state = !profile.requirements ? '<div class="notice info">Start by saving <a href="#/requirements">what you are looking for</a>. We match it against every published listing, now and as new ones arrive.</div>'
+    : !profile.matchingConsent ? '<div class="notice warn">Matching is off because you have not agreed to it. Turn it on in <a href="#/requirements">My requirements</a>.</div>' : ''
+  main.innerHTML = `<div class="page-head"><div><h1>Hello, ${esc(session.user.name.split(' ')[0])}</h1><p>${profile.agent ? `Your agent is <strong>${esc(profile.agent.name)}</strong>.` : profile.requirements && profile.matchingConsent ? 'An agent will be assigned to you soon.' : ''}</p></div>
+    <div class="row"><a class="btn primary" href="#/requirements">${profile.requirements ? 'Edit requirements' : 'Save my requirements'}</a></div></div>${state}
+    <div class="grid stats"><div class="card stat"><div class="label">Matching properties</div><div class="value">${recs.recommendations.length}</div></div>
+      <div class="card stat"><div class="label">Viewings</div><div class="value">${viewings.filter((v) => ['requested', 'booked'].includes(v.status)).length}</div></div>
+      <div class="card stat"><div class="label">Unread notifications</div><div class="value">${unread}</div></div></div>
+    <div class="grid two-col"><section class="card"><h2>Top matches</h2>${recs.recommendations.length ? `<ul class="timeline">${recs.recommendations.slice(0, 3).map((r) => `<li><a href="#/browse/${r.property.id}"><strong>${esc(r.property.title)}</strong></a> <span class="badge">${r.score}/100</span><div class="small">${esc(priceText(r.property))} · ${esc([r.property.locality, r.property.city].filter(Boolean).join(', '))}</div></li>`).join('')}</ul><a href="#/recommendations">See all</a>` : '<p class="muted">No matches yet. New listings are checked against your requirements as they are published.</p>'}</section>
+      <section class="card"><h2>Latest notifications</h2>${notifications.length ? `<ul class="timeline">${notifications.map((n) => `<li>${n.link ? `<a href="${esc(n.link)}">${esc(n.title)}</a>` : esc(n.title)}<div class="small muted">${esc(fmtDateTime(n.createdAt))}</div></li>`).join('')}</ul>` : '<p class="muted">Nothing yet.</p>'}</section></div>`
+}
+
+async function renderRequirements() {
+  const { profile } = await api('/api/me')
+  const r = profile.requirements || { customer_type: 'buyer', phone: profile.phone }
+  main.innerHTML = `<div class="page-head"><div><h1>My requirements</h1><p>Saved requirements are matched against every published listing straight away, and again whenever a listing is published or changed.</p></div></div>
+    <form class="card" id="rq-form" novalidate><div id="rq-msg"></div>
+      <div class="form-grid">${REQ_FIELDS.map((f) => fieldHtml(f, r[f.key])).join('')}</div>
+      <fieldset class="stack" style="margin-top:1rem;border:0;padding:0"><legend><strong>Consent and notifications</strong></legend>
+        <label class="radio"><input type="checkbox" name="matchingConsent" ${profile.matchingConsent ? 'checked' : ''}> Match me with listings and share my requirements and contact details with the one agent assigned to me</label>
+        <label class="radio"><input type="checkbox" name="notifyInApp" ${profile.notifyInApp ? 'checked' : ''}> Tell me in DealSaathi when a new property matches</label>
+        <label class="radio"><input type="checkbox" name="allowAgentEmail" ${profile.allowAgentEmail ? 'checked' : ''}> My agent may email me recommendations they have reviewed</label>
+      </fieldset>
+      <div class="row end" style="margin-top:1rem"><button class="btn primary" type="submit" id="rq-save">Save requirements</button></div></form>`
+  const form = document.getElementById('rq-form')
+  bindMoneyHints(form)
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const requirements = {}
+    for (const f of REQ_FIELDS) {
+      const raw = form.elements[f.key].value.trim()
+      requirements[f.key] = raw === '' ? null : (f.type === 'number' || f.type === 'money') ? Number(raw) : raw
+    }
+    try {
+      await api('/api/me/requirements', { method: 'PUT', body: { requirements, matchingConsent: form.elements.matchingConsent.checked, notifyInApp: form.elements.notifyInApp.checked, allowAgentEmail: form.elements.allowAgentEmail.checked } })
+      toast(form.elements.matchingConsent.checked ? 'Saved. Matching runs in the background; see Recommendations.' : 'Saved. Matching stays off until you agree to it.')
+      location.hash = '#/recommendations'
+    } catch (error) { showFieldErrors(form, error.details?.fields); document.getElementById('rq-msg').innerHTML = `<div class="notice err">${esc(error.message)}</div>` }
+  })
+}
+
+async function renderRecommendations() {
+  main.innerHTML = '<div class="page-head"><div><h1>Recommendations</h1><p>Published properties that fit your saved requirements, best first, with the reasons. Updated automatically.</p></div><button class="btn ghost" id="rec-refresh">Refresh</button></div><div id="recs"><p class="muted">Loading…</p></div>'
+  const box = document.getElementById('recs')
+  const load = async () => {
+    const { recommendations, state } = await api('/api/me/recommendations')
+    box.innerHTML = state === 'no_requirements' ? '<div class="notice info">Save <a href="#/requirements">your requirements</a> first.</div>'
+      : state === 'no_consent' ? '<div class="notice warn">Matching is off until you agree to it in <a href="#/requirements">My requirements</a>.</div>'
+        : recommendations.length ? `<div class="grid cards">${recommendations.map((r) => `<article class="card"><h2><a href="#/browse/${r.property.id}">${esc(r.property.title)}</a></h2>
+            <div><strong>${esc(priceText(r.property))}</strong> · ${esc([r.property.locality, r.property.city].filter(Boolean).join(', '))} <span class="badge">${r.score}/100</span></div>
+            <ul class="small">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}${(r.gaps || []).map((g) => `<li class="muted">Unknown: ${esc(g)}</li>`).join('')}</ul>
+            <div class="small muted">Matched ${esc(fmtDate(r.matchedAt))}</div><a class="btn ghost small" href="#/browse/${r.property.id}">View and request a viewing</a></article>`).join('')}</div>`
+          : '<p class="muted">Nothing matches yet. You will be notified when a new listing fits.</p>'
+  }
+  document.getElementById('rec-refresh').addEventListener('click', () => load().catch((e) => toast(e.message)))
+  await load()
+}
+
+/** A buyer picks a free time in their agent's calendar; the agent confirms before anything is booked. */
+function viewingRequestPanel(p, box) {
+  box.innerHTML = `<section class="card" style="margin-top:1rem"><h2>Request a viewing</h2>
+    <p class="small muted">Times come from your agent’s Google Calendar. Your agent confirms the request before it is booked.</p>
+    <div class="row"><label for="vr-date">Date</label><input id="vr-date" type="date" min="${todayLocal()}" value="${todayLocal()}" style="width:auto"><button class="btn ghost" id="vr-find">Find free times</button></div>
+    <div id="vr-slots"></div></section>`
+  document.getElementById('vr-find').addEventListener('click', async () => {
+    const out = document.getElementById('vr-slots')
+    out.innerHTML = '<p class="muted small">Checking your agent’s calendar…</p>'
+    try {
+      const r = await api(`/api/me/viewing-slots?propertyId=${p.id}&date=${document.getElementById('vr-date').value}`)
+      out.innerHTML = r.slots.length ? `<p class="small">Free with ${esc(r.agentName)} (${esc(r.timezone)}):</p><div class="slot-grid">${r.slots.map((sl) => `<button class="btn ghost small" data-slot="${sl.start}">${esc(sl.label)}</button>`).join('')}</div>` : '<p class="small muted">No free time that day. Try another date.</p>'
+      out.querySelectorAll('[data-slot]').forEach((b) => b.addEventListener('click', async () => {
+        b.disabled = true
+        try { await api('/api/me/viewings', { method: 'POST', body: { propertyId: p.id, start: b.dataset.slot } }); toast('Requested. Your agent will confirm it.'); location.hash = '#/my-viewings' } catch (error) { out.insertAdjacentHTML('beforeend', `<div class="notice err small">${esc(error.message)}</div>`); b.disabled = false }
+      }))
+    } catch (error) { out.innerHTML = `<div class="notice ${error.status === 409 ? 'warn' : 'err'}">${esc(error.message)}</div>` }
+  })
+}
+
+const BV_STATUS = { requested: '<span class="pill pill-setup">Waiting for your agent</span>', booked: '<span class="pill pill-on">Booked</span>', completed: '<span class="pill pill-on">Took place</span>', no_show: '<span class="pill pill-off">Missed</span>', cancelled: '<span class="pill pill-off">Cancelled</span>', failed: '<span class="pill pill-err">Not booked</span>', unknown: '<span class="pill pill-setup">Being checked</span>', booking: '<span class="pill pill-setup">Booking…</span>' }
+async function renderMyViewings() {
+  main.innerHTML = '<div class="page-head"><div><h1>My viewings</h1><p>Request one from any listing’s page. After a viewing, tell us what you thought: it improves your matches.</p></div></div><section class="card"><div id="mv"><p class="muted">Loading…</p></div></section>'
+  const box = document.getElementById('mv')
+  const { viewings } = await api('/api/me/viewings')
+  box.innerHTML = viewings.length ? `<ul class="timeline">${viewings.map((v) => `<li data-v="${v.id}"><div class="row" style="justify-content:space-between"><div><strong>${esc(v.when)}</strong> ${BV_STATUS[v.status] || esc(v.status)}
+      <div class="small">${v.properties.map((p) => esc(p.title)).join(', ')}${v.agentName ? ` · with ${esc(v.agentName)}` : ''}</div></div>
+      <div class="row">${['requested', 'booked'].includes(v.status) ? '<button class="btn ghost small" data-cancel>Cancel</button>' : ''}${v.status === 'completed' && !v.feedbackGiven ? '<button class="btn primary small" data-fb>Give feedback</button>' : ''}${v.feedbackGiven ? '<span class="small muted">Feedback sent</span>' : ''}</div></div><div class="v-extra"></div></li>`).join('')}</ul>` : '<p class="muted">No viewings yet.</p>'
+  box.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
+    const id = b.closest('[data-v]').dataset.v
+    if (!(await confirmDialog('Cancel this viewing?', 'Your agent is told, and a booked viewing is removed from their calendar.', 'Cancel viewing'))) return
+    try { await api(`/api/me/viewings/${id}/cancel`, { method: 'POST', body: {} }); toast('Cancelled.'); renderMyViewings() } catch (error) { toast(error.message) }
+  }))
+  box.querySelectorAll('[data-fb]').forEach((b) => b.addEventListener('click', () => {
+    const li = b.closest('[data-v]')
+    const v = viewings.find((x) => x.id === li.dataset.v)
+    const extra = li.querySelector('.v-extra')
+    extra.innerHTML = `<form class="stack" style="margin-top:.5rem">${v.properties.map((p) => `<fieldset style="border:0;padding:0"><legend><strong>${esc(p.title)}</strong></legend>
+      ${Object.entries(VERDICT_LABEL).map(([k, l]) => `<label class="radio"><input type="radio" name="p${p.id}" value="${k}"> ${esc(l)}</label>`).join('')}</fieldset>`).join('')}
+      <label for="fb-c-${v.id}">Anything else? (optional)</label><textarea id="fb-c-${v.id}" name="comments" maxlength="1000"></textarea>
+      <div class="row end"><button class="btn primary small">Send feedback</button></div></form>`
+    extra.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const f = e.target
+      const responses = v.properties.map((p) => ({ propertyId: p.id, verdict: f.querySelector(`input[name="p${p.id}"]:checked`)?.value })).filter((x) => x.verdict)
+      if (!responses.length) { toast('Choose an answer for at least one property.'); return }
+      try {
+        const r = await api(`/api/me/viewings/${v.id}/feedback`, { method: 'POST', body: { responses, comments: f.elements.comments.value } })
+        toast(r.changes?.length ? `Thanks. Updated: ${r.changes.join('; ')}` : 'Thanks for your feedback.')
+        renderMyViewings()
+      } catch (error) { toast(error.message) }
+    })
+  }))
+}
+
+// ---------- sellers ----------
+async function renderSellerHome() {
+  const [{ profile }, { properties }, { viewings }, { notifications }] = await Promise.all([api('/api/me'), api('/api/properties?scope=mine'), api('/api/me/listing-viewings'), api('/api/notifications?limit=5')])
+  const live = properties.filter((p) => p.listing_state === 'published')
+  main.innerHTML = `<div class="page-head"><div><h1>Hello, ${esc(session.user.name.split(' ')[0])}</h1><p>${profile.agent ? `Your agent is <strong>${esc(profile.agent.name)}</strong>.` : 'An agent is assigned when you list a property in an area an agent serves.'}</p></div>
+    <a class="btn primary" href="#/my-listings/new">List a property</a></div>
+    <div class="grid stats"><div class="card stat"><div class="label">Listings</div><div class="value">${properties.length}</div></div>
+      <div class="card stat"><div class="label">Published</div><div class="value">${live.length}</div></div>
+      <div class="card stat"><div class="label">Matching buyer requirements</div><div class="value">${live.reduce((a, p) => a + p.match_count, 0)}</div></div>
+      <div class="card stat"><div class="label">Upcoming viewings</div><div class="value">${viewings.filter((v) => v.status === 'booked').length}</div></div></div>
+    <section class="card"><h2>Latest notifications</h2>${notifications.length ? `<ul class="timeline">${notifications.map((n) => `<li>${n.link ? `<a href="${esc(n.link)}">${esc(n.title)}</a>` : esc(n.title)}<div class="small muted">${esc(fmtDateTime(n.createdAt))}</div></li>`).join('')}</ul>` : '<p class="muted">Nothing yet.</p>'}</section>`
+}
+
+async function renderListingViewings() {
+  const { viewings } = await api('/api/me/listing-viewings')
+  main.innerHTML = `<div class="page-head"><div><h1>Viewings</h1><p>Viewings of your listings, arranged by your agent. Buyers’ details stay private.</p></div></div>
+    <section class="card">${viewings.length ? `<ul class="timeline">${viewings.map((v) => `<li><strong>${esc(v.when)}</strong> ${BV_STATUS[v.status] || esc(v.status)}<div class="small">${v.properties.map((p) => esc(p.title)).join(', ')}</div></li>`).join('')}</ul>` : '<p class="muted">No viewings yet.</p>'}</section>`
+}
+
+// ---------- tenants and landlords ----------
+async function renderMyTenancies() {
+  const landlord = session.user.role === 'seller'
+  const { tenancies } = await api('/api/me/tenancies')
+  main.innerHTML = `<div class="page-head"><div><h1>${landlord ? 'My rentals' : 'My rent'}</h1><p>${landlord ? 'Tenancies on your properties, managed by your agent. You can record rent you received.' : 'Your rent, as recorded by your agent. Rent is marked paid only when a payment is confirmed.'}</p></div></div>
+    ${tenancies.length ? tenancies.map(({ tenancy: t, dues }) => `<section class="card" style="margin-bottom:1rem"><h2>${esc(t.propertyLabel)}</h2>
+      <p class="small">${rupees(t.rentAmount)} a month, due on day ${t.dueDay} · ${esc(t.status)}${landlord ? ` · tenant ${esc(t.tenantName)}` : ''}${t.agent ? ` · managed by ${esc(t.agent.name)}` : ''}</p>
+      <ul class="timeline">${dues.map((d) => `<li data-due="${d.id}"><strong>${esc(d.period)}</strong> ${DUE_STATE[d.state]} <span class="small">due ${esc(d.dueDate)} · ${rupees(d.amount)}${d.amountPaid ? ` · ${rupees(d.amountPaid)} paid` : ''}${d.verificationSource ? ` (${d.verificationSource === 'razorpay' ? 'confirmed by Razorpay' : 'recorded'})` : ''}</span>
+        ${safeUrl(d.paymentLink?.url) ? `<div class="small"><a href="${esc(d.paymentLink.url)}" target="_blank" rel="noopener noreferrer">Pay with Razorpay</a></div>` : ''}
+        ${d.canRecord ? '<button class="btn ghost small" data-pay>Record payment received</button><div class="due-extra"></div>' : ''}</li>`).join('')}</ul></section>`).join('') : `<p class="muted">No tenancy is linked to your account. ${landlord ? 'Your agent links one by entering your email as the landlord’s.' : 'Your agent links one by entering your email as the tenant’s.'}</p>`}`
+  main.querySelectorAll('[data-pay]').forEach((b) => b.addEventListener('click', () => {
+    const li = b.closest('[data-due]')
+    li.querySelector('.due-extra').innerHTML = `<form class="form-grid" novalidate style="margin-top:.5rem">
+      <div class="field" data-field="amount"><label>Amount received (₹)</label><input name="amount" type="number" min="1"><div class="err"></div></div>
+      <div class="field" data-field="paidOn"><label>Received on</label><input name="paidOn" type="date" max="${todayLocal()}" value="${todayLocal()}"><div class="err"></div></div>
+      <div class="field wide" data-field="note"><label>How you verified it</label><input name="note" placeholder="e.g. UPI ref 8812, bank statement"><div class="err"></div></div>
+      <div class="row end wide"><button class="btn primary small">Record payment</button></div></form>`
+    const f = li.querySelector('form')
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      try { await api(`/api/me/rent/dues/${li.dataset.due}/payments`, { method: 'POST', body: { amount: Number(f.elements.amount.value), paidOn: f.elements.paidOn.value, note: f.elements.note.value } }); toast('Payment recorded.'); renderMyTenancies() } catch (error) { showFieldErrors(f, error.details?.fields); if (!error.details?.fields) toast(error.message) }
+    })
+  }))
+}
+
 // ---------- router ----------
+/** Pages per role. A section not listed for the signed-in role is not shown (and its API refuses the role anyway). */
+const ROUTES = {
+  agent: {
+    dashboard: () => renderDashboard(), notifications: () => renderNotifications(), profile: () => renderProfile(), assistant: () => renderAssistant(),
+    leads: (p, params) => (p[1] === 'new' ? renderLeadForm(null) : p[1] && p[2] === 'edit' ? renderLeadForm(p[1]) : p[1] ? renderLeadDetail(p[1]) : renderLeads(params)),
+    pool: () => renderPool(), activity: (p, params) => renderActivity(params),
+    properties: (p, params) => (p[1] === 'new' ? renderPropertyForm(null) : p[1] && p[2] === 'edit' ? renderPropertyForm(p[1]) : p[1] ? renderPropertyDetail(p[1]) : renderProperties(params)),
+    viewings: (p, params) => renderViewings(params), feedback: () => renderFeedback(),
+    rent: (p) => (p[1] === 'new' ? renderTenancyForm(null) : p[1] && p[2] === 'edit' ? renderTenancyForm(p[1]) : p[1] ? renderTenancy(p[1]) : renderRent()),
+    integrations: () => renderIntegrations(), automations: () => renderAutomations()
+  },
+  buyer: {
+    dashboard: () => renderBuyerHome(), requirements: () => renderRequirements(), recommendations: () => renderRecommendations(),
+    browse: (p, params) => (p[1] ? renderPropertyDetail(p[1]) : renderProperties(params)), 'my-viewings': () => renderMyViewings(),
+    'my-tenancies': () => renderMyTenancies(), notifications: () => renderNotifications()
+  },
+  seller: {
+    dashboard: () => renderSellerHome(), profile: () => renderProfile(), notifications: () => renderNotifications(),
+    'my-listings': (p, params) => (p[1] === 'new' ? renderPropertyForm(null) : p[1] && p[2] === 'edit' ? renderPropertyForm(p[1]) : p[1] ? renderPropertyDetail(p[1]) : renderProperties(params)),
+    'listing-viewings': () => renderListingViewings(), 'my-tenancies': () => renderMyTenancies()
+  }
+}
+
 async function route() {
   if (session.mode === 'locked') return renderLocked()
   if (!session.user) return renderLogin()
@@ -1675,29 +2054,14 @@ async function route() {
   const params = new URLSearchParams(query)
   const section = parts[0] || 'dashboard'
   document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === section))
+  const page = ROUTES[session.user.role]?.[section]
   try {
-    if (section === 'dashboard') await renderDashboard()
-    else if (section === 'assistant') await renderAssistant()
-    else if (section === 'leads' && parts[1] === 'new') await renderLeadForm(null)
-    else if (section === 'leads' && parts[1] && parts[2] === 'edit') await renderLeadForm(parts[1])
-    else if (section === 'leads' && parts[1]) await renderLeadDetail(parts[1])
-    else if (section === 'leads') await renderLeads(params)
-    else if (section === 'properties' && parts[1] === 'new') await renderPropertyForm(null)
-    else if (section === 'properties' && parts[1] && parts[2] === 'edit') await renderPropertyForm(parts[1])
-    else if (section === 'properties' && parts[1]) await renderPropertyDetail(parts[1])
-    else if (section === 'properties') await renderProperties(params)
-    else if (section === 'viewings') await renderViewings(params)
-    else if (section === 'feedback') await renderFeedback()
-    else if (section === 'rent' && parts[1] === 'new') await renderTenancyForm(null)
-    else if (section === 'rent' && parts[1] && parts[2] === 'edit') await renderTenancyForm(parts[1])
-    else if (section === 'rent' && parts[1]) await renderTenancy(parts[1])
-    else if (section === 'rent') await renderRent()
-    else if (section === 'integrations') await renderIntegrations()
-    else if (section === 'automations') await renderAutomations()
-    else main.innerHTML = '<div class="empty"><h1>Page not found</h1><p><a href="#/dashboard">Go to the dashboard</a></p></div>'
+    if (page) await page(parts, params)
+    else main.innerHTML = '<div class="empty"><h1>Page not found</h1><p>This page does not exist, or is not part of your account’s role. <a href="#/dashboard">Go home</a></p></div>'
   } catch (error) {
     main.innerHTML = `<div class="notice err">${esc(error.message)}</div>`
   }
+  refreshUnread()
   main.focus({ preventScroll: true })
 }
 

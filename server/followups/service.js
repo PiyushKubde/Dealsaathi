@@ -96,6 +96,7 @@ function recommendable(db, rawLead, propertyIds) {
     const p = Number.isInteger(id) && getProperty(db, id)
     if (!p) throw validationError({ properties: 'One of the listings no longer exists.' })
     if (p.is_sample) throw validationError({ properties: `${p.title} is a sample listing, not real inventory, so it cannot be sent to a lead.` })
+    if (p.listing_state !== 'published') throw validationError({ properties: `${p.title} is not published.` })
     if (!scoreMatch(lead, p)) throw validationError({ properties: `${p.title} does not match this lead’s saved needs (or is not available).` })
     return p
   })
@@ -156,6 +157,10 @@ export async function prepareFollowup(db, vs, user, leadId, input) {
   requireViasocket(vs)
   const lead = requireLead(db, leadId)
   if (!lead.email || !EMAIL_RE.test(lead.email)) throw new AppError(400, 'lead_has_no_email', 'This lead has no email address. Add one to the lead first.')
+  // A registered buyer decides whether agents may email them (their notification settings).
+  if (lead.buyer_user_id && !db.prepare('SELECT allow_agent_email FROM buyer_profiles WHERE user_id = ?').get(lead.buyer_user_id)?.allow_agent_email) {
+    throw new AppError(409, 'no_email_consent', 'This buyer has not allowed agents to email them. They see their recommendations in the app.')
+  }
   const kind = input?.kind === 'recommendation' ? 'recommendation' : 'followup'
   let propertyIds = null
   if (kind === 'recommendation') {

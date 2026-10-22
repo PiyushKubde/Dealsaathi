@@ -9,49 +9,49 @@ import { now } from '../db.js'
 export const AUTOMATIONS = [
   {
     key: 'new_lead_alert', name: 'New Lead Alert', available: true, defaultEnabled: false,
-    description: 'Tells you or your team the moment a new lead is added.',
-    trigger: 'A lead is saved (form or AI assistant)',
-    action: 'An email from your Gmail, or a message to a Slack channel, with the lead’s details',
+    description: 'Tells you when a lead becomes yours: one you add, a buyer who registers in your service area, or one assigned or transferred to you. Other agents’ leads never reach you.',
+    trigger: 'Platform event: lead created or assigned to you (processed from the event queue)',
+    action: 'An in-app notification, plus an email from your Gmail or a Slack message if you choose',
     channels: ['gmail', 'slack']
   },
   {
-    key: 'buyer_matching', name: 'New Property → Buyer Matching', available: true, defaultEnabled: true,
-    description: 'Finds the saved buyers and tenants a new listing suits, and says why.',
-    trigger: 'You save a property',
-    action: 'Matches it against saved buyer and tenant preferences and lists who fits on the property page',
-    channels: []
+    key: 'buyer_matching', name: 'New Property Matching', available: true, defaultEnabled: true,
+    description: 'Matching runs for the whole platform whenever a listing is published or changed, or a buyer saves requirements. This controls how you hear about new matches for your buyers and listings.',
+    trigger: 'Platform events: listing published or changed, buyer requirements saved or changed',
+    action: 'In-app notices for new matches; optionally one Gmail or Slack message per change listing every new match for your buyers',
+    channels: ['gmail', 'slack']
   },
   {
     key: 'property_recommendations', name: 'Property Recommendations', available: true, defaultEnabled: false,
-    description: 'Prepares a personal email of matching listings for a lead; you approve it before it is sent.',
-    trigger: 'You ask for recommendations on a lead’s page',
-    action: 'A reviewed email of real matching listings, sent from your Gmail',
+    description: 'Buyers see their matches in the app as they are found. For your leads you can pick listings and send an email you approve first (only to buyers who allow agent email). WhatsApp delivery needs a WhatsApp Business account with an approved template and is not available yet.',
+    trigger: 'Stored matches (in-app, automatic); your approval (email)',
+    action: 'In-app recommendations for buyers; a reviewed email from your Gmail',
     channels: ['gmail']
   },
   {
     key: 'followup_reminders', name: 'Buyer Follow-Up Reminders', available: true, defaultEnabled: false,
-    description: 'Reminds you when a lead’s follow-up date arrives or a lead has gone quiet.',
+    description: 'Reminds you about your own assigned leads when a follow-up date arrives or nobody has contacted them for a set number of days (automatic entries such as matches do not count as contact).',
     trigger: 'A lead’s follow-up date arrives, or no activity is recorded for a set number of days (checked every 15 minutes)',
     action: 'A reminder in DealSaathi, and optionally an email or Slack message to you',
     channels: ['gmail', 'slack'], needsScheduler: true
   },
   {
     key: 'viewing_scheduler', name: 'Property Viewing Scheduler', available: true, defaultEnabled: false,
-    description: 'Finds free times in your Google Calendar, books the viewing you confirm, and sends the confirmation.',
-    trigger: 'You schedule a viewing on the Viewings page and confirm a slot',
+    description: 'You, or a buyer assigned to you, pick a time your Google Calendar shows free; you confirm, and it is booked in your calendar with an optional confirmation email.',
+    trigger: 'You schedule a viewing, or one of your buyers requests one; you confirm it',
     action: 'Google Calendar free/busy check, a re-check, the calendar event, and a Gmail confirmation to the lead',
     channels: ['google-calendar', 'gmail']
   },
   {
     key: 'viewing_feedback', name: 'Post-Viewing Feedback', available: true, defaultEnabled: false,
-    description: 'After you mark a viewing as having taken place, asks the buyer for feedback and updates their preferences.',
+    description: 'After you mark a viewing as having taken place, asks the buyer for feedback (in the app for registered buyers, by a private emailed link otherwise) and updates their requirements and matches.',
     trigger: 'You mark a viewing completed (DealSaathi reminds you when a viewing has ended)',
     action: 'A private feedback link by Gmail; the answer updates the buyer’s saved preferences and future matches',
     channels: ['gmail']
   },
   {
     key: 'rent_reminders', name: 'Rent and Payment Reminders', available: true, defaultEnabled: false,
-    description: 'Reminds tenants before and after rent is due, and stops once payment is verified.',
+    description: 'Reminds tenants before and after rent is due, and stops once payment is verified. Linked tenants and landlords see their tenancy in the app; only you manage it.',
     trigger: 'Rent due dates approaching or passing (checked every 15 minutes)',
     action: 'Gmail reminders with an optional Razorpay payment link; stopped only by Razorpay’s paid status or a payment you record',
     channels: ['gmail', 'razorpay'], needsScheduler: true
@@ -75,8 +75,8 @@ export function saveSetting(db, userId, key, { enabled, config }) {
 
 /** Users who switched this automation on. */
 export function usersWithEnabled(db, key) {
-  const rows = db.prepare('SELECT s.user_id, s.config, u.name, u.email FROM automation_settings s JOIN users u ON u.id = s.user_id WHERE s.key = ? AND s.enabled = 1').all(key)
-  return rows.map((r) => ({ user: { id: r.user_id, name: r.name, email: r.email }, config: JSON.parse(r.config) }))
+  const rows = db.prepare("SELECT s.user_id, s.config, u.name, u.email, u.role FROM automation_settings s JOIN users u ON u.id = s.user_id WHERE s.key = ? AND s.enabled = 1 AND u.role = 'agent'").all(key)
+  return rows.map((r) => ({ user: { id: r.user_id, name: r.name, email: r.email, role: r.role }, config: JSON.parse(r.config) }))
 }
 
 /**

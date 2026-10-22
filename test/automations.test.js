@@ -91,8 +91,10 @@ test('a saved lead triggers one Gmail alert with only the facts on record, and t
     assert.match(r.summary, /message id msg_123/)
     assert.equal(r.subjectId, String(lead.id))
 
-    t.engine.onLeadCreated(lead, t.user, 'form')
-    await t.idle()
+    // The same event processed again (a retry, a duplicate delivery) never alerts twice.
+    t.db.prepare("UPDATE domain_events SET status = 'pending', next_attempt_at = '2000-01-01T00:00:00.000Z' WHERE type = 'lead.created'").run()
+    await t.events.drain()
+    assert.equal(t.db.prepare("SELECT status FROM domain_events WHERE type = 'lead.created'").get().status, 'done')
     assert.equal(t.vs.calls.filter((c) => c.name === 'runAction').length, 1, 'the same lead never alerts twice')
   } finally { await t.close() }
 })
@@ -159,19 +161,22 @@ test('a connection revoked after enabling: the card says Needs setup and the ale
   } finally { await t.close() }
 })
 
-test('Buyer Matching can be switched off; each save is recorded', async () => {
+test('New Property Matching: matching always runs from the event queue; switching it off silences only the agent’s notices', async () => {
   const t = await startApp({ vs: fakeVs() })
   try {
-    await addLead(t)
-    const on = (await t.call('/api/properties', { method: 'POST', body: { property: BANER } })).body
-    assert.equal(on.matching.matched, 1)
+    const lead = await addLead(t)
+    const on = (await t.call('/api/properties', { method: 'POST', body: { property: BANER } })).body.property
+    await t.idle()
+    assert.equal((await t.call(`/api/properties/${on.id}`)).body.matches.length, 1)
+    assert.equal(t.db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'match' AND user_id = ?").get(t.user.id).n, 1)
     await put(t, 'buyer_matching', { enabled: false })
-    const off = (await t.call('/api/properties', { method: 'POST', body: { property: { ...BANER, title: 'Another Baner flat' } } })).body
-    assert.equal(off.matching, null)
-    assert.equal((await t.call(`/api/properties/${off.property.id}`)).body.matches.length, 0)
+    const off = (await t.call('/api/properties', { method: 'POST', body: { property: { ...BANER, title: 'Another Baner flat' } } })).body.property
+    await t.idle()
+    assert.equal((await t.call(`/api/properties/${off.id}`)).body.matches.length, 1, 'still matched')
+    assert.equal(t.db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'match' AND user_id = ?").get(t.user.id).n, 1, 'no new notice while off')
     const runs = await runsOf(t, 'buyer_matching')
-    assert.deepEqual(runs.map((r) => r.status), ['skipped', 'succeeded'])
-    assert.match(runs[1].summary, /1 matching buyer/)
+    assert.ok(runs.some((r) => /2 BHK in Baner: 1 match \(1 new/.test(r.summary)), runs.map((r) => r.summary).join(' | '))
+    assert.equal((await t.call(`/api/leads/${lead.id}/matches`)).body.matches.length, 2)
   } finally { await t.close() }
 })
 

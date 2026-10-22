@@ -2,6 +2,7 @@
 // `actions` are the action_ids the Connect popup asks permission for (connect()'s `actions`).
 import { AppError } from '../errors.js'
 import { viasocketError } from './service.js'
+import { paymentsLive } from '../rent/service.js'
 
 export const CURATED_APPS = [
   {
@@ -52,7 +53,10 @@ export async function curatedApps(vs) {
   return Promise.all(CURATED_APPS.map(async (app) => {
     try {
       const serviceId = await vs.serviceIdFor(app.slug)
-      return { ...app, serviceId, iconUrl: await iconFor(vs, serviceId), error: null }
+      const blocked = app.slug === 'razorpay' && !paymentsLive()
+        ? 'Live payment links are off on this server until a real-payment test passes (RAZORPAY_LIVE). You can connect an account; nothing is charged.'
+        : app.slug === 'whatsapp_business_cloud' ? 'Not used for sending yet: needs a WhatsApp Business account with an approved message template.' : null
+      return { ...app, inUse: app.inUse && !blocked, liveBlocked: blocked, serviceId, iconUrl: await iconFor(vs, serviceId), error: null }
     } catch (error) {
       return { ...app, serviceId: null, iconUrl: null, error: viasocketError(error, `find ${app.name}`).message }
     }

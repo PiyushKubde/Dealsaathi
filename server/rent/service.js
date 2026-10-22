@@ -16,6 +16,13 @@ import { getProperty } from '../properties/service.js'
 import { gmailInput, readGmailResult, readPaymentLink, readPaymentLinkList, runOnce } from '../integrations/run.js'
 import { finishRun, getSetting, startRun, usersWithEnabled } from '../automations/store.js'
 import { addDays, daysBetween, todayIn, utcToZoned } from '../time.js'
+import { emit } from '../events/bus.js'
+
+/**
+ * Razorpay takes real money, so live payment links stay off until the operator has run the real-service checks
+ * and sets RAZORPAY_LIVE=1 on the server. Until then rent is verified only by payments recorded by people.
+ */
+export const paymentsLive = () => process.env.RAZORPAY_LIVE === '1'
 
 export const RENT_TIMEZONE = 'Asia/Kolkata'
 const QUIET = { from: 21, to: 9 } // no reminders from 9 pm to 9 am, India time
@@ -45,6 +52,11 @@ function cleanTenancy(db, input, current = {}) {
   text('reference', 60)
   text('notes', 1000)
   text('property_label', 150)
+  if ('landlord_email' in input) {
+    const e = typeof input.landlord_email === 'string' ? input.landlord_email.trim().toLowerCase() : ''
+    if (e && !EMAIL_RE.test(e)) errors.landlord_email = 'Enter a valid email address.'
+    else v.landlord_email = e || null
+  }
   if ('tenant_email' in input) {
     const e = typeof input.tenant_email === 'string' ? input.tenant_email.trim() : ''
     if (e && !EMAIL_RE.test(e)) errors.tenant_email = 'Enter a valid email address.'
@@ -85,6 +97,24 @@ function cleanTenancy(db, input, current = {}) {
   return v
 }
 
+/**
+ * Links the tenancy to the tenant's and landlord's DealSaathi accounts, by the emails the agent entered (a seller
+ * listing's owner is its landlord when no landlord email is given). Linked people see the tenancy in the app;
+ * they never manage it.
+ */
+function linkParties(db, id, actorId) {
+  const t = db.prepare('SELECT * FROM tenancies WHERE id = ?').get(id)
+  const tenant = t.tenant_email ? db.prepare("SELECT id FROM users WHERE email = ? AND role = 'buyer'").get(t.tenant_email.toLowerCase()) : null
+  let landlord = t.landlord_email ? db.prepare("SELECT id FROM users WHERE email = ? AND role = 'seller'").get(t.landlord_email) : null
+  if (!landlord && !t.landlord_email && t.property_id) landlord = db.prepare("SELECT u.id FROM properties p JOIN users u ON u.id = p.owner_user_id WHERE p.id = ? AND u.role = 'seller'").get(t.property_id)
+  const tenantId = tenant?.id ?? null
+  const landlordId = landlord?.id ?? null
+  if (tenantId === t.tenant_user_id && landlordId === t.landlord_user_id) return
+  db.prepare('UPDATE tenancies SET tenant_user_id = ?, landlord_user_id = ? WHERE id = ?').run(tenantId, landlordId, id)
+  event(db, id, null, 'parties_linked', `Linked accounts: tenant ${tenantId ? 'linked' : 'not linked'}, landlord ${landlordId ? 'linked' : 'not linked'}`, actorId)
+  emit(db, 'tenancy.linked', { subjectType: 'tenancy', subjectId: id, actorId, agentId: t.user_id, payload: { key: `${tenantId}:${landlordId}` }, dedupeKey: `tenancy.linked:${id}:${tenantId}:${landlordId}` })
+}
+
 const ownTenancy = (db, userId, id) => {
   const t = db.prepare('SELECT * FROM tenancies WHERE id = ? AND user_id = ?').get(id, userId)
   if (!t) throw new AppError(404, 'tenancy_not_found', 'No such tenancy.')
@@ -122,6 +152,8 @@ export function createTenancy(db, user, input) {
       .run(user.id, v.property_id ?? null, v.property_label, v.tenant_name, v.tenant_email ?? null, v.tenant_phone ?? null, v.reference ?? null, v.rent_amount, v.due_day, v.lease_start, v.lease_end ?? null, trackingFrom, v.reminders_opt_out ?? 0, v.notes ?? null, now(), now())
     const id = Number(lastInsertRowid)
     event(db, id, null, 'tenancy_created', `Tenancy added: ${v.tenant_name}, ${inr(v.rent_amount)}/month due on day ${v.due_day}`, user.id)
+    db.prepare('UPDATE tenancies SET landlord_email = ? WHERE id = ?').run(v.landlord_email ?? null, id)
+    linkParties(db, id, user.id)
     generateDues(db, ownTenancy(db, user.id, id), today)
     return tenancyDetail(db, user.id, id)
   })
@@ -139,6 +171,8 @@ export function updateTenancy(db, user, id, input) {
         v.lease_start, v.lease_end ?? null, status, v.reminders_opt_out ?? 0, v.notes ?? null, now(), id)
     if (status !== current.status) event(db, id, null, 'status_changed', `Tenancy ${status === 'active' ? 'reactivated' : status}`, user.id)
     if (v.rent_amount !== current.rent_amount) event(db, id, null, 'rent_changed', `Rent changed from ${inr(current.rent_amount)} to ${inr(v.rent_amount)} (for months not yet generated)`, user.id)
+    db.prepare('UPDATE tenancies SET landlord_email = ? WHERE id = ?').run(v.landlord_email ?? null, id)
+    linkParties(db, id, user.id)
     generateDues(db, ownTenancy(db, user.id, id))
     return tenancyDetail(db, user.id, id)
   })
@@ -187,21 +221,54 @@ export function rentOverview(db, userId) {
   }
 }
 
+/** A due the agent manages, or (landlordMay) one on a tenancy where this seller is the linked landlord. */
+function partyDue(db, user, dueId, { landlordMay = false } = {}) {
+  const d = db.prepare('SELECT d.*, t.user_id, t.tenant_name, t.landlord_user_id FROM rent_dues d JOIN tenancies t ON t.id = d.tenancy_id WHERE d.id = ?').get(dueId)
+  const ok = d && ((user.role === 'agent' && d.user_id === user.id) || (landlordMay && user.role === 'seller' && d.landlord_user_id === user.id))
+  if (!ok) throw new AppError(404, 'due_not_found', 'No such rent due.')
+  return d
+}
+
+/** The tenancies a buyer is the tenant of, or a seller the landlord of: what they may see, nothing they may manage. */
+export function partyTenancies(db, user) {
+  const col = user.role === 'seller' ? 'landlord_user_id' : user.role === 'buyer' ? 'tenant_user_id' : null
+  if (!col) throw new AppError(403, 'forbidden', 'Only tenants and landlords have tenancies here.')
+  return db.prepare(`SELECT id FROM tenancies WHERE ${col} = ? ORDER BY status, created_at DESC`).all(user.id).map((r) => partyTenancy(db, user, r.id))
+}
+
+export function partyTenancy(db, user, id) {
+  const col = user.role === 'seller' ? 'landlord_user_id' : 'tenant_user_id'
+  const t = db.prepare(`SELECT * FROM tenancies WHERE id = ? AND ${col} = ?`).get(id, user.id)
+  if (!t) throw new AppError(404, 'tenancy_not_found', 'No such tenancy.')
+  const today = todayIn(RENT_TIMEZONE)
+  const agent = db.prepare('SELECT name, email FROM users WHERE id = ?').get(t.user_id)
+  const dues = db.prepare('SELECT * FROM rent_dues WHERE tenancy_id = ? ORDER BY due_date DESC LIMIT 24').all(id).map((d) => {
+    const p = duePublic(db, d, today)
+    return { id: p.id, period: p.period, dueDate: p.dueDate, amount: p.amount, amountPaid: p.amountPaid, outstanding: p.outstanding, state: p.state, verificationSource: p.verificationSource,
+      paymentLink: p.paymentLink?.status === 'created' && user.role === 'buyer' ? p.paymentLink : null,
+      payments: p.payments.map((x) => ({ amount: x.amount, paidOn: x.paid_on, source: x.source })), canRecord: user.role === 'seller' && ['open', 'partially_paid'].includes(d.status) }
+  })
+  return { tenancy: { id: t.id, propertyLabel: t.property_label, rentAmount: t.rent_amount, dueDay: t.due_day, leaseStart: t.lease_start, leaseEnd: t.lease_end, status: t.status,
+    tenantName: t.tenant_name, agent: agent ? { name: agent.name, email: agent.email } : null, role: user.role === 'seller' ? 'landlord' : 'tenant' }, dues }
+}
+
 function ownDue(db, userId, dueId) {
   const d = db.prepare('SELECT d.*, t.user_id, t.tenant_name FROM rent_dues d JOIN tenancies t ON t.id = d.tenancy_id WHERE d.id = ?').get(dueId)
   if (!d || d.user_id !== userId) throw new AppError(404, 'due_not_found', 'No such rent due.')
   return d
 }
 
-function applyPayment(db, due, amount, { source, externalId = null, paidOn, userId = null, note = null }) {
+function applyPayment(db, due, amount, { source, externalId = null, paidOn, userId = null, note = null, recordedBy = 'the broker' }) {
   const total = due.amount_paid + amount
   const status = total >= due.amount ? 'paid' : 'partially_paid'
   db.prepare('INSERT INTO rent_payments (due_id, amount, paid_on, source, external_id, recorded_by, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(due.id, amount, paidOn, source, externalId, userId, note, now())
+  const t = db.prepare('SELECT user_id FROM tenancies WHERE id = ?').get(due.tenancy_id)
+  emit(db, 'rent.payment_recorded', { subjectType: 'tenancy', subjectId: due.tenancy_id, actorId: userId, agentId: t?.user_id, payload: { dueId: due.id, amount, period: due.period, source, key: `${due.id}:${source}:${externalId ?? now()}` } })
   db.prepare('UPDATE rent_dues SET amount_paid = ?, status = ?, paid_at = ?, verification_source = ?, updated_at = ? WHERE id = ?')
     .run(total, status, status === 'paid' ? now() : null, source, now(), due.id)
   event(db, due.tenancy_id, due.id, source === 'manual' ? 'payment_recorded' : 'payment_verified',
-    `${inr(amount)} for ${due.period} ${source === 'manual' ? `recorded by the broker${note ? `: ${note}` : ''}` : 'confirmed by Razorpay'}${status === 'paid' ? ' (paid in full)' : ` (${inr(due.amount - total)} still owed)`}`, userId)
+    `${inr(amount)} for ${due.period} ${source === 'manual' ? `recorded by ${recordedBy}${note ? `: ${note}` : ''}` : 'confirmed by Razorpay'}${status === 'paid' ? ' (paid in full)' : ` (${inr(due.amount - total)} still owed)`}`, userId)
   return status
 }
 
@@ -210,7 +277,7 @@ function applyPayment(db, due, amount, { source, externalId = null, paidOn, user
  * it is kept in the audit trail. An open payment link is cancelled so the tenant cannot pay twice.
  */
 export async function recordManualPayment(db, vs, user, dueId, input) {
-  const due = ownDue(db, user.id, dueId)
+  const due = partyDue(db, user, dueId, { landlordMay: true })
   if (['paid', 'waived', 'cancelled'].includes(due.status)) throw new AppError(409, 'due_closed', `This rent is already ${due.status}.`)
   const amount = Number(input?.amount)
   const outstanding = due.amount - due.amount_paid
@@ -221,9 +288,10 @@ export async function recordManualPayment(db, vs, user, dueId, input) {
   const note = typeof input?.note === 'string' ? input.note.trim().slice(0, 300) : ''
   if (note.length < 5) errors.note = 'Say how you verified it (e.g. “HDFC statement, UTR 1234”).'
   if (Object.keys(errors).length) throw validationError(errors)
-  const status = transaction(db, () => applyPayment(db, due, amount, { source: 'manual', paidOn: input.paidOn, userId: user.id, note }))
-  if (status === 'paid' && due.payment_link_id && due.payment_link_status === 'created') await cancelLink(db, vs, user, due, 'Paid by other means')
-  return tenancyDetail(db, user.id, due.tenancy_id)
+  const status = transaction(db, () => applyPayment(db, due, amount, { source: 'manual', paidOn: input.paidOn, userId: user.id, note, recordedBy: user.role === 'seller' ? 'the landlord' : 'the broker' }))
+  const agent = db.prepare('SELECT id, name, email, role FROM users WHERE id = ?').get(due.user_id)
+  if (status === 'paid' && due.payment_link_id && due.payment_link_status === 'created' && agent) await cancelLink(db, vs, { ...agent }, due, 'Paid by other means')
+  return user.role === 'agent' ? tenancyDetail(db, user.id, due.tenancy_id) : partyTenancy(db, user, due.tenancy_id)
 }
 
 export async function waiveDue(db, vs, user, dueId, note) {
@@ -250,7 +318,7 @@ async function cancelLink(db, vs, user, due, why) {
 
 /** Creates the Razorpay link for what is still owed, once per attempt. Returns the link or null. */
 async function ensurePaymentLink(db, vs, user, cfg, due, t) {
-  if (!cfg.razorpayConnectionId) return null
+  if (!cfg.razorpayConnectionId || !paymentsLive()) return null
   if (due.payment_link_id && due.payment_link_status === 'created') return due.payment_link_url
   const attempt = due.link_attempt + 1
   const ref = `ds-rent-${due.id}-${attempt}`
@@ -335,6 +403,7 @@ async function remind(db, vs, user, cfg, due, t, stage, link) {
   const detail = read.ok ? `Gmail message id ${read.messageId}` : read.reason
   db.prepare('UPDATE rent_reminders SET status = ?, detail = ? WHERE dedupe_key = ?').run(status, detail, key)
   event(db, t.id, due.id, `reminder_${status}`, `Reminder (${stage.label}) to ${t.tenant_email}: ${status}${read.ok ? '' : ` (${detail})`}`, null)
+  if (status === 'sent') emit(db, 'rent.reminder_sent', { subjectType: 'tenancy', subjectId: t.id, agentId: user.id, payload: { dueId: due.id, period: due.period, label: stage.label, key }, dedupeKey: `rent.reminder_sent:${key}` })
   return status
 }
 

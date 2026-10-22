@@ -382,6 +382,145 @@ const MIGRATIONS = [
     created_at TEXT NOT NULL
   );
   CREATE INDEX rent_events_tenancy ON rent_events(tenancy_id, created_at);
+  `,
+  // 6: three-sided marketplace — roles and profiles, ownership and assignment, publication state,
+  // durable domain events (the processing queue), notifications, buyer viewing requests, tenancy parties.
+  `
+  ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'agent' CHECK (role IN ('buyer','seller','agent'));
+
+  CREATE TABLE agent_profiles (
+    user_id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    phone           TEXT,
+    agency          TEXT,
+    service_areas   TEXT NOT NULL DEFAULT '[]',
+    accepting_leads INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+  );
+  INSERT INTO agent_profiles (user_id, created_at, updated_at) SELECT id, created_at, created_at FROM users;
+
+  -- A buyer's requirements live in their own lead row (leads.buyer_user_id), so matching has one source.
+  CREATE TABLE buyer_profiles (
+    user_id          TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    phone            TEXT,
+    lead_id          INTEGER UNIQUE REFERENCES leads(id) ON DELETE SET NULL,
+    matching_consent INTEGER NOT NULL DEFAULT 0,
+    consent_at       TEXT,
+    notify_in_app    INTEGER NOT NULL DEFAULT 1,
+    allow_agent_email INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+  );
+
+  CREATE TABLE seller_profiles (
+    user_id           TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    phone             TEXT,
+    assigned_agent_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    notify_in_app     INTEGER NOT NULL DEFAULT 1,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
+  );
+
+  -- Who is responsible for a lead, and how that was decided.
+  ALTER TABLE leads ADD COLUMN assigned_agent_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+  ALTER TABLE leads ADD COLUMN assignment_rule TEXT;
+  ALTER TABLE leads ADD COLUMN assigned_at TEXT;
+  ALTER TABLE leads ADD COLUMN buyer_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+  -- Existing leads: the agent who created them, else the only account (this copy had one shared book).
+  UPDATE leads SET assigned_agent_id = (SELECT a.user_id FROM lead_activities a JOIN users u ON u.id = a.user_id
+                                        WHERE a.lead_id = leads.id AND a.type = 'created' ORDER BY a.id LIMIT 1),
+                   assignment_rule = 'migrated_creator', assigned_at = updated_at;
+  UPDATE leads SET assigned_agent_id = (SELECT id FROM users), assignment_rule = 'migrated_only_account', assigned_at = updated_at
+    WHERE assigned_agent_id IS NULL AND (SELECT COUNT(*) FROM users) = 1;
+  UPDATE leads SET assignment_rule = NULL, assigned_at = NULL WHERE assigned_agent_id IS NULL;
+  CREATE INDEX leads_agent ON leads(assigned_agent_id, status);
+  -- A self-registered buyer may share an email or phone with a lead an agent typed in; agents' own book stays unique.
+  DROP INDEX leads_email_unique;
+  DROP INDEX leads_phone_unique;
+  CREATE UNIQUE INDEX leads_email_unique ON leads(email_norm) WHERE email_norm IS NOT NULL AND buyer_user_id IS NULL;
+  CREATE UNIQUE INDEX leads_phone_unique ON leads(phone_norm) WHERE phone_norm IS NOT NULL AND buyer_user_id IS NULL;
+
+  ALTER TABLE properties ADD COLUMN owner_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+  ALTER TABLE properties ADD COLUMN agent_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+  ALTER TABLE properties ADD COLUMN listing_state TEXT NOT NULL DEFAULT 'published' CHECK (listing_state IN ('draft','published','unpublished','archived'));
+  ALTER TABLE properties ADD COLUMN published_at TEXT;
+  UPDATE properties SET owner_user_id = created_by, agent_id = created_by, published_at = created_at;
+  CREATE INDEX properties_owner ON properties(owner_user_id);
+  CREATE INDEX properties_agent ON properties(agent_id);
+
+  -- Matches keep their history: a match that stops fitting is withdrawn (with the reason), not deleted.
+  CREATE TABLE property_matches_v6 (
+    property_id      INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+    lead_id          INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    score            INTEGER NOT NULL,
+    reasons          TEXT    NOT NULL,
+    status           TEXT    NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested','dismissed','withdrawn')),
+    fingerprint      TEXT,
+    withdrawn_reason TEXT,
+    created_at       TEXT    NOT NULL,
+    updated_at       TEXT    NOT NULL,
+    PRIMARY KEY (property_id, lead_id)
+  );
+  INSERT INTO property_matches_v6 (property_id, lead_id, score, reasons, status, created_at, updated_at)
+    SELECT property_id, lead_id, score, reasons, status, created_at, updated_at FROM property_matches;
+  DROP TABLE property_matches;
+  ALTER TABLE property_matches_v6 RENAME TO property_matches;
+  CREATE INDEX property_matches_lead ON property_matches(lead_id, status);
+
+  -- The processing queue: every platform event is written in the same transaction as the change it records,
+  -- then processed (and retried) by the event processor. dedupe_key stops one fact from being queued twice.
+  CREATE TABLE domain_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    type            TEXT NOT NULL,
+    subject_type    TEXT NOT NULL,
+    subject_id      TEXT NOT NULL,
+    actor_id        TEXT REFERENCES users(id) ON DELETE SET NULL,
+    agent_id        TEXT REFERENCES users(id) ON DELETE SET NULL,
+    payload         TEXT NOT NULL DEFAULT '{}',
+    dedupe_key      TEXT UNIQUE,
+    status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processing','done','failed','skipped')),
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL,
+    locked_until    TEXT,
+    last_error      TEXT,
+    result          TEXT,
+    created_at      TEXT NOT NULL,
+    processed_at    TEXT
+  );
+  CREATE INDEX domain_events_due ON domain_events(status, next_attempt_at);
+  CREATE INDEX domain_events_subject ON domain_events(subject_type, subject_id);
+  CREATE INDEX domain_events_agent ON domain_events(agent_id, id);
+
+  -- What each person was told, in the app or through an integration. One row per fact and recipient.
+  CREATE TABLE notifications (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    body         TEXT,
+    link         TEXT,
+    subject_type TEXT,
+    subject_id   TEXT,
+    channel      TEXT NOT NULL DEFAULT 'in_app' CHECK (channel IN ('in_app','gmail','slack','whatsapp')),
+    status       TEXT NOT NULL CHECK (status IN ('unread','read','sending','sent','failed','unknown','skipped')),
+    detail       TEXT,
+    event_id     INTEGER REFERENCES domain_events(id) ON DELETE SET NULL,
+    dedupe_key   TEXT NOT NULL UNIQUE,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    read_at      TEXT
+  );
+  CREATE INDEX notifications_user ON notifications(user_id, channel, status, created_at);
+
+  ALTER TABLE viewings ADD COLUMN requested_by TEXT REFERENCES users(id) ON DELETE SET NULL;
+
+  ALTER TABLE tenancies ADD COLUMN landlord_email TEXT;
+  ALTER TABLE tenancies ADD COLUMN landlord_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+  ALTER TABLE tenancies ADD COLUMN tenant_user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+
+  ALTER TABLE connections ADD COLUMN verified_at TEXT;
+  ALTER TABLE connections ADD COLUMN verify_status TEXT;
+  ALTER TABLE connections ADD COLUMN verify_detail TEXT;
   `
 ]
 
@@ -391,20 +530,32 @@ export function databaseFile(env = process.env) {
   return env.DATA_DIR ? join(env.DATA_DIR, 'dealsaathi.db') : 'data/dealsaathi.db'
 }
 
-export function openDatabase(file = databaseFile()) {
+export const SCHEMA_VERSION = MIGRATIONS.length
+
+/** `upTo` stops at an older schema version (migration tests build an old database with it). */
+export function openDatabase(file = databaseFile(), { log = () => {}, upTo = MIGRATIONS.length } = {}) {
   if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true })
   const db = new DatabaseSync(file)
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 3000;')
-  migrate(db)
+  migrate(db, file, log, upTo)
   return db
 }
 
-function migrate(db) {
+/**
+ * Applies pending migrations, each in its own transaction. Before migrating a database that already holds
+ * data, a full copy is written next to it (VACUUM INTO), because the host keeps no backups.
+ */
+function migrate(db, file, log, upTo) {
   db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)')
   const row = db.prepare('SELECT version FROM schema_version').get()
   let version = row ? row.version : 0
   if (!row) db.prepare('INSERT INTO schema_version (version) VALUES (0)').run()
-  while (version < MIGRATIONS.length) {
+  if (version > 0 && version < upTo && file !== ':memory:') {
+    const backup = `${file}.pre-v${upTo}-${Date.now()}.bak`
+    db.prepare('VACUUM INTO ?').run(backup)
+    log(`Backed up the database before migrating v${version} → v${upTo}: ${backup}`)
+  }
+  while (version < upTo) {
     transaction(db, () => {
       db.exec(MIGRATIONS[version])
       db.prepare('UPDATE schema_version SET version = ?').run(version + 1)

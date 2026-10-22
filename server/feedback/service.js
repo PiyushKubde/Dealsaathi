@@ -5,7 +5,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { now, transaction } from '../db.js'
 import { AppError, validationError } from '../errors.js'
 import { getLead, logActivity } from '../leads/service.js'
-import { getProperty, rematchProperty } from '../properties/service.js'
+import { getProperty } from '../properties/service.js'
+import { emit } from '../events/bus.js'
 import { gmailInput, readGmailResult, runOnce } from '../integrations/run.js'
 import { finishRun, getSetting, startRun } from '../automations/store.js'
 import { describeInZone, utcToZoned } from '../time.js'
@@ -58,11 +59,13 @@ async function sendLink(db, vs, user, row, token, link) {
  * Feedback automation is on. Returns what happened, in words the broker can act on.
  */
 export async function onViewingCompleted(db, vs, user, viewingId, base) {
-  const s = getSetting(db, user.id, 'viewing_feedback')
-  if (!s.enabled || !s.config.gmailConnectionId) return { status: 'off', detail: 'Post-Viewing Feedback is off, so no feedback request was sent.' }
   const v = db.prepare('SELECT * FROM viewings WHERE id = ? AND user_id = ?').get(viewingId, user.id)
   if (!v || v.status !== 'completed') throw new AppError(409, 'viewing_not_completed', 'Feedback is requested only for a viewing that took place.')
   const lead = getLead(db, v.lead_id)
+  // A registered buyer is asked in the app (the viewing.completed event notifies them); no email is needed.
+  if (lead?.buyer_user_id) return { status: 'in_app', detail: 'This buyer has a DealSaathi account: they were asked for feedback in the app.' }
+  const s = getSetting(db, user.id, 'viewing_feedback')
+  if (!s.enabled || !s.config.gmailConnectionId) return { status: 'off', detail: 'Post-Viewing Feedback is off, so no feedback request was sent.' }
   if (!lead?.email || !EMAIL_RE.test(lead.email)) return { status: 'no_email', detail: 'The lead has no email address, so no feedback request was sent.' }
   if (db.prepare('SELECT 1 FROM feedback_requests WHERE viewing_id = ?').get(viewingId)) return { status: 'exists', detail: 'A feedback request already exists for this viewing.' }
 
@@ -125,10 +128,31 @@ export function publicFeedback(db, token) {
 /** A price-too-high answer means the lead's limit is below that price: the next round lakh (or thousand) down. */
 const below = (price) => (price >= 200000 ? Math.floor((price - 1) / 100000) * 100000 : Math.floor((price - 1) / 1000) * 1000)
 
-/** Saves the one answer and updates the lead's preferences from it. A second submission is refused. */
+/** Saves the one answer through the emailed link. */
 export function submitFeedback(db, token, input) {
   const row = requestFor(db, token)
   if (!row) throw new AppError(404, 'not_found', 'This feedback link is not valid.')
+  return applyFeedback(db, row, input, null)
+}
+
+/** A registered buyer answers in the app, for their own completed viewing. */
+export function submitBuyerFeedback(db, buyer, viewingId, input) {
+  const prof = db.prepare('SELECT lead_id FROM buyer_profiles WHERE user_id = ?').get(buyer.id)
+  const v = prof?.lead_id ? db.prepare('SELECT * FROM viewings WHERE id = ? AND lead_id = ?').get(viewingId, prof.lead_id) : null
+  if (!v) throw new AppError(404, 'viewing_not_found', 'No such viewing.')
+  if (v.status !== 'completed') throw new AppError(409, 'viewing_not_completed', 'Feedback opens once your agent marks the viewing as having taken place.')
+  let row = db.prepare('SELECT * FROM feedback_requests WHERE viewing_id = ?').get(v.id)
+  if (!row) {
+    const id = randomUUID()
+    db.prepare(`INSERT INTO feedback_requests (id, viewing_id, lead_id, user_id, token_hash, status, send_detail, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'created', 'Answered in the app', ?, ?, ?) ON CONFLICT (viewing_id) DO NOTHING`)
+      .run(id, v.id, v.lead_id, v.user_id, hash(randomBytes(32).toString('base64url')), new Date(Date.now() + 60 * 86400000).toISOString(), now(), now())
+    row = db.prepare('SELECT * FROM feedback_requests WHERE viewing_id = ?').get(v.id)
+  }
+  return applyFeedback(db, row, input, buyer.id)
+}
+
+/** Saves the one answer and updates the lead's preferences from it. A second submission is refused. */
+function applyFeedback(db, row, input, actorId) {
   const v = db.prepare('SELECT * FROM viewings WHERE id = ?').get(row.viewing_id)
   const viewed = new Set(JSON.parse(v.property_ids))
   const answers = Array.isArray(input?.responses) ? input.responses : []
@@ -172,9 +196,11 @@ export function submitFeedback(db, token, input) {
       .run(budgetMax, excluded.size ? JSON.stringify([...excluded]) : null, now(), lead.id)
     db.prepare('UPDATE feedback_requests SET response = ?, preference_changes = ? WHERE id = ?').run(JSON.stringify({ answers: clean, comments }), JSON.stringify(changes), row.id)
     const summary = clean.map((c) => `${getProperty(db, c.propertyId)?.title ?? 'a listing'}: ${VERDICTS[c.verdict]}`).join('; ')
-    logActivity(db, lead.id, 'feedback_received', `Viewing feedback: ${summary}${comments ? ` (comment: “${comments.slice(0, 200)}”)` : ''}`, { feedbackId: row.id, changes }, 'feedback', null)
-    if (changes.length) logActivity(db, lead.id, 'preferences_updated', `Preferences updated from feedback: ${changes.join('; ')}`, { feedbackId: row.id }, 'feedback', null)
-    for (const pid of viewed) rematchProperty(db, pid, row.user_id)
-    return { received: true }
+    logActivity(db, lead.id, 'feedback_received', `Viewing feedback: ${summary}${comments ? ` (comment: “${comments.slice(0, 200)}”)` : ''}`, { feedbackId: row.id, changes }, 'feedback', actorId)
+    if (changes.length) logActivity(db, lead.id, 'preferences_updated', `Preferences updated from feedback: ${changes.join('; ')}`, { feedbackId: row.id }, 'feedback', actorId)
+    // Matches are recalculated from the queue, in the same way as any other requirements change.
+    emit(db, 'feedback.submitted', { subjectType: 'feedback', subjectId: row.id, actorId, agentId: row.user_id, dedupeKey: `feedback.submitted:${row.id}` })
+    emit(db, 'lead.requirements_changed', { subjectType: 'lead', subjectId: lead.id, actorId, agentId: lead.assigned_agent_id, payload: { fields: ['feedback'], via: 'feedback' }, dedupeKey: `lead.requirements_changed:feedback:${row.id}` })
+    return { received: true, changes }
   })
 }

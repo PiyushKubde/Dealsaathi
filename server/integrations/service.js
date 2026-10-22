@@ -58,6 +58,7 @@ function toPublic(row, live) {
     iconUrl: row.icon_url,
     label: row.label,
     status: live === undefined ? 'unknown' : !live ? 'missing' : live.isExpired ? 'expired' : 'active',
+    verification: row.verified_at ? { status: row.verify_status, detail: row.verify_detail, at: row.verified_at } : null,
     createdAt: row.created_at
   }
 }

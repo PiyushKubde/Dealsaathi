@@ -44,7 +44,8 @@ test('saving a property matches buyers automatically, ranked, and logs it once o
 
     const res = await addProperty(t, BANER)
     assert.equal(res.status, 201)
-    assert.equal(res.body.matching.matched, 2)
+    assert.equal(res.body.property.listing_state, 'published', 'an agent’s listing is published on save')
+    await t.idle() // matching runs from the event queue, not inside the request
     const detail = (await t.call(`/api/properties/${res.body.property.id}`)).body
     assert.deepEqual(detail.matches.map((m) => m.name), ['Rahul Sharma', 'Neha Kulkarni'], 'best first; excluded buyers are absent')
     assert.ok(detail.matches[0].score > detail.matches[1].score)
@@ -54,14 +55,17 @@ test('saving a property matches buyers automatically, ranked, and logs it once o
     assert.equal(activity.length, 1)
 
     await t.call(`/api/properties/${res.body.property.id}`, { method: 'PATCH', body: { property: { notes: 'Freshly painted' } } })
+    await t.idle()
     assert.equal((await t.call(`/api/leads/${rahul.id}`)).body.activities.filter((a) => a.type === 'property_matched').length, 1, 're-saving does not repeat the match entry')
 
     await t.call(`/api/properties/${res.body.property.id}/matches/${wakad.id}/dismiss`, { method: 'POST', body: {} })
-    await t.call(`/api/properties/${res.body.property.id}`, { method: 'PATCH', body: { property: { notes: 'Again' } } })
+    await t.call(`/api/properties/${res.body.property.id}`, { method: 'PATCH', body: { property: { notes: 'Again', bedrooms: 2 } } })
+    await t.idle()
     const after = (await t.call(`/api/properties/${res.body.property.id}`)).body.matches
     assert.equal(after.find((m) => m.name === 'Neha Kulkarni').status, 'dismissed', 'a dismissed match stays dismissed')
 
     await t.call(`/api/properties/${res.body.property.id}`, { method: 'PATCH', body: { property: { price: 6000000 } } })
+    await t.idle()
     assert.equal((await t.call(`/api/properties/${res.body.property.id}`)).body.matches.length, 0, 'a price rise above every budget removes the matches')
   } finally { await t.close() }
 })
@@ -73,6 +77,7 @@ test('a lead’s matching properties come from saved listings only', async () =>
     assert.deepEqual((await t.call(`/api/leads/${rahul.id}/matches`)).body.matches, [], 'no listings, no matches: nothing invented')
     await addProperty(t, BANER)
     await addProperty(t, { ...BANER, title: 'Villa', property_type: 'villa' })
+    await t.idle()
     const { matches } = (await t.call(`/api/leads/${rahul.id}/matches`)).body
     assert.deepEqual(matches.map((m) => m.property.title), ['2 BHK in Baner'])
   } finally { await t.close() }
@@ -108,13 +113,38 @@ test('properties and matches persist across restarts', async () => {
   const file = join(dir, 'p.db')
   try {
     let t = await startApp({ db: openDatabase(file) })
+    const agent = t.user
     await addLead(t, RAHUL)
     const { property } = (await addProperty(t, BANER)).body
     await t.close(); t.db.close()
     t = await startApp({ db: openDatabase(file) })
-    const detail = (await t.call(`/api/properties/${property.id}`)).body
+    const detail = (await t.call(`/api/properties/${property.id}`, { as: agent })).body
     assert.equal(detail.property.title, '2 BHK in Baner')
     assert.equal(detail.matches.length, 1)
     await t.close(); t.db.close()
   } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('matching edge cases: budget boundaries, partial requirements, tenants and rentals, conflicting input', async () => {
+  const p = { ...BANER, status: 'available', listing_state: 'published' }
+  assert.ok(scoreMatch(RAHUL, { ...p, price: 5000000 }), 'a price exactly at the budget matches')
+  assert.equal(scoreMatch(RAHUL, { ...p, price: 5000001 }), null, 'one rupee over does not')
+  assert.equal(scoreMatch(RAHUL, { ...p, listing_state: 'draft' }), null, 'unpublished listings never match')
+  const partial = scoreMatch({ full_name: 'A B', customer_type: 'buyer', budget_max: 6000000 }, p)
+  assert.equal(partial.score, 30, 'only the budget is known: a partial match, with the rest named as gaps')
+  assert.deepEqual(partial.gaps, ['no preferred location saved', 'no bedroom count saved'])
+  const noBhk = scoreMatch(RAHUL, { ...p, bedrooms: null })
+  assert.ok(noBhk.gaps.includes('the listing has no bedroom count'), 'a listing missing a fact is reported, not assumed')
+  const below = scoreMatch({ ...RAHUL, budget_min: 4900000 }, p)
+  assert.match(below.reasons.join(' '), /Below their minimum/)
+  const tenant = { full_name: 'T', customer_type: 'tenant', preferred_location: 'Koramangala', budget_max: 30000 }
+  const rental = { title: 'Flat', listing_type: 'rent', property_type: 'apartment', price: 28000, city: 'Bangalore', locality: 'Koramangala', status: 'available' }
+  assert.ok(scoreMatch(tenant, rental))
+  assert.equal(scoreMatch(tenant, { ...rental, listing_type: 'sale' }), null)
+  const t = await startApp()
+  try {
+    const bad = await t.call('/api/leads', { method: 'POST', body: { lead: { ...RAHUL, budget_min: 6000000, budget_max: 5000000 } } })
+    assert.equal(bad.status, 400, 'a minimum above the maximum is refused, not guessed')
+    assert.ok(bad.body.error.details.fields.budget_min)
+  } finally { await t.close() }
 })

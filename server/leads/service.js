@@ -1,6 +1,7 @@
 // Lead records in the local SQLite database. Nothing here talks to an external CRM.
 import { now, transaction } from '../db.js'
 import { AppError, validationError } from '../errors.js'
+import { emit } from '../events/bus.js'
 import {
   LEAD_FIELDS, STATUSES, CUSTOMER_TYPES, checkCompleteLead, cleanLeadFields, leadCode,
   normalizeEmail, normalizeName, normalizePhone
@@ -12,6 +13,9 @@ const FIELD_LABELS = {
   preferred_location: 'Location', budget_min: 'Min budget', budget_max: 'Max budget', status: 'Status',
   assigned_broker: 'Assigned broker', notes: 'Notes', follow_up_on: 'Follow-up date'
 }
+
+/** Fields that change what a lead matches: a change to any of them queues lead.requirements_changed. */
+export const MATCH_FIELDS = ['customer_type', 'property_type', 'bedrooms', 'preferred_location', 'budget_min', 'budget_max', 'status']
 
 /** Leads following up needs: still New or Contacted and untouched for this many days. */
 export const FOLLOW_UP_AFTER_DAYS = 3
@@ -36,12 +40,16 @@ export function requireLead(db, id) {
  * Existing leads that look like the same person. `strong` matches (same email or phone) block saving;
  * a name-only match is a warning the broker may override.
  */
-export function findDuplicates(db, { full_name, email, phone }, excludeId = null) {
+export function findDuplicates(db, { full_name, email, phone }, excludeId = null, viewerId = undefined) {
   const found = new Map()
+  // Only the agents' own book (self-registered buyers are separate records). Another agent's lead is reported
+  // as existing, without its details: one agent never sees another's contacts.
   const add = (rows, reason, strong) => {
     for (const row of rows) {
-      if (row.id === excludeId) continue
-      const entry = found.get(row.id) || { lead: toLead(row), reasons: [], strong: false }
+      if (row.id === excludeId || row.buyer_user_id) continue
+      if (viewerId !== undefined && row.assigned_agent_id !== viewerId && !strong) continue
+      const visible = viewerId === undefined || row.assigned_agent_id === viewerId
+      const entry = found.get(row.id) || { lead: visible ? toLead(row) : null, otherAgent: !visible, reasons: [], strong: false }
       entry.reasons.push(reason)
       entry.strong ||= strong
       found.set(row.id, entry)
@@ -68,28 +76,46 @@ export function logActivity(db, leadId, type, summary, details, via, userId = nu
  * Validates and saves a new lead. Throws 400 for invalid fields, 409 for a duplicate
  * (a name-only match passes when allowSameName is true).
  */
-export function createLead(db, input, { via = 'form', allowSameName = false, userId = null } = {}) {
+export function createLead(db, input, { via = 'form', allowSameName = false, userId = null, assignTo = userId, assignmentRule = 'created_by_agent', buyerUserId = null } = {}) {
   const { value, errors } = cleanLeadFields(input)
   const lead = { status: 'new', ...value }
   Object.assign(errors, checkCompleteLead(lead))
   if (Object.keys(errors).length) throw validationError(errors)
 
   return transaction(db, () => {
-    const duplicates = findDuplicates(db, lead)
-    const blocking = duplicates.filter((d) => d.strong || !allowSameName)
-    if (blocking.length) {
-      throw new AppError(409, 'possible_duplicate', 'This lead may already exist.', { duplicates })
+    if (!buyerUserId) {
+      const duplicates = findDuplicates(db, lead, null, assignTo)
+      const blocking = duplicates.filter((d) => d.strong || !allowSameName)
+      if (blocking.length) {
+        throw new AppError(409, 'possible_duplicate', blocking.some((d) => d.otherAgent) ? 'A lead with this email or phone is already managed by another agent.' : 'This lead may already exist.', { duplicates: blocking })
+      }
     }
     const ts = now()
     const cols = LEAD_FIELDS.filter((f) => lead[f] != null)
     const row = { ...Object.fromEntries(cols.map((f) => [f, lead[f]])) }
-    const names = [...cols, 'email_norm', 'phone_norm', 'created_at', 'updated_at']
-    const values = [...cols.map((f) => row[f]), normalizeEmail(lead.email), normalizePhone(lead.phone), ts, ts]
+    const names = [...cols, 'email_norm', 'phone_norm', 'buyer_user_id', 'assigned_agent_id', 'assignment_rule', 'assigned_at', 'created_at', 'updated_at']
+    const values = [...cols.map((f) => row[f]), normalizeEmail(lead.email), normalizePhone(lead.phone), buyerUserId, assignTo || null, assignTo ? assignmentRule : null, assignTo ? ts : null, ts, ts]
     const { lastInsertRowid } = db
       .prepare(`INSERT INTO leads (${names.join(', ')}) VALUES (${names.map(() => '?').join(', ')})`)
       .run(...values)
     const id = Number(lastInsertRowid)
     logActivity(db, id, 'created', 'Lead created', { fields: row }, via, userId)
+    emit(db, 'lead.created', { subjectType: 'lead', subjectId: id, actorId: userId, agentId: assignTo || null, payload: { via }, dedupeKey: `lead.created:${id}` })
+    return getLead(db, id)
+  })
+}
+
+/** Gives a lead to an agent (or takes it back to the pool with null), recorded and queued as lead.assigned. */
+export function assignLead(db, id, agentId, { rule, actorId = null, onlyIfUnassigned = false } = {}) {
+  return transaction(db, () => {
+    const current = requireLead(db, id)
+    const ts = now()
+    const r = db.prepare(`UPDATE leads SET assigned_agent_id = ?, assignment_rule = ?, assigned_at = ?, updated_at = ? WHERE id = ?${onlyIfUnassigned ? ' AND assigned_agent_id IS NULL' : ''}`)
+      .run(agentId, agentId ? rule : null, agentId ? ts : null, ts, id)
+    if (!r.changes) throw new AppError(409, 'already_assigned', 'Another agent has already taken this lead.')
+    const agent = agentId ? db.prepare('SELECT name FROM users WHERE id = ?').get(agentId) : null
+    logActivity(db, id, 'assigned', agent ? `Assigned to ${agent.name} (${rule.replace(/_/g, ' ')})` : 'Returned to the unassigned pool', { from: current.assigned_agent_id, to: agentId, rule }, 'assignment', actorId)
+    if (agentId) emit(db, 'lead.assigned', { subjectType: 'lead', subjectId: id, actorId, agentId, payload: { from: current.assigned_agent_id, rule }, dedupeKey: `lead.assigned:${id}:${agentId}:${ts}` })
     return getLead(db, id)
   })
 }
@@ -97,7 +123,7 @@ export function createLead(db, input, { via = 'form', allowSameName = false, use
 const display = (v) => (v == null || v === '' ? '—' : String(v))
 
 /** Applies the given changes. Returns { lead, changed } where changed lists the fields that differ. */
-export function updateLead(db, id, input, { via = 'form', allowSameName = false, userId = null } = {}) {
+export function updateLead(db, id, input, { via = 'form', allowSameName = false, userId = null, buyerOwned = false } = {}) {
   const { value, errors } = cleanLeadFields(input)
   if (Object.keys(errors).length) throw validationError(errors)
 
@@ -117,7 +143,7 @@ export function updateLead(db, id, input, { via = 'form', allowSameName = false,
         email: changes.some(([f]) => f === 'email') ? merged.email : null,
         phone: changes.some(([f]) => f === 'phone') ? merged.phone : null
       }
-      const blocking = findDuplicates(db, probe, id).filter((d) => d.strong || !allowSameName)
+      const blocking = buyerOwned ? [] : findDuplicates(db, probe, id, current.assigned_agent_id).filter((d) => d.strong || !allowSameName)
       if (blocking.length) throw new AppError(409, 'possible_duplicate', 'Another lead already has these details.', { duplicates: blocking })
     }
 
@@ -135,6 +161,9 @@ export function updateLead(db, id, input, { via = 'form', allowSameName = false,
       ? `Status changed: ${display(statusChange.from)} → ${display(statusChange.to)}`
       : `Updated ${diff.map((d) => FIELD_LABELS[d.field]).join(', ')}`
     logActivity(db, id, statusChange ? 'status_changed' : 'updated', summary, { changes: diff }, via, userId)
+    if (diff.some((d) => MATCH_FIELDS.includes(d.field))) {
+      emit(db, 'lead.requirements_changed', { subjectType: 'lead', subjectId: id, actorId: userId, agentId: current.assigned_agent_id, payload: { fields: diff.map((d) => d.field).filter((f) => MATCH_FIELDS.includes(f)), via } })
+    }
     return { lead: getLead(db, id), changed: diff }
   })
 }
@@ -156,9 +185,10 @@ export function listActivities(db, id) {
 const escapeLike = (s) => s.replace(/[\\%_]/g, (c) => `\\${c}`)
 
 /** Search and filter. Every filter is optional; q matches name, email, phone, location, interest and notes. */
-export function listLeads(db, { q, customer_type, status, location, budget_max, follow_up, limit = 50, offset = 0 } = {}) {
-  const where = []
-  const params = []
+export function listLeads(db, { agentId, q, customer_type, status, location, budget_max, follow_up, limit = 50, offset = 0 } = {}) {
+  if (!agentId) throw new AppError(403, 'forbidden', 'Only an agent’s own leads can be listed.')
+  const where = ['assigned_agent_id = ?']
+  const params = [agentId]
   if (q && String(q).trim()) {
     const like = `%${escapeLike(String(q).trim().toLowerCase())}%`
     const digits = String(q).replace(/\D/g, '')
@@ -197,12 +227,12 @@ export function listLeads(db, { q, customer_type, status, location, budget_max, 
   return { total, leads: rows.map(toLead) }
 }
 
-export function leadStats(db) {
-  const total = db.prepare('SELECT COUNT(*) AS n FROM leads').get().n
-  const byStatus = Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM leads GROUP BY status').all().map((r) => [r.status, r.n]))
-  const byType = Object.fromEntries(db.prepare('SELECT customer_type, COUNT(*) AS n FROM leads GROUP BY customer_type').all().map((r) => [r.customer_type, r.n]))
-  const followUp = listLeads(db, { follow_up: true, limit: 5 })
-  const recent = listLeads(db, { limit: 5 }).leads
+export function leadStats(db, agentId) {
+  const total = db.prepare('SELECT COUNT(*) AS n FROM leads WHERE assigned_agent_id = ?').get(agentId).n
+  const byStatus = Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM leads WHERE assigned_agent_id = ? GROUP BY status').all(agentId).map((r) => [r.status, r.n]))
+  const byType = Object.fromEntries(db.prepare('SELECT customer_type, COUNT(*) AS n FROM leads WHERE assigned_agent_id = ? GROUP BY customer_type').all(agentId).map((r) => [r.customer_type, r.n]))
+  const followUp = listLeads(db, { agentId, follow_up: true, limit: 5 })
+  const recent = listLeads(db, { agentId, limit: 5 }).leads
   return { total, byStatus, byType, followUp: { total: followUp.total, leads: followUp.leads }, recent, followUpAfterDays: FOLLOW_UP_AFTER_DAYS }
 }
 

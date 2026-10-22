@@ -8,12 +8,14 @@ import { requireOwnConnection } from '../integrations/service.js'
 import { ACTIONS, execute, gmailInput, pickOptions, prepareRun, readGmailResult, readSlackResult, serviceIdOf, slackChannels, slackInput } from '../integrations/run.js'
 import { CALENDAR_TIMEZONES } from '../time.js'
 import { noticeEndedViewings } from '../viewings/service.js'
-import { runRentChecks } from '../rent/service.js'
+import { paymentsLive, runRentChecks } from '../rent/service.js'
+import { notifyInApp } from '../notifications/service.js'
 import { AUTOMATIONS, automation, finishRun, getRun, getSetting, lastRun, listRuns, saveSetting, startRun, usersWithEnabled } from './store.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 const CHANNEL_ACTION = { gmail: ACTIONS.gmail_send_email, slack: ACTIONS.slack_send_message }
 const ACTIVE_LEAD_STATUSES = ['new', 'contacted', 'qualified', 'viewing_scheduled', 'negotiating']
+const AUTOMATIC_ACTIVITY = ['property_matched', 'reminder_created', 'assigned', 'preferences_updated', 'consent_changed']
 export const REMINDER_TIMEZONE = 'Asia/Kolkata'
 
 const inr = (n) => (n == null ? null : n >= 1e7 ? `₹${+(n / 1e7).toFixed(2)} Cr` : n >= 1e5 ? `₹${+(n / 1e5).toFixed(2)} L` : `₹${n.toLocaleString('en-IN')}`)
@@ -99,7 +101,10 @@ async function checkConfig(db, vs, user, key, raw, live, scheduler) {
   const def = automation(key)
   if (!def) throw new AppError(404, 'automation_not_found', 'No such automation.')
   if (!def.available) return { config: {}, problems: [def.blocker] }
-  if (key === 'buyer_matching') return { config: {}, problems: [] }
+  if (key === 'buyer_matching') {
+    const notify = await checkChannel(db, vs, user, { ...raw, channel: raw?.notify ?? 'none' }, { live, allowNone: true })
+    return { config: { notify: notify.config.channel, ...notify.config, channel: undefined }, problems: notify.problems }
+  }
   if (key === 'new_lead_alert') return checkChannel(db, vs, user, raw, { live })
   if (key === 'property_recommendations') {
     const { config, problems } = await checkChannel(db, vs, user, { ...raw, channel: 'gmail', emailTo: user.email }, { live })
@@ -150,7 +155,8 @@ async function checkConfig(db, vs, user, key, raw, live, scheduler) {
     const problems = await checkConnection(db, vs, user, config.gmailConnectionId, 'gmail', 'Gmail', live)
     if (!Number.isInteger(config.beforeDays) || config.beforeDays < 0 || config.beforeDays > 15) problems.push('Send the first reminder 0 to 15 days before the due date.')
     if (!afterDays) problems.push('Overdue reminders: up to five numbers of days from 1 to 60, separated by commas.')
-    if (config.razorpayConnectionId) problems.push(...await checkConnection(db, vs, user, config.razorpayConnectionId, 'razorpay', 'Razorpay', live))
+    if (config.razorpayConnectionId && !paymentsLive()) problems.push('Razorpay payment links are not enabled for live use on this server yet (they need a verified real-payment test first). Leave Razorpay unset; payments are then recorded by people.')
+    else if (config.razorpayConnectionId) problems.push(...await checkConnection(db, vs, user, config.razorpayConnectionId, 'razorpay', 'Razorpay', live))
     if (!scheduler.available) problems.push('The 15-minute scheduler runs only on the hosted DealSaathi (Embarko). Here you can use “Run check now”.')
     return { config, problems, schedulerProblem: !scheduler.available }
   }
@@ -167,14 +173,6 @@ async function checkConfig(db, vs, user, key, raw, live, scheduler) {
 }
 
 export function createAutomationEngine({ db, vs, scheduler = { available: false } }) {
-  const pending = new Set()
-  const track = (promise) => {
-    const p = promise.catch((error) => console.error(`[automation] ${error?.name}: ${error?.message}`))
-    pending.add(p)
-    p.finally(() => pending.delete(p))
-    return p
-  }
-
   async function liveConnections(userId) {
     if (!vs.configured) return { connections: null }
     try {
@@ -233,12 +231,14 @@ export function createAutomationEngine({ db, vs, scheduler = { available: false 
     const targets = onlyUser ? [{ user: onlyUser, config: onlyConfig }] : usersWithEnabled(db, 'followup_reminders')
     const today = todayIn(REMINDER_TIMEZONE)
     const totals = { brokers: 0, created: 0, notified: 0, failed: 0 }
-    const leads = db.prepare(`SELECT l.*, (SELECT MAX(a.created_at) FROM lead_activities a WHERE a.lead_id = l.id AND a.type NOT IN ('property_matched','reminder_created')) AS last_activity
-                              FROM leads l WHERE l.customer_type IN ('buyer','tenant') AND l.status IN (${ACTIVE_LEAD_STATUSES.map(() => '?').join(',')})`).all(...ACTIVE_LEAD_STATUSES)
+    // Only the agent responsible for a lead is reminded about it. "Activity" is what a person did: automatic
+    // entries (matches, reminders, assignment, preference updates from feedback) do not count as contact.
+    const leadsOf = db.prepare(`SELECT l.*, (SELECT MAX(a.created_at) FROM lead_activities a WHERE a.lead_id = l.id AND a.type NOT IN (${AUTOMATIC_ACTIVITY.map(() => '?').join(',')})) AS last_activity
+                              FROM leads l WHERE l.assigned_agent_id = ? AND l.customer_type IN ('buyer','tenant') AND l.status IN (${ACTIVE_LEAD_STATUSES.map(() => '?').join(',')})`)
     for (const { user, config } of targets) {
       totals.brokers++
       const created = []
-      for (const lead of leads) {
+      for (const lead of leadsOf.all(...AUTOMATIC_ACTIVITY, user.id, ...ACTIVE_LEAD_STATUSES)) {
         const found = []
         if (lead.follow_up_on && lead.follow_up_on <= today) found.push({ reason: 'follow_up_date', anchor: lead.follow_up_on, detail: `Follow-up date ${lead.follow_up_on} has arrived` })
         const last = [lead.created_at, lead.last_activity].filter(Boolean).sort().at(-1)
@@ -251,6 +251,7 @@ export function createAutomationEngine({ db, vs, scheduler = { available: false 
           if (r.changes) {
             created.push({ lead, ...f })
             logActivity(db, lead.id, 'reminder_created', `Follow-up reminder: ${f.detail}`, { reason: f.reason }, 'automation', user.id)
+            notifyInApp(db, user.id, { kind: 'reminder', title: `Follow up with ${lead.full_name}`, body: f.detail, link: `#/leads/${lead.id}`, subjectType: 'lead', subjectId: lead.id, dedupeKey: `reminder:${user.id}:${lead.id}:${f.reason}:${f.anchor}` })
           }
         }
       }
@@ -272,8 +273,12 @@ export function createAutomationEngine({ db, vs, scheduler = { available: false 
   }
 
   return {
-    /** Waits for background runs (tests). */
-    idle: () => Promise.all([...pending]),
+    /** Automation work now runs from the event queue (see events/); nothing is left in flight here. */
+    idle: () => Promise.resolve(),
+
+    /** For the event handlers: send through an agent's configured channel, and the New Lead Alert message. */
+    notifyThrough: notify,
+    leadAlertMessage: leadMessage,
 
     async cards(user) {
       const live = await liveConnections(user.id)
@@ -300,7 +305,7 @@ export function createAutomationEngine({ db, vs, scheduler = { available: false 
       const current = getSetting(db, user.id, key)
       const merged = { ...current.config, ...(config && typeof config === 'object' && !Array.isArray(config) ? config : {}) }
       const live = enabled ? { ...(await liveConnections(user.id)), verifySlack: true } : null
-      const usesChannel = ['new_lead_alert', 'property_recommendations', 'viewing_scheduler', 'viewing_feedback', 'rent_reminders'].includes(key) || (key === 'followup_reminders' && ['gmail', 'slack'].includes(merged.notify))
+      const usesChannel = ['new_lead_alert', 'property_recommendations', 'viewing_scheduler', 'viewing_feedback', 'rent_reminders'].includes(key) || (['followup_reminders', 'buyer_matching'].includes(key) && ['gmail', 'slack'].includes(merged.notify))
       if (enabled && usesChannel && live.connections === null) throw new AppError(503, 'viasocket_unavailable', live.error || 'viaSocket is not configured, so this cannot be switched on.')
       const { config: clean, problems } = await checkConfig(db, vs, user, key, merged, live, scheduler)
       if (enabled && problems.length) throw new AppError(409, 'needs_setup', 'This automation cannot be switched on yet.', { problems })
@@ -318,14 +323,6 @@ export function createAutomationEngine({ db, vs, scheduler = { available: false 
       return slackChannels(db, vs, user.id, connectionId)
     },
 
-    /** Trigger: a lead was saved. Each broker who switched the alert on is notified once for this lead. */
-    onLeadCreated(lead, actor, via) {
-      for (const { user, config } of usersWithEnabled(db, 'new_lead_alert')) {
-        const runId = startRun(db, { userId: user.id, key: 'new_lead_alert', trigger: 'Lead saved', subjectType: 'lead', subjectId: lead.id, dedupeKey: `new_lead_alert:${user.id}:${lead.id}` })
-        if (runId) track(runLeadAlert(runId, user, config, lead.id, actor, via))
-      }
-    },
-
     /** Retries a failed (refused, not unknown) lead alert: nothing went out the first time. */
     async retry(user, runId) {
       const run = getRun(db, user.id, runId)
@@ -335,16 +332,6 @@ export function createAutomationEngine({ db, vs, scheduler = { available: false 
       db.prepare("UPDATE automation_runs SET status = 'running', error = NULL, finished_at = NULL WHERE id = ? AND status = 'failed'").run(runId)
       await runLeadAlert(runId, user, setting.config, Number(run.subjectId), user, 'retry')
       return getRun(db, user.id, runId)
-    },
-
-    matchingEnabledFor: (userId) => getSetting(db, userId, 'buyer_matching').enabled,
-
-    /** Trigger record: a property was saved by this broker. */
-    recordMatching(userId, property, matching) {
-      const runId = startRun(db, { userId, key: 'buyer_matching', trigger: 'Property saved', subjectType: 'property', subjectId: property.id })
-      finishRun(db, runId, matching
-        ? { status: 'succeeded', summary: `${property.title}: ${matching.matched} matching buyer${matching.matched === 1 ? '' : 's'}${matching.newMatches ? ` (${matching.newMatches} new)` : ''}` }
-        : { status: 'skipped', summary: `${property.title}: matching is turned off` })
     },
 
     /** Trigger: the scheduler (every 15 minutes on the hosted app), or "Run check now" for one broker. */

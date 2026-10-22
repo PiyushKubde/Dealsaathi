@@ -1,27 +1,43 @@
 # DealSaathi
 
-An AI assistant for real estate brokers, built on viaSocket.
+A three-sided real-estate marketplace for **buyers**, **sellers** and **agents**, built on viaSocket.
+See [docs/architecture.md](docs/architecture.md) for roles, assignment, matching and the event queue.
+
+| Role | Signs up as | Can do |
+| --- | --- | --- |
+| Buyer (or tenant) | Buyer — open signup | Save requirements (with consent to matching), see recommendations with reasons, browse listings, request viewings in their agent's calendar, give feedback, see their tenancy and rent |
+| Seller (or landlord) | Seller — open signup | Create draft listings, publish / unpublish / archive them, see how many buyers match (never who), see viewings of their listings, see their rentals and record rent received |
+| Agent | Agent — needs the team access code on the hosted copy | Their assigned leads (plus a claimable pool), AI lead entry, all published listings, matches, viewings, feedback, rent management, integrations, the seven automations, the activity log |
+
+Every rule is enforced on the server (`server/access.js`); pages only hide what a role cannot use.
 
 | Area | What works | Status |
 | --- | --- | --- |
-| Accounts | Each broker signs up with their own login and gets a stable id (`usr_…`), which is also their identity on viaSocket | Working |
-| Leads | Add with AI (viaSocket AI) or a form, review, confirm, edit, delete, duplicate checks, follow-up date, activity history | Working |
-| Properties | Listings with buyer matching on save; clearly labelled sample listings | Working (local data) |
-| Integrations | A fixed list of the apps DealSaathi uses (Gmail, Slack, Google Calendar, Razorpay, WhatsApp Business), connected through the official **Connect** popup (`viasocket-apps/browser` `connect()`), live status, reconnect, disconnect | Working; each broker signs in to their own apps |
-| Real Estate Automations | Seven DealSaathi automations with native settings, on/off, run history and retry. No viaSocket builder or app catalog is shown | All 7 built; each needs its broker's own connections (see below) |
-| Viewings | Free times from the broker's Google Calendar, review, book, move, cancel, mark taken place / no-show | Built; needs Google Calendar |
-| Feedback | A private one-time link per completed viewing; answers update the buyer's preferences and matches | Built; needs Gmail |
-| Tenancies and rent | Tenancies, monthly rent, reminders before/on/after the due date, Razorpay payment links, verified payments | Built; needs Gmail, Razorpay optional |
+| Accounts and roles | Signup with a role, role profiles, role dashboards, sessions (HttpOnly, SameSite=Strict), open signup capped per IP | Working |
+| Assignment | Agent-added leads are theirs; registered buyers go to the least-loaded agent serving their area; otherwise a pool agents claim from; transfer between agents | Working |
+| Matching | Both directions, continuous, from the event queue; stored with reasons, fingerprints and status (suggested / dismissed / withdrawn) | Working |
+| Event queue | Every platform change writes a domain event in the same transaction; processed after the request, on start-up and every 15 minutes, with retries and dedupe | Working |
+| Notifications | In-app, per person, deduplicated; external (Gmail / Slack) only through an agent's own connection | In-app working; external needs connections |
+| Integrations | Gmail, Slack, Google Calendar through the official Connect popup, with a read-only **Check access**. Razorpay and WhatsApp are blocked for live use | See [Integrations](#integrations-status) |
+| Viewings, feedback, tenancies, rent | Agent-run; buyers request and give feedback in the app; tenants and landlords see their tenancy | Built; Calendar / Gmail needed for external steps |
 
-| Automation | Trigger | Acts through | Status |
+| Automation | Trigger (platform event) | Acts through | Status |
 | --- | --- | --- | --- |
-| New Lead Alert | A lead is saved | Gmail · Send Email or Slack · Send Message | Built; needs Gmail or Slack connected |
-| New Property → Buyer Matching | A property is saved | DealSaathi | Working |
-| Property Recommendations | The broker picks listings on a lead's page | Gmail · Send Email, after approval | Built; needs Gmail connected |
-| Buyer Follow-Up Reminders | Embarko scheduler, every 15 minutes (`/tasks/automations`) | DealSaathi reminders; optional Gmail or Slack | Built; scheduler only on the hosted app |
-| Property Viewing Scheduler | The broker books a free time on the Viewings page | Google Calendar · Get Free/Busy Information, Create / Update / Delete Event; optional Gmail confirmation | Built; needs Google Calendar connected |
-| Post-Viewing Feedback | The broker marks a viewing as taken place | Gmail · Send Email with a private link; the answer updates preferences and matches | Built; needs Gmail connected |
-| Rent and Payment Reminders | Embarko scheduler, every 15 minutes, or "Run check now" | Gmail · Send Email; optional Razorpay · Create / List / Cancel Payment Link | Built; scheduler only on the hosted app |
+| New Lead Alert | `lead.created`, `lead.assigned` — only the **assigned** agent | In-app; optional Gmail · Send Email or Slack · Send Message | Built; external needs the agent's Gmail or Slack |
+| New Property Matching | `property.published` / `changed` / `unpublished`, `lead.requirements_changed` | Matching for everyone; in-app notices; optional one Gmail/Slack digest per change | Working; external optional |
+| Property Recommendations | Stored matches (buyers, in-app); agent approval (email) | In-app; Gmail · Send Email after approval, only to buyers who allow agent email | In-app working; email needs Gmail; WhatsApp unavailable |
+| Buyer Follow-Up Reminders | Scheduler (15 min): due follow-up dates, no human activity | In-app reminder + notice; optional Gmail/Slack | Built; scheduler only when hosted |
+| Property Viewing Scheduler | Agent schedules, or a buyer requests; agent confirms | Google Calendar · Free/Busy, Create / Update / Delete Event | Built; needs the agent's Google Calendar |
+| Post-Viewing Feedback | `viewing.completed` | In-app for registered buyers; private emailed link otherwise; answers queue re-matching | Built; email needs Gmail |
+| Rent and Payment Reminders | Scheduler (15 min) | Gmail · Send Email; Razorpay links only with `RAZORPAY_LIVE=1` | Built; Razorpay off for live use |
+
+## Integrations status
+
+| App | Live execution | Why |
+| --- | --- | --- |
+| Gmail, Slack, Google Calendar | Allowed, through each agent's own connection | Each run first checks the connection is live on viaSocket; **Check access** runs a read-only call |
+| Razorpay | **Blocked** until the server sets `RAZORPAY_LIVE=1` | Real money: enable only after a real payment link test passes |
+| WhatsApp Business | **Not used** | Needs a WhatsApp Business account with an approved message template |
 
 ## Run it on your computer
 
@@ -59,7 +75,8 @@ Set in the app's **App setup** page on https://embarko.ai/app (never in the uplo
 ## Checks
 
 ```bash
-npm test       # automated tests: a fake viaSocket and AI, temporary databases
+npm test           # unit, API, database and migration tests: a fake viaSocket and AI, temporary databases
+npm run test:e2e   # browser journeys for all three roles (Playwright; PLAYWRIGHT_MODULE=<node_modules path>)
 npm run lint
 curl -fsSL https://flow.viasocket.com/viasocket-check.mjs -o viasocket-check.mjs && node viasocket-check.mjs server public scripts
 ```
@@ -92,7 +109,12 @@ The skill's test-connection step, for proving Gmail · Send Email works before a
 | `server/integrations/apps.js` | The curated list of apps on the Integrations page |
 | `server/integrations/run.js` | Runs one allowlisted viaSocket action on a broker's own connection |
 | `embarko.json` | The hosted app's schedule |
-| `server/properties/service.js` | Listings and buyer matching (honours feedback exclusions) |
+| `server/access.js` | Roles and ownership rules, used by every route |
+| `server/profiles/service.js` | Role profiles, buyer requirements, agent assignment, the unassigned pool |
+| `server/events/bus.js`, `server/events/handlers.js` | The domain event queue (retries, leases, dedupe) and what each event does |
+| `server/matching/engine.js` | Two-way matching: stored matches, fingerprints, withdrawal |
+| `server/notifications/service.js` | In-app notifications and external delivery claims |
+| `server/properties/service.js` | Listings: ownership, publish / unpublish / archive, scoring |
 | `server/viewings/service.js` | Free times, booking, moving, cancelling and outcomes of viewings |
 | `server/feedback/service.js` | Feedback links (only a hash is stored), the public answer, preference updates |
 | `server/rent/service.js` | Tenancies, monthly rent, reminder stages, payment links, payment verification, audit |
@@ -107,8 +129,9 @@ The skill's test-connection step, for proving Gmail · Send Email works before a
 
 ## Known limits
 
-- One shared lead and property book for everyone signed in to one DealSaathi; connections, automations, AI threads
-  and follow-ups are per broker.
+- Email addresses are not verified. A tenancy links to accounts by the email the agent types, so an account
+  registered with someone else's email could see that tenancy's rent. Email verification is the top open item.
+- Matching runs in the server process; the queue is in SQLite. One server instance only.
 - viaSocket's slug lookup does not find `gmail` today (reported to viaSocket). DealSaathi then finds the slug in
   `catalog.list()`, which does list it; the check script still reports it.
 - Budgets are plain rupee amounts: a tenant's monthly rent and a buyer's price look alike.

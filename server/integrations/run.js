@@ -254,3 +254,39 @@ export async function pickOptions(db, vs, userId, connectionId, actionKey, field
     throw viasocketError(error, `list your ${action.app} options`)
   }
 }
+
+/**
+ * Checks that a "connected" account really works now, with a read-only call through it: Gmail lists its sender
+ * addresses, Slack its channels, Google Calendar its calendars. The result is saved on the connection.
+ */
+export async function verifyAccess(db, vs, userId, connectionId) {
+  const row = db.prepare('SELECT * FROM connections WHERE id = ? AND user_id = ?').get(connectionId, userId)
+  if (!row) throw new AppError(404, 'connection_not_found', 'No such connection.')
+  const probes = {
+    gmail: () => gmailFromOptions(db, vs, userId, connectionId),
+    slack: () => slackChannels(db, vs, userId, connectionId),
+    'google-calendar': () => pickOptions(db, vs, userId, connectionId, 'calendar_free_busy', 'calendar_id')
+  }
+  let slug = null
+  for (const s of ['gmail', 'slack', 'google-calendar', 'razorpay', 'whatsapp_business_cloud']) {
+    try { if ((await vs.serviceIdFor(s)) === row.service_id) { slug = s; break } } catch { /* try the next */ }
+  }
+  let status
+  let detail
+  if (!probes[slug]) {
+    status = 'not_checked'
+    detail = 'DealSaathi does not run actions through this app yet, so it was not exercised.'
+  } else {
+    try {
+      const options = await probes[slug]()
+      status = 'ok'
+      const noun = { gmail: ['sender address', 'sender addresses'], slack: ['channel', 'channels'], 'google-calendar': ['calendar', 'calendars'] }[slug]
+      detail = `Access confirmed: ${options.length} ${noun[options.length === 1 ? 0 : 1]} readable through this connection.`
+    } catch (error) {
+      status = 'failed'
+      detail = String(error?.message || error).slice(0, 300)
+    }
+  }
+  db.prepare('UPDATE connections SET verified_at = ?, verify_status = ?, verify_detail = ? WHERE id = ?').run(new Date().toISOString(), status, detail, connectionId)
+  return { status, detail, checkedAt: new Date().toISOString() }
+}

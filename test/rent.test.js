@@ -9,6 +9,7 @@ const today = todayIn('Asia/Kolkata')
 const TEN = { tenant_name: 'Priya Nair', tenant_email: 'priya@example.com', tenant_phone: '9000000010', property_label: 'Flat 4B, Koramangala', rent_amount: 28000, due_day: 5, lease_start: '2025-01-01' }
 
 async function setup({ razorpay = false } = {}) {
+  process.env.RAZORPAY_LIVE = razorpay ? '1' : '' // live payment links are an explicit server switch
   const vs = fakeVs()
   const t = await startApp({ vs })
   const conn = async (slug) => (await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: await vs.serviceIdFor(slug), authId: vs.connectApp(t.user.id, slug) } })).body.connection
@@ -216,5 +217,26 @@ test('rent is private to the broker who manages it', async () => {
     assert.equal((await t.call('/api/rent', { as: other })).body.tenancies.length, 0)
     const overview = (await t.call('/api/rent')).body
     assert.equal(overview.tenancies.length, 1)
+  } finally { await t.close() }
+})
+
+test('Razorpay stays unavailable for live payments until the server switch is set', async () => {
+  process.env.RAZORPAY_LIVE = ''
+  const vs = fakeVs()
+  const t = await startApp({ vs })
+  try {
+    const conn = async (slug) => (await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: await vs.serviceIdFor(slug), authId: vs.connectApp(t.user.id, slug) } })).body.connection
+    const gmail = await conn('gmail')
+    const rzp = await conn('razorpay')
+    const res = await t.call('/api/automations/rent_reminders', { method: 'PUT', body: { enabled: false, config: { gmailConnectionId: gmail.id, razorpayConnectionId: rzp.id } } })
+    assert.match(res.body.automation.problems.join(' '), /not enabled for live use/)
+    const { tenancy } = (await addTenancy(t)).body
+    moveDue(t, tenancy.id, 0)
+    await t.call('/api/automations/rent_reminders', { method: 'PUT', body: { enabled: false, config: { razorpayConnectionId: null } } })
+    await runNow(t)
+    assert.ok(!vs.calls.some((c) => c.name === 'runAction' && c.args[1] === V.rowtl0joo241), 'no payment link is created')
+    const apps = (await t.call('/api/integrations/apps')).body.apps
+    assert.match(apps.find((a) => a.slug === 'razorpay').liveBlocked, /RAZORPAY_LIVE/)
+    assert.match(apps.find((a) => a.slug === 'whatsapp_business_cloud').liveBlocked, /approved message template/)
   } finally { await t.close() }
 })

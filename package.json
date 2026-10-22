@@ -12,7 +12,8 @@
     "dev": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning --watch server/index.js",
     "db:init": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/init-db.js",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:e2e": "node scripts/e2e-journeys.mjs"
   },
   "dependencies": {
     "express": "^5.3.0",

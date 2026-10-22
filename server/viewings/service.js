@@ -20,6 +20,7 @@ import { getProperty } from '../properties/service.js'
 import { gmailInput, readCalendarEvent, readFreeBusy, readGmailResult, runOnce } from '../integrations/run.js'
 import { finishRun, getSetting, startRun } from '../automations/store.js'
 import { addDays, describeInZone, hhmm, todayIn, utcToZoned, zonedToUtc } from '../time.js'
+import { emit } from '../events/bus.js'
 
 const SLOT_STEP_MIN = 30
 const LEAD_TIME_MS = 30 * 60 * 1000 // no slot that starts in the next 30 minutes
@@ -50,7 +51,7 @@ function toPublic(db, row) {
     confirmationStatus: row.confirmation_status, confirmationDetail: row.confirmation_detail,
     ended: Date.parse(row.end_at) <= Date.now(), outcomeAt: row.outcome_at,
     feedback: fb ? { status: fb.status, submittedAt: fb.submitted_at } : null,
-    createdAt: row.created_at, updatedAt: row.updated_at
+    requestedByBuyer: Boolean(row.requested_by), createdAt: row.created_at, updatedAt: row.updated_at
   }
 }
 
@@ -65,7 +66,7 @@ export const getViewing = (db, userId, id) => toPublic(db, own(db, userId, id))
 export function listViewings(db, userId, { leadId } = {}) {
   const rows = leadId
     ? db.prepare('SELECT * FROM viewings WHERE user_id = ? AND lead_id = ? ORDER BY start_at DESC').all(userId, leadId)
-    : db.prepare("SELECT * FROM viewings WHERE user_id = ? AND status != 'draft' ORDER BY start_at DESC LIMIT 200").all(userId)
+    : db.prepare("SELECT * FROM viewings WHERE user_id = ? AND (status != 'draft' OR requested_by IS NOT NULL) ORDER BY start_at DESC LIMIT 200").all(userId)
   return rows.map((r) => toPublic(db, r))
 }
 
@@ -134,6 +135,7 @@ function checkProperties(db, propertyIds) {
     const p = Number.isInteger(id) && getProperty(db, id)
     if (!p) throw validationError({ properties: 'One of the properties no longer exists.' })
     if (p.is_sample) throw validationError({ properties: `${p.title} is a sample listing, not a real property, so it cannot be viewed.` })
+    if (p.listing_state !== 'published' || p.status !== 'available') throw validationError({ properties: `${p.title} is not on the market, so it cannot be viewed.` })
     return p
   })
 }
@@ -141,9 +143,10 @@ function checkProperties(db, propertyIds) {
 const locationOf = (props) => props.map((p) => [p.address, p.locality, p.city].filter(Boolean).join(', ')).join(' | ').slice(0, 300)
 
 /** A viewing to review before booking. Nothing is sent to Google Calendar yet. */
-export function draftViewing(db, user, input) {
+export function draftViewing(db, user, input, { requestedBy = null } = {}) {
   const cfg = viewingSettings(db, user.id)
   const lead = requireLead(db, Number(input?.leadId))
+  if (lead.assigned_agent_id !== user.id) throw new AppError(404, 'lead_not_found', 'No such lead.')
   const props = checkProperties(db, input?.propertyIds)
   const minutes = checkDuration(input?.durationMinutes ?? cfg.durationMinutes)
   const start = Date.parse(input?.start)
@@ -154,10 +157,16 @@ export function draftViewing(db, user, input) {
   const note = typeof input?.note === 'string' ? input.note.trim().slice(0, 500) : null
   const id = randomUUID()
   const ts = now()
-  db.prepare(`INSERT INTO viewings (id, user_id, lead_id, property_ids, calendar_connection_id, calendar_id, start_at, end_at, timezone, location, invite_lead, note, status, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`)
-    .run(id, user.id, lead.id, JSON.stringify(props.map((p) => p.id)), cfg.calendarConnectionId, cfg.calendarId, new Date(start).toISOString(),
-      new Date(start + minutes * 60000).toISOString(), cfg.timezone, locationOf(props), inviteLead ? 1 : 0, note || null, ts, ts)
+  transaction(db, () => {
+    db.prepare(`INSERT INTO viewings (id, user_id, lead_id, property_ids, calendar_connection_id, calendar_id, start_at, end_at, timezone, location, invite_lead, note, status, requested_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)`)
+      .run(id, user.id, lead.id, JSON.stringify(props.map((p) => p.id)), cfg.calendarConnectionId, cfg.calendarId, new Date(start).toISOString(),
+        new Date(start + minutes * 60000).toISOString(), cfg.timezone, locationOf(props), inviteLead ? 1 : 0, note || null, requestedBy, ts, ts)
+    if (requestedBy) {
+      logActivity(db, lead.id, 'viewing_requested', `The buyer requested a viewing on ${describeInZone(new Date(start).toISOString(), cfg.timezone)}`, { viewingId: id }, 'buyer', requestedBy)
+      emit(db, 'viewing.requested', { subjectType: 'viewing', subjectId: id, actorId: requestedBy, agentId: user.id, dedupeKey: `viewing.requested:${id}` })
+    }
+  })
   return { viewing: getViewing(db, user.id, id), confirmationWillBeSent: cfg.confirmation === 'gmail' && Boolean(lead.email) }
 }
 
@@ -251,6 +260,7 @@ export async function bookViewing(db, vs, user, id, { confirmNotInCalendar = fal
   transaction(db, () => {
     db.prepare("UPDATE viewings SET status = 'booked', event_id = ?, event_link = ?, error = NULL, updated_at = ? WHERE id = ?").run(read.eventId, read.link, now(), id)
     logActivity(db, row.lead_id, 'viewing_booked', `Viewing booked in Google Calendar for ${describeInZone(row.start_at, row.timezone)}`, { viewingId: id, eventId: read.eventId }, 'calendar', user.id)
+    emit(db, 'viewing.booked', { subjectType: 'viewing', subjectId: id, actorId: user.id, agentId: user.id, payload: { eventId: read.eventId }, dedupeKey: `viewing.booked:${id}:${row.start_at}` })
   })
   console.log(`[viewing] ${id} booked calendar_event=${read.eventId}`)
   const note = await notifyLead(db, vs, user, row, cfg, 'booked')
@@ -273,7 +283,7 @@ export async function resendConfirmation(db, vs, user, id) {
 }
 
 /** Cancels: deletes the calendar event first (if there is one); the viewing is cancelled only when that works. */
-export async function cancelViewing(db, vs, user, id, { notifyLead: tell = true } = {}) {
+export async function cancelViewing(db, vs, user, id, { notifyLead: tell = true, actorId = null } = {}) {
   const row = own(db, user.id, id)
   if (row.status === 'cancelled') return { viewing: toPublic(db, row) }
   if (['completed', 'no_show'].includes(row.status)) throw new AppError(409, 'viewing_closed', 'This viewing already took place (or was missed).')
@@ -293,7 +303,8 @@ export async function cancelViewing(db, vs, user, id, { notifyLead: tell = true 
   const wasBooked = row.status === 'booked'
   transaction(db, () => {
     db.prepare("UPDATE viewings SET status = 'cancelled', outcome_at = ?, updated_at = ? WHERE id = ?").run(now(), now(), id)
-    logActivity(db, row.lead_id, 'viewing_cancelled', `Viewing on ${describeInZone(row.start_at, row.timezone)} cancelled${wasBooked ? ' and removed from Google Calendar' : ''}`, { viewingId: id }, 'calendar', user.id)
+    logActivity(db, row.lead_id, 'viewing_cancelled', `Viewing on ${describeInZone(row.start_at, row.timezone)} cancelled${wasBooked ? ' and removed from Google Calendar' : ''}`, { viewingId: id }, 'calendar', actorId ?? user.id)
+    emit(db, 'viewing.cancelled', { subjectType: 'viewing', subjectId: id, actorId: actorId ?? user.id, agentId: user.id, dedupeKey: `viewing.cancelled:${id}` })
   })
   let note = null
   if (wasBooked && tell && row.confirmation_status === 'sent') note = await notifyLead(db, vs, user, row, { timezone: 'Asia/Kolkata', ...cfg }, 'cancelled')
@@ -325,6 +336,7 @@ export async function rescheduleViewing(db, vs, user, id, { start, durationMinut
     transaction(db, () => {
       db.prepare("UPDATE viewings SET start_at = ?, end_at = ?, ended_noticed_at = NULL, updated_at = ? WHERE id = ?").run(moved.start_at, moved.end_at, now(), id)
       logActivity(db, row.lead_id, 'viewing_rescheduled', `Viewing moved to ${describeInZone(moved.start_at, row.timezone)}`, { viewingId: id }, 'calendar', user.id)
+      emit(db, 'viewing.rescheduled', { subjectType: 'viewing', subjectId: id, actorId: user.id, agentId: user.id, dedupeKey: `viewing.rescheduled:${id}:${moved.start_at}` })
     })
   } catch {
     throw new AppError(409, 'slot_taken', 'You already have another viewing at that time.')
@@ -344,6 +356,7 @@ export function setOutcome(db, user, id, outcome) {
     db.prepare('UPDATE viewings SET status = ?, outcome_at = ?, updated_at = ? WHERE id = ?').run(outcome, now(), now(), id)
     db.prepare("UPDATE reminders SET status = 'done', updated_at = ? WHERE dedupe_key = ?").run(now(), `viewing:${id}`)
     logActivity(db, row.lead_id, `viewing_${outcome}`, `Viewing on ${describeInZone(row.start_at, row.timezone)} ${outcome === 'completed' ? 'took place' : 'did not happen (no-show)'}`, { viewingId: id }, 'calendar', user.id)
+    if (outcome === 'completed') emit(db, 'viewing.completed', { subjectType: 'viewing', subjectId: id, actorId: user.id, agentId: user.id, dedupeKey: `viewing.completed:${id}` })
   })
   return own(db, user.id, id)
 }
@@ -362,4 +375,85 @@ export function noticeEndedViewings(db) {
     })
   }
   return rows.length
+}
+
+// ---- The buyer's side. A registered buyer books through the agent assigned to them, in that agent's calendar.
+
+function buyerContext(db, buyer) {
+  const prof = db.prepare('SELECT lead_id, matching_consent FROM buyer_profiles WHERE user_id = ?').get(buyer.id)
+  const lead = prof?.lead_id ? getLead(db, prof.lead_id) : null
+  if (!lead) throw new AppError(409, 'no_requirements', 'Save your requirements first.')
+  if (!lead.assigned_agent_id) throw new AppError(409, 'no_agent', 'No agent is assigned to you yet, so viewings cannot be booked. An agent will pick up your requirements soon.')
+  const agent = db.prepare("SELECT id, name, email, role FROM users WHERE id = ? AND role = 'agent'").get(lead.assigned_agent_id)
+  if (!agent) throw new AppError(409, 'no_agent', 'Your agent is no longer available.')
+  const s = getSetting(db, agent.id, 'viewing_scheduler')
+  if (!s.enabled) throw new AppError(409, 'agent_calendar_off', `${agent.name} does not take viewing requests in DealSaathi yet. Contact them directly.`)
+  return { lead, agent: { ...agent } }
+}
+
+/** Free times in the assigned agent's real calendar, for one listing the buyer can see. */
+export async function buyerSlots(db, vs, buyer, { propertyId, date }) {
+  const { agent } = buyerContext(db, buyer)
+  checkProperties(db, [propertyId])
+  const out = await freeSlots(db, vs, agent, { date })
+  return { ...out, agentName: agent.name }
+}
+
+/** A requested viewing: free in the agent's calendar now, booked only when the agent confirms (re-checked then). */
+export async function requestViewing(db, vs, buyer, input) {
+  const { lead, agent } = buyerContext(db, buyer)
+  const ids = Array.isArray(input?.propertyIds) ? input.propertyIds : [input?.propertyId]
+  const start = Date.parse(input?.start)
+  const cfg = viewingSettings(db, agent.id)
+  if (!Number.isFinite(start)) throw validationError({ start: 'Choose a time slot.' })
+  const date = utcToZoned(new Date(start).toISOString(), cfg.timezone).date
+  const free = await freeSlots(db, vs, agent, { date })
+  if (!free.slots.some((sl) => Date.parse(sl.start) === start)) throw new AppError(409, 'slot_taken', 'That time is no longer free. Choose another slot.')
+  const open = db.prepare("SELECT COUNT(*) AS n FROM viewings WHERE lead_id = ? AND status = 'draft' AND requested_by IS NOT NULL").get(lead.id).n
+  if (open >= 5) throw new AppError(409, 'too_many_requests', 'You already have 5 viewing requests waiting for your agent.')
+  const note = typeof input?.note === 'string' ? input.note.trim().slice(0, 300) : null
+  const { viewing } = draftViewing(db, agent, { leadId: lead.id, propertyIds: ids, start: new Date(start).toISOString(), inviteLead: Boolean(lead.email), note }, { requestedBy: buyer.id })
+  return { viewing: buyerView(db, db.prepare('SELECT * FROM viewings WHERE id = ?').get(viewing.id)) }
+}
+
+function buyerView(db, row) {
+  const agent = db.prepare('SELECT name FROM users WHERE id = ?').get(row.user_id)
+  const fb = db.prepare('SELECT status FROM feedback_requests WHERE viewing_id = ?').get(row.id)
+  return {
+    id: row.id, when: describeInZone(row.start_at, row.timezone), startAt: row.start_at, status: row.status === 'draft' ? 'requested' : row.status,
+    agentName: agent?.name ?? null, durationMinutes: Math.round((Date.parse(row.end_at) - Date.parse(row.start_at)) / 60000),
+    properties: JSON.parse(row.property_ids).map((id) => { const p = getProperty(db, id); return p ? { id, title: p.title, area: [p.locality, p.city].filter(Boolean).join(', ') } : { id, title: '(listing removed)' } }),
+    feedbackGiven: fb?.status === 'submitted'
+  }
+}
+
+export function listBuyerViewings(db, buyer) {
+  const prof = db.prepare('SELECT lead_id FROM buyer_profiles WHERE user_id = ?').get(buyer.id)
+  if (!prof?.lead_id) return []
+  return db.prepare("SELECT * FROM viewings WHERE lead_id = ? AND (status != 'draft' OR requested_by IS NOT NULL) ORDER BY start_at DESC LIMIT 100").all(prof.lead_id).map((r) => buyerView(db, r))
+}
+
+/** The buyer's own viewing, or a 404. */
+export function buyerViewing(db, buyer, id) {
+  const prof = db.prepare('SELECT lead_id FROM buyer_profiles WHERE user_id = ?').get(buyer.id)
+  const row = prof?.lead_id ? db.prepare('SELECT * FROM viewings WHERE id = ? AND lead_id = ?').get(id, prof.lead_id) : null
+  if (!row) throw new AppError(404, 'viewing_not_found', 'No such viewing.')
+  return row
+}
+
+/** The buyer withdraws a request, or cancels a booked viewing (the agent's calendar event is removed first). */
+export async function buyerCancel(db, vs, buyer, id) {
+  const row = buyerViewing(db, buyer, id)
+  const agent = db.prepare('SELECT id, name, email, role FROM users WHERE id = ?').get(row.user_id)
+  await cancelViewing(db, vs, { ...agent }, id, { actorId: buyer.id })
+  return { viewing: buyerView(db, db.prepare('SELECT * FROM viewings WHERE id = ?').get(id)) }
+}
+
+/** Viewings on a seller's listings: when and the state only; never who the buyer is. */
+export function listListingViewings(db, seller) {
+  const mine = new Set(db.prepare('SELECT id FROM properties WHERE owner_user_id = ?').all(seller.id).map((r) => r.id))
+  if (!mine.size) return []
+  return db.prepare("SELECT * FROM viewings WHERE status IN ('booked','completed','no_show','cancelled') ORDER BY start_at DESC LIMIT 500").all()
+    .filter((v) => JSON.parse(v.property_ids).some((id) => mine.has(id)))
+    .map((v) => ({ id: v.id, when: describeInZone(v.start_at, v.timezone), status: v.status, properties: JSON.parse(v.property_ids).filter((id) => mine.has(id)).map((id) => ({ id, title: getProperty(db, id)?.title })) }))
 }

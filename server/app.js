@@ -4,6 +4,13 @@ import { join } from 'node:path'
 import { now } from './db.js'
 import { AppError } from './errors.js'
 import { createLead, deleteLead, leadStats, listActivities, listLeads, requireLead, updateLead } from './leads/service.js'
+import { allow, requireAgentLead } from './access.js'
+import { createEventProcessor, listEvents } from './events/bus.js'
+import { createHandlers } from './events/handlers.js'
+import { listDeliveries, listNotifications, markAllRead, markRead } from './notifications/service.js'
+import { agentForSeller, buyerRecommendations, claimLead, getProfile, listAgents, saveBuyerRequirements, transferLead, unassignedPool, updateAgentProfile, updateSellerProfile } from './profiles/service.js'
+import { storedMatchesForLead } from './matching/engine.js'
+import { verifyAccess } from './integrations/run.js'
 import { cancelAction, confirmAction, handleMessage, loadConversation } from './assistant/service.js'
 import { createAuth } from './auth.js'
 import { createHash, timingSafeEqual } from 'node:crypto'
@@ -12,10 +19,10 @@ import { curatedApps, requireCuratedServiceId } from './integrations/apps.js'
 import { GMAIL, cancelFollowup, draftFollowup, draftRecommendation, followupSetup, fromOptions, listFollowups, prepareFollowup, sendFollowup } from './followups/service.js'
 import { createAutomationEngine } from './automations/engine.js'
 import { listReminders, setReminderStatus } from './automations/reminders.js'
-import { bookViewing, cancelViewing, draftViewing, freeSlots, getViewing, listViewings, rescheduleViewing, resendConfirmation, setOutcome } from './viewings/service.js'
-import { baseUrl, listFeedback, onViewingCompleted, publicFeedback, resendFeedback, submitFeedback } from './feedback/service.js'
-import { checkDueNow, createTenancy, recordManualPayment, rentOverview, tenancyDetail, updateTenancy, waiveDue } from './rent/service.js'
-import { addSampleProperties, createProperty, deleteProperty, dismissMatch, listProperties, listPropertyMatches, matchPropertiesFor, requireProperty, updateProperty } from './properties/service.js'
+import { bookViewing, buyerCancel, buyerSlots, cancelViewing, draftViewing, freeSlots, getViewing, listBuyerViewings, listListingViewings, listViewings, requestViewing, rescheduleViewing, resendConfirmation, setOutcome } from './viewings/service.js'
+import { baseUrl, listFeedback, onViewingCompleted, publicFeedback, resendFeedback, submitBuyerFeedback, submitFeedback } from './feedback/service.js'
+import { checkDueNow, createTenancy, partyTenancies, partyTenancy, recordManualPayment, rentOverview, tenancyDetail, updateTenancy, waiveDue } from './rent/service.js'
+import { addSampleProperties, createProperty, deleteProperty, dismissMatch, listProperties, listPropertyMatches, setAgentForSeller, setListingState, updateProperty, viewProperty } from './properties/service.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 // The official browser half of viasocket-apps (connect()), served as-is from the installed package.
@@ -48,8 +55,17 @@ const sameHost = (origin, host) => {
  */
 export function createApp({ db, ai, vs = { configured: false }, auth = createAuth({ db }), behindProxy = false, scheduler = { available: false, secret: null } }) {
   const automations = createAutomationEngine({ db, vs, scheduler })
+  setAgentForSeller(agentForSeller)
+  // The processing path for platform events (see events/bus.js): kicked after each change, by the scheduler, and on start.
+  const events = createEventProcessor({ db, handlers: createHandlers({ db, notifyThrough: automations.notifyThrough, leadAlertMessage: automations.leadAlertMessage }) })
   const app = express()
   app.locals.automations = automations
+  app.locals.events = events
+  // Any request that wrote something may have queued events: process them once the answer is on its way.
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') res.on('finish', () => { if (res.statusCode < 400) events.kick() })
+    next()
+  })
   app.disable('x-powered-by')
   if (behindProxy) app.set('trust proxy', 1)
   app.use(express.json({ limit: '50kb' }))
@@ -81,11 +97,57 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
     res.status(database === 'ok' ? 200 : 503).json({ ok: database === 'ok', database, ai: ai.configured ? 'configured' : 'not_configured', viasocket: vs.configured ? 'configured' : 'not_configured', access: auth.mode, time: now() })
   })
 
-  app.get('/api/dashboard', (req, res) => res.json(leadStats(db)))
+  // ---- Who am I, my profile, my notifications (every role)
+  app.get('/api/me', (req, res) => res.json({ user: req.user, profile: getProfile(db, req.user) }))
+  app.patch('/api/me/profile', (req, res) => {
+    if (req.user.role === 'agent') return res.json({ profile: updateAgentProfile(db, req.user, req.body || {}) })
+    if (req.user.role === 'seller') return res.json({ profile: updateSellerProfile(db, req.user, req.body || {}) })
+    res.json({ profile: saveBuyerRequirements(db, req.user, { ...req.body, requirements: {} }) })
+  })
+  app.get('/api/notifications', (req, res) => res.json(listNotifications(db, req.user.id, { unreadOnly: req.query.unread === '1', limit: req.query.limit })))
+  app.post('/api/notifications/read-all', (req, res) => res.json(markAllRead(db, req.user.id)))
+  app.post('/api/notifications/:id/read', (req, res) => res.json(markRead(db, req.user.id, parseId(req.params.id))))
+
+  // ---- Buyers: requirements, recommendations, viewings, feedback
+  app.put('/api/me/requirements', allow('buyer'), (req, res) => res.json({ profile: saveBuyerRequirements(db, req.user, req.body || {}) }))
+  app.get('/api/me/recommendations', allow('buyer'), (req, res) => res.json(buyerRecommendations(db, req.user)))
+  app.get('/api/me/viewings', allow('buyer'), (req, res) => res.json({ viewings: listBuyerViewings(db, req.user) }))
+  const buyerHits = new Map()
+  const limitBuyer = (req) => { // each slot lookup reads the agent's calendar: keep it to a human pace
+    const e = buyerHits.get(req.user.id)
+    if (!e || e.reset < Date.now()) buyerHits.set(req.user.id, { n: 1, reset: Date.now() + 15 * 60 * 1000 })
+    else if (++e.n > 40) throw new AppError(429, 'too_many_requests', 'Too many availability checks. Try again in a few minutes.')
+  }
+  app.get('/api/me/viewing-slots', allow('buyer'), async (req, res) => { limitBuyer(req); res.json(await buyerSlots(db, vs, req.user, { propertyId: Number(req.query.propertyId), date: req.query.date })) })
+  app.post('/api/me/viewings', allow('buyer'), async (req, res) => { limitBuyer(req); res.status(201).json(await requestViewing(db, vs, req.user, req.body || {})) })
+  app.post('/api/me/viewings/:id/cancel', allow('buyer'), async (req, res) => res.json(await buyerCancel(db, vs, req.user, parseUuid(req.params.id, 'viewing'))))
+  app.post('/api/me/viewings/:id/feedback', allow('buyer'), (req, res) => res.json(submitBuyerFeedback(db, req.user, parseUuid(req.params.id, 'viewing'), req.body || {})))
+  // ---- Tenants and landlords: their tenancies (read), landlords record payments they received
+  app.get('/api/me/tenancies', allow('buyer', 'seller'), (req, res) => res.json({ tenancies: partyTenancies(db, req.user) }))
+  app.get('/api/me/tenancies/:id', allow('buyer', 'seller'), (req, res) => res.json(partyTenancy(db, req.user, parseId(req.params.id))))
+  app.post('/api/me/rent/dues/:id/payments', allow('seller'), async (req, res) => res.json(await recordManualPayment(db, vs, req.user, parseId(req.params.id), req.body)))
+  // ---- Sellers: viewings on their listings (no buyer details)
+  app.get('/api/me/listing-viewings', allow('seller'), (req, res) => res.json({ viewings: listListingViewings(db, req.user) }))
+
+  // ---- Agents: dashboard, the unassigned pool, the event log
+  app.get('/api/dashboard', allow('agent'), (req, res) => res.json(leadStats(db, req.user.id)))
+  app.get('/api/agents', allow('agent'), (req, res) => res.json({ agents: listAgents(db) }))
+  app.get('/api/pool', allow('agent'), (req, res) => res.json({ leads: unassignedPool(db) }))
+  app.post('/api/pool/:id/claim', allow('agent'), (req, res) => res.json({ lead: claimLead(db, req.user, parseId(req.params.id)) }))
+  app.get('/api/events', allow('agent'), (req, res) => res.json({ events: listEvents(db, { agentId: req.user.id, status: ['failed', 'pending', 'done'].includes(req.query.status) ? req.query.status : null }) }))
+  app.get('/api/deliveries', allow('agent'), (req, res) => res.json({ deliveries: listDeliveries(db, req.user.id) }))
+
+  // Everything below about leads, the assistant, follow-ups, automations, integrations, agent viewings,
+  // feedback and rent management is for agents only.
+  for (const path of ['/api/leads', '/api/assistant', '/api/followups', '/api/automations', '/api/integrations', '/api/viewings', '/api/feedback', '/api/rent', '/api/reminders']) app.use(path, allow('agent'))
 
   app.get('/api/leads', (req, res) => {
     const { q, customer_type, status, location, follow_up, limit, offset } = req.query
-    res.json(listLeads(db, { q, customer_type, status, location, follow_up: follow_up === '1', limit, offset }))
+    res.json(listLeads(db, { agentId: req.user.id, q, customer_type, status, location, follow_up: follow_up === '1', limit, offset }))
+  })
+  // Agents' own routes on one lead first check that it is theirs (else 404).
+  app.use('/api/leads/:id', (req, res, next) => {
+    try { requireAgentLead(db, req.user, parseId(req.params.id)); next() } catch (error) { next(error) }
   })
 
   // The form sends an Idempotency-Key per opened form: a double click or a retry returns the first answer.
@@ -97,8 +159,8 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
       if (seen) return res.status(seen.status).json({ ...JSON.parse(seen.response), replayed: true })
     }
     const { lead: fields, allowSameName } = req.body || {}
+    // lead.created is queued in the same transaction: matching and New Lead Alert run from the event queue.
     const lead = createLead(db, fields, { via: 'form', allowSameName: allowSameName === true, userId: req.user.id })
-    automations.onLeadCreated(lead, req.user, 'form') // trigger: New Lead Alert (runs after the save, in the background)
     const body = { lead }
     if (key) db.prepare('INSERT INTO idempotency_keys (key, scope, status, response, created_at) VALUES (?, ?, 201, ?, ?)').run(key, 'create_lead', JSON.stringify(body), now())
     res.status(201).json(body)
@@ -131,43 +193,43 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
 
   app.post('/api/assistant/actions/:id/confirm', (req, res) => {
     const { fields, allowSameName } = req.body || {}
-    const result = confirmAction(db, parseUuid(req.params.id, 'action'), { fields, allowSameName: allowSameName === true, userId: req.user.id })
-    if (!result.alreadySaved && result.lead) automations.onLeadCreated(result.lead, req.user, 'assistant')
-    res.json(result)
+    res.json(confirmAction(db, parseUuid(req.params.id, 'action'), { fields, allowSameName: allowSameName === true, userId: req.user.id }))
   })
+  app.post('/api/leads/:id/transfer', (req, res) => res.json({ lead: transferLead(db, req.user, parseId(req.params.id), req.body?.agentId) }))
 
   app.post('/api/assistant/actions/:id/cancel', (req, res) => {
     res.json(cancelAction(db, parseUuid(req.params.id, 'action'), req.user.id))
   })
 
-  // ---- Properties and matching. Saving a property recomputes its buyer matches in the same transaction.
+  // ---- Listings. Saving or publishing queues property.* events; matching runs from the queue, for every role.
   app.get('/api/properties', (req, res) => {
-    const { q, listing_type, city, status } = req.query
-    res.json({ properties: listProperties(db, { q, listing_type, city, status }) })
+    const { scope, q, listing_type, city, status } = req.query
+    res.json({ properties: listProperties(db, req.user, { scope: ['mine', 'market'].includes(scope) ? scope : undefined, q, listing_type, city, status }) })
   })
-  // Trigger: New Property → Buyer Matching, in the same transaction as the save (unless the broker turned it off).
-  app.post('/api/properties', (req, res) => {
-    const match = automations.matchingEnabledFor(req.user.id)
-    const out = createProperty(db, req.body?.property, { userId: req.user.id, match })
-    automations.recordMatching(req.user.id, out.property, out.matching)
-    res.status(201).json(out)
+  app.post('/api/properties', allow('agent', 'seller'), (req, res) => {
+    const out = createProperty(db, req.body?.property, { actor: req.user, publish: typeof req.body?.publish === 'boolean' ? req.body.publish : undefined })
+    res.status(201).json({ property: viewProperty(db, req.user, out.property.id) })
   })
-  app.post('/api/properties/samples', (req, res) => res.status(201).json({ properties: addSampleProperties(db, req.user.id) }))
+  app.post('/api/properties/samples', allow('agent'), (req, res) => res.status(201).json({ properties: addSampleProperties(db, req.user) }))
   app.get('/api/properties/:id', (req, res) => {
-    const id = parseId(req.params.id)
-    res.json({ property: requireProperty(db, id), matches: listPropertyMatches(db, id) })
+    const property = viewProperty(db, req.user, parseId(req.params.id))
+    const matches = req.user.role === 'buyer' ? null : listPropertyMatches(db, property.id, req.user)
+    res.json({ property, ...(matches ? (property.mine || req.user.role === 'agent' ? matches : { matches: [], otherBuyers: matches.otherBuyers }) : {}) })
   })
-  app.patch('/api/properties/:id', (req, res) => {
-    const match = automations.matchingEnabledFor(req.user.id)
-    const out = updateProperty(db, parseId(req.params.id), req.body?.property, { userId: req.user.id, match })
-    automations.recordMatching(req.user.id, out.property, out.matching)
-    res.json(out)
+  app.patch('/api/properties/:id', allow('agent', 'seller'), (req, res) => {
+    const out = updateProperty(db, parseId(req.params.id), req.body?.property, { actor: req.user })
+    res.json({ property: viewProperty(db, req.user, out.property.id) })
   })
-  app.delete('/api/properties/:id', (req, res) => res.json({ deleted: true, property: deleteProperty(db, parseId(req.params.id)) }))
-  app.post('/api/properties/:id/matches/:leadId/dismiss', (req, res) => res.json(dismissMatch(db, parseId(req.params.id), parseId(req.params.leadId))))
+  for (const action of ['publish', 'unpublish', 'archive']) {
+    app.post(`/api/properties/:id/${action}`, allow('agent', 'seller'), (req, res) => {
+      const out = setListingState(db, req.user, parseId(req.params.id), action)
+      res.json({ property: viewProperty(db, req.user, out.property.id) })
+    })
+  }
+  app.delete('/api/properties/:id', allow('agent', 'seller'), (req, res) => res.json({ deleted: true, property: deleteProperty(db, req.user, parseId(req.params.id)) }))
+  app.post('/api/properties/:id/matches/:leadId/dismiss', allow('agent'), (req, res) => res.json(dismissMatch(db, req.user, parseId(req.params.id), parseId(req.params.leadId))))
   app.get('/api/leads/:id/matches', (req, res) => {
-    const lead = requireLead(db, parseId(req.params.id))
-    res.json({ matches: matchPropertiesFor(db, lead).map(({ property, match }) => ({ property, ...match })) })
+    res.json({ matches: storedMatchesForLead(db, parseId(req.params.id)).map(({ property, ...m }) => ({ property, ...m })) })
   })
 
   // ---- Integrations: only the curated apps, each connected through the official Connect popup
@@ -176,8 +238,8 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
     requireViasocket(vs)
     const [apps, { connections, live, error }] = await Promise.all([curatedApps(vs), listUserConnections(db, vs, req.user.id)])
     res.json({
-      apps: apps.map(({ slug, name, purpose, usedBy, inUse, serviceId, iconUrl, actions, error: appError }) => ({
-        slug, name, purpose, usedBy, inUse, serviceId, iconUrl, actions, error: appError,
+      apps: apps.map(({ slug, name, purpose, usedBy, inUse, liveBlocked, serviceId, iconUrl, actions, error: appError }) => ({
+        slug, name, purpose, usedBy, inUse, liveBlocked, serviceId, iconUrl, actions, error: appError,
         connections: connections.filter((c) => serviceId && c.serviceId === serviceId)
       })),
       live,
@@ -205,6 +267,7 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   })
   app.post('/api/integrations/connections/:id/reconnect', async (req, res) => res.json(await reconnectDetails(db, vs, req.user.id, parseId(req.params.id))))
   app.delete('/api/integrations/connections/:id', async (req, res) => res.json(await disconnect(db, vs, req.user.id, parseId(req.params.id))))
+  app.post('/api/integrations/connections/:id/verify', async (req, res) => { requireViasocket(vs); res.json(await verifyAccess(db, vs, req.user.id, parseId(req.params.id))) })
 
   // ---- Emails to a lead through the broker's Gmail: follow-ups and property recommendations
   const gmailId = async () => {
@@ -217,7 +280,9 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   }
   app.get('/api/leads/:id/followups', async (req, res) => {
     const id = parseId(req.params.id)
-    res.json({ ...followupSetup(db, req.user.id, id, await gmailId()), viasocket: vs.configured, ai: ai.configured, followups: listFollowups(db, id) })
+    const lead = requireLead(db, id)
+    const consent = !lead.buyer_user_id || Boolean(db.prepare('SELECT allow_agent_email FROM buyer_profiles WHERE user_id = ?').get(lead.buyer_user_id)?.allow_agent_email)
+    res.json({ ...followupSetup(db, req.user.id, id, await gmailId()), viasocket: vs.configured, ai: ai.configured, emailConsent: consent, followups: listFollowups(db, id) })
   })
   app.get('/api/followups/from-options', async (req, res) => res.json({ options: await fromOptions(db, vs, req.user.id, parseId(req.query.connectionId)) }))
   app.post('/api/leads/:id/followups/draft', async (req, res) => res.json(await draftFollowup(db, ai, req.user, parseId(req.params.id))))
@@ -225,6 +290,13 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   app.post('/api/leads/:id/followups', async (req, res) => res.status(201).json(await prepareFollowup(db, vs, req.user, parseId(req.params.id), req.body)))
   app.post('/api/followups/:id/send', async (req, res) => res.json(await sendFollowup(db, vs, req.user, parseUuid(req.params.id, 'followup'))))
   app.post('/api/followups/:id/cancel', (req, res) => res.json(cancelFollowup(db, req.user, parseUuid(req.params.id, 'followup'))))
+  app.post('/api/events/:id/retry', allow('agent'), (req, res) => {
+    const id = parseId(req.params.id)
+    const e = db.prepare('SELECT agent_id, actor_id FROM domain_events WHERE id = ?').get(id)
+    if (!e || (e.agent_id !== req.user.id && e.actor_id !== req.user.id)) throw new AppError(404, 'event_not_found', 'No such event.')
+    if (!events.retry(id)) throw new AppError(409, 'not_failed', 'Only an event that failed can be retried.')
+    res.json({ retried: true })
+  })
 
   // ---- Real estate automations: DealSaathi's own seven, configured here and run by this server
   const automationKey = (key) => {
@@ -243,7 +315,7 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   app.get('/api/viewings/slots', async (req, res) => res.json(await freeSlots(db, vs, req.user, {
     date: req.query.date, durationMinutes: req.query.durationMinutes ? Number(req.query.durationMinutes) : undefined, except: req.query.except ? parseUuid(req.query.except, 'viewing') : null
   })))
-  app.post('/api/viewings', (req, res) => res.status(201).json(draftViewing(db, req.user, req.body)))
+  app.post('/api/viewings', (req, res) => { requireAgentLead(db, req.user, Number(req.body?.leadId)); res.status(201).json(draftViewing(db, req.user, req.body)) })
   app.get('/api/viewings/:id', (req, res) => res.json({ viewing: getViewing(db, req.user.id, parseUuid(req.params.id, 'viewing')) }))
   app.post('/api/viewings/:id/book', async (req, res) => res.json(await bookViewing(db, vs, req.user, parseUuid(req.params.id, 'viewing'), { confirmNotInCalendar: req.body?.confirmNotInCalendar === true })))
   app.post('/api/viewings/:id/cancel', async (req, res) => res.json(await cancelViewing(db, vs, req.user, parseUuid(req.params.id, 'viewing'), { notifyLead: req.body?.notifyLead !== false })))
@@ -293,9 +365,14 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
     const given = Buffer.from(createHash('sha256').update(req.get('authorization') || '').digest('hex'))
     const wanted = Buffer.from(createHash('sha256').update(`Bearer ${scheduler.secret || ''}`).digest('hex'))
     if (!scheduler.secret || !timingSafeEqual(given, wanted)) return res.status(401).type('text').send('unauthorized')
+    const before = await events.drain() // anything a crash or a failed attempt left in the queue
     const { reminders: t, viewingsEnded, rent } = await automations.runScheduled('Scheduled check')
-    res.type('text').send(`Follow-ups: ${t.brokers} broker(s), ${t.created} new reminder(s), ${t.notified} notification(s) sent, ${t.failed} failed. ` +
-      `Viewings ended: ${viewingsEnded}. Rent: ${rent.brokers} broker(s), ${rent.sent} reminder(s) sent, ${rent.failed} failed, ${rent.verified} payment(s) verified.`)
+    const after = await events.drain()
+    const pending = db.prepare("SELECT COUNT(*) AS n FROM domain_events WHERE status IN ('pending','processing')").get().n
+    const failed = db.prepare("SELECT COUNT(*) AS n FROM domain_events WHERE status = 'failed'").get().n
+    res.type('text').send(`Events: ${before.done + after.done} processed, ${before.retry + after.retry} to retry, ${pending} waiting, ${failed} failed in total. ` +
+      `Follow-ups: ${t.brokers} agent(s), ${t.created} new reminder(s), ${t.notified} notification(s) sent, ${t.failed} failed. ` +
+      `Viewings ended: ${viewingsEnded}. Rent: ${rent.brokers} agent(s), ${rent.sent} reminder(s) sent, ${rent.failed} failed, ${rent.verified} payment(s) verified.`)
   })
 
   // The buyer's feedback page: a standalone page with no app code. The token in its URL is never sent on as a referrer.
