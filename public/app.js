@@ -2107,6 +2107,7 @@ const AGENT_ACTION_STATE = {
 const agentListingCard = (l) => `<article class="card"><h2><a href="#/browse/${Number(l.id)}">${esc(l.title)}</a></h2>
   <div><strong>${esc(l.price_text)}</strong> · ${esc([l.locality, l.city].filter(Boolean).join(', '))}${l.score != null ? ` <span class="badge">${Number(l.score)}/100</span>` : ''}</div>
   ${l.reasons?.length || l.gaps?.length ? `<ul class="small">${(l.reasons || []).map((x) => `<li>${esc(x)}</li>`).join('')}${(l.gaps || []).map((g) => `<li class="muted">Unknown: ${esc(g)}</li>`).join('')}</ul>` : ''}
+  ${l.flags?.length ? `<div class="notice warn small">This listing’s own text includes ${l.flags.map((f) => (f === 'contact_details' ? 'contact details' : 'instructions addressed to an assistant')).join(' and ')}. DealSaathi does not endorse it: request viewings only through DealSaathi.</div>` : ''}
   <a class="btn ghost small" href="#/browse/${Number(l.id)}">Open listing</a></article>`
 function agentActionHtml(a) {
   if (!a) return ''

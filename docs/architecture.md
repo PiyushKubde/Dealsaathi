@@ -90,8 +90,10 @@ One loop per buyer message (`POST /api/agent/messages`, buyers only). Each step 
 answer. The server validates the decision and runs the tool **in-process as the signed-in buyer**; the model never
 gets SQL, HTTP, shell or other users' data.
 
-- **Tools** (`tools.js`) wrap existing functions: `get_my_requirements` (profile), `search_listings`
-  (`listProperties` market scope + `scoreMatch`, with the buyer's feedback exclusions), `get_listing` (`viewProperty`),
+- **Tools** (`tools.js`) wrap existing functions: `get_my_requirements` (profile), `search_listings` (every
+  published, available, real listing that could match: the validated budget, bedrooms and type narrow it in SQL,
+  `canViewProperty` decides visibility, `scoreMatch` ranks, the buyer's feedback exclusions apply; above 5,000
+  candidates it reports itself incomplete instead of silently truncating), `get_listing` (`viewProperty`),
   `get_my_recommendations` (`buyerRecommendations`), `get_viewing_slots` (`buyerSlots`: the agent's real free/busy,
   read only) and `propose_viewing_request` (prepares an `agent_actions` row; sends nothing).
 - **Criteria guard**: for budget, bedrooms, type and buy/rent, the buyer's newest message that states (or explicitly
@@ -105,7 +107,12 @@ gets SQL, HTTP, shell or other users' data.
   time left of 60 s per message (the conversation lock lasts the turn plus 30 s); no identical call twice; one message at
   a time per conversation; 20 messages per 10 minutes and 20 calendar checks per 15 minutes per buyer; prepared requests
   expire after 30 minutes. A sentence stating a booking as done is rejected ("booked only after…" is fine). Listings
-  from earlier turns are shown again only while still on the market.
+  from earlier turns are shown again only while still on the market. The claim check works per clause: a real
+  condition ("only after", "once", "until") or negation ("not yet") allows it; "can"/"will" do not.
+- **Untrusted listing text** (`untrusted.js`): seller titles and amenities with text addressed to an AI or contact
+  details (phone numbers, emails, links) reach the model only as a cleaned copy, flagged as such; the page shows the
+  real listing with a warning. Server-written replies use cleaned titles, and model replies containing contact
+  details or links are refused.
 - **Live check** (`scripts/live-agent-check.mjs`): the real viaSocket AI against a throwaway database of made-up listings
   and the Calendar stand-in; never confirms a request. Run only with approval: it makes real AI calls.
 - **Records** (schema v8, new tables only): `agent_conversations` (with working context: listings and free times

@@ -9,10 +9,12 @@ import { getSetting } from '../automations/store.js'
 import { getLead } from '../leads/service.js'
 import { PROPERTY_TYPES } from '../leads/validate.js'
 import { buyerRecommendations, getProfile } from '../profiles/service.js'
-import { listProperties, scoreMatch, viewProperty, withExclusions } from '../properties/service.js'
+import { getProperty, scoreMatch, viewProperty, withExclusions } from '../properties/service.js'
+import { canViewProperty, propertyView } from '../access.js'
 import { addDays, todayIn } from '../time.js'
 import { buyerSlots } from '../viewings/service.js'
 import { inr, parseRequest, toRupees } from './parse.js'
+import { cardFlags, cleanText } from './untrusted.js'
 
 /** Bad arguments from the model: reported back to it, never shown as a server error. */
 export class ToolInputError extends Error {
@@ -55,12 +57,15 @@ const rupees = (amount, unit, name) => {
 
 /** A listing as the model and the page see it: no address, owner or notes (propertyView already removed them). */
 function card(p, match = null) {
-  return {
+  const c = {
     id: p.id, title: String(p.title).slice(0, 120), listing_type: p.listing_type, property_type: p.property_type, bedrooms: p.bedrooms ?? null,
     price: p.price, price_text: `${inr(p.price)}${p.listing_type === 'rent' ? '/month' : ''}`, area_sqft: p.area_sqft ?? null,
     locality: p.locality ?? null, city: p.city, amenities: Array.isArray(p.amenities) ? p.amenities.slice(0, 6).map((a) => String(a).slice(0, 40)) : [],
     ...(match ? { score: match.score, reasons: match.reasons, gaps: match.gaps } : {})
   }
+  // Seller text with contact details or text addressed to an AI: the page warns; the model gets a cleaned copy.
+  const flags = cardFlags(c)
+  return flags ? { ...c, flags } : c
 }
 
 function buyerLead(db, user) {
@@ -100,6 +105,24 @@ function describeCriteria(c) {
   return [c.bedrooms ? `${c.bedrooms} BHK` : null, c.property_type ? c.property_type.replace('_', ' ') : null, c.location,
     c.budget_min ? `from ${inr(c.budget_min)}` : null, c.budget_max ? `up to ${inr(c.budget_max)}` : null, c.listing_type === 'rent' ? 'to rent' : 'to buy'].filter(Boolean).join(' · ')
 }
+
+/**
+ * Every listing that could match, not a recent slice: the validated hard criteria (scoreMatch excludes on each of
+ * them) narrow the set in SQL, and canViewProperty stays the authority on what this buyer may see. Above
+ * MAX_CANDIDATES the search says it is incomplete instead of silently missing listings.
+ */
+export const MAX_CANDIDATES = 5000
+function candidates(db, user, listingType, { budget_max = null, bedrooms = null, property_type = null } = {}) {
+  const where = ["listing_state = 'published'", 'is_sample = 0', "status = 'available'", 'listing_type = ?']
+  const params = [listingType]
+  if (budget_max != null) { where.push('price <= ?'); params.push(budget_max) }
+  if (bedrooms != null) { where.push('(bedrooms = ? OR bedrooms IS NULL)'); params.push(bedrooms) } // unknown bedrooms is a gap, not a miss
+  if (property_type) { where.push('property_type = ?'); params.push(property_type) }
+  const rows = db.prepare(`SELECT id FROM properties WHERE ${where.join(' AND ')} ORDER BY id LIMIT ?`).all(...params, MAX_CANDIDATES + 1)
+  const list = rows.slice(0, MAX_CANDIDATES).map((r) => getProperty(db, r.id)).filter((p) => canViewProperty(user, p)).map((p) => propertyView(user, p))
+  return { list, incomplete: rows.length > MAX_CANDIDATES }
+}
+const marketSize = (db, listingType) => db.prepare("SELECT COUNT(*) AS n FROM properties WHERE listing_state = 'published' AND is_sample = 0 AND status = 'available' AND listing_type = ?").get(listingType).n
 
 function rank(pool, criteria) {
   return pool.map((p) => ({ p, m: scoreMatch(criteria, p) })).filter((x) => x.m)
@@ -162,8 +185,9 @@ export const TOOLS = {
       const listingType = c.listing_type || (lead?.customer_type === 'tenant' ? 'rent' : 'sale')
       const base = { customer_type: listingType === 'rent' ? 'tenant' : 'buyer', preferred_location: c.location, bedrooms: c.bedrooms, budget_max: c.budget_max, budget_min: c.budget_min, property_type: c.property_type }
       const criteria = { ...base, excludedPropertyIds: lead?.excludedPropertyIds || [], excluded_localities: lead?.excluded_localities || null }
-      // listProperties(market) for a buyer: published, available, real listings only.
-      const pool = listProperties(ctx.db, ctx.user, { scope: 'market', listing_type: listingType, limit: 200 })
+      const main = candidates(ctx.db, ctx.user, listingType, c)
+      const pool = main.list
+      let incomplete = main.incomplete
       const ranked = rank(pool, criteria)
       const withoutFeedback = rank(pool, base).length
       const used = { ...c, listing_type: listingType, limit: undefined }
@@ -171,14 +195,20 @@ export const TOOLS = {
       if (ranked.length < 3) {
         relaxations = {}
         // How many would fit (in total) if the buyer relaxed one thing: for the model to offer, never to apply.
-        if (c.budget_max) relaxations.would_fit_with_budget_10_percent_higher = rank(pool, { ...criteria, budget_max: Math.round(c.budget_max * 1.1) }).length
-        if (c.bedrooms) relaxations.would_fit_with_any_bedroom_count = rank(pool, { ...criteria, bedrooms: null }).length
-        if (c.property_type) relaxations.would_fit_with_any_property_type = rank(pool, { ...criteria, property_type: null }).length
+        const count = (relaxed, sqlCriteria) => {
+          const set = candidates(ctx.db, ctx.user, listingType, sqlCriteria)
+          incomplete = incomplete || set.incomplete
+          return rank(set.list, relaxed).length
+        }
+        if (c.budget_max) { const budget = Math.round(c.budget_max * 1.1); relaxations.would_fit_with_budget_10_percent_higher = count({ ...criteria, budget_max: budget }, { ...c, budget_max: budget }) }
+        if (c.bedrooms) relaxations.would_fit_with_any_bedroom_count = count({ ...criteria, bedrooms: null }, { ...c, bedrooms: null })
+        if (c.property_type) relaxations.would_fit_with_any_property_type = count({ ...criteria, property_type: null }, { ...c, property_type: null })
         relaxations.would_fit_in_any_location = rank(pool, { ...criteria, preferred_location: null }).length
       }
       return {
         criteria_used: { ...used, summary: describeCriteria(used), budget_max_text: c.budget_max ? inr(c.budget_max) : null },
-        considered: pool.length, matched: ranked.length, left_out_by_your_feedback: Math.max(0, withoutFeedback - ranked.length),
+        considered: marketSize(ctx.db, listingType), matched: ranked.length, incomplete,
+        ...(incomplete ? { incomplete_note: `More than ${MAX_CANDIDATES} listings fit the filters, so not all were ranked. Ask the buyer to narrow the search.` } : {}), left_out_by_your_feedback: Math.max(0, withoutFeedback - ranked.length),
         listings: ranked.slice(0, c.limit).map(({ p, m }) => card(p, m)),
         relaxations,
         how_ranked: 'Location 35 (area) or 25 (city), within budget 30, exact bedrooms 25, property type 10. Over budget, other bedroom counts or another place are left out.'
@@ -197,7 +227,7 @@ export const TOOLS = {
       return { property_id: id }
     },
     run: (ctx, a) => ({ listing: card(viewProperty(ctx.db, ctx.user, a.property_id)) }),
-    label: (a, r) => `Opened ${r.listing.title}`
+    label: (a, r) => `Opened ${cleanText(r.listing.title) || 'the listing'}`
   },
 
   get_my_recommendations: {
@@ -229,8 +259,8 @@ export const TOOLS = {
       calendarRead(ctx.user.id)
       const r = await buyerSlots(ctx.db, ctx.vs, ctx.user, { propertyId: a.property_id, date: a.date })
       const slots = r.slots.map((s) => ({ start: s.start, label: s.label }))
-      ctx.state.offers = [{ property_id: a.property_id, title: listing.title, date: a.date, timezone: r.timezone, agent_name: r.agentName, slots, at: now() }, ...(ctx.state.offers || [])].slice(0, 3)
-      return { property_id: a.property_id, title: listing.title, agent_name: r.agentName, date: a.date, timezone: r.timezone, free_times: slots.slice(0, MAX_SLOTS), total_free: slots.length }
+      ctx.state.offers = [{ property_id: a.property_id, title: cleanText(listing.title), date: a.date, timezone: r.timezone, agent_name: r.agentName, slots, at: now() }, ...(ctx.state.offers || [])].slice(0, 3)
+      return { property_id: a.property_id, title: cleanText(listing.title), agent_name: r.agentName, date: a.date, timezone: r.timezone, free_times: slots.slice(0, MAX_SLOTS), total_free: slots.length }
     },
     label: (a, r) => `Checked ${r.agent_name}'s calendar on ${a.date}: ${r.total_free} free time${r.total_free === 1 ? '' : 's'}`
   },
@@ -258,7 +288,7 @@ export const TOOLS = {
       ctx.db.prepare(`INSERT INTO agent_actions (id, conversation_id, user_id, type, params, status, expires_at, created_at, updated_at)
                       VALUES (?, ?, ?, 'request_viewing', ?, 'awaiting_confirmation', ?, ?, ?)`)
         .run(id, ctx.conversationId, ctx.user.id, JSON.stringify({ propertyIds: a.property_ids, start: a.start, timezone: a.offer.timezone }), new Date(Date.now() + ACTION_TTL_MS).toISOString(), now(), now())
-      return { action_id: id, listings: listings.map((l) => l.title), when: `${a.offer.date} ${slot.label} (${a.offer.timezone})`, agent_name: a.offer.agent_name }
+      return { action_id: id, listings: listings.map((l) => cleanText(l.title)), when: `${a.offer.date} ${slot.label} (${a.offer.timezone})`, agent_name: a.offer.agent_name }
     },
     label: () => 'Prepared a viewing request for you to confirm'
   }

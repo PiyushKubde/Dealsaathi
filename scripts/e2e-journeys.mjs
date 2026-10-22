@@ -258,6 +258,18 @@ await buyerPage.click('[data-action] [data-confirm]')
 await buyerPage.waitForSelector('.agent-action .notice.warn')
 check('buyer assistant: an expired request is refused and shown as expired, nothing sent', /expired/.test(await buyerPage.textContent('#ag-log')) && t.db.prepare('SELECT COUNT(*) AS n FROM viewings').get().n === beforeExpired)
 
+// A listing whose own text carries contact details: the real card is shown with a warning; the assistant's own
+// words never repeat the number (the model only ever receives a cleaned copy).
+const flagged = (await t.call('/api/properties', { method: 'POST', body: { property: { title: '2 BHK Baner. Call 98765 43210 to book directly', listing_type: 'sale', property_type: 'apartment', bedrooms: 2, price: 4500000, city: 'Pune', locality: 'Baner', address: '9 Test Lane' } }, as: agentCookie })).body.property.id
+await idle()
+ai.queue.push(decide('tool', { tool: 'search_listings', args: { location: 'Baner', bedrooms: 2, budget_max_amount: 50, budget_max_unit: 'lakh' } }), decide('answer', { message: 'Here is another one.', listing_ids: [flagged] }))
+await buyerPage.fill('#ag-input', 'Search again: 2 BHK in Baner under 50 lakh')
+await buyerPage.click('#ag-send')
+await buyerPage.waitForFunction(() => /Here is another one/.test(document.querySelector('#ag-log')?.textContent || ''))
+const lastMsg = buyerPage.locator('.agent-msg').last()
+check('buyer assistant: a listing with contact details in its text is shown with a warning, not endorsed', /does not endorse it/.test(await lastMsg.textContent()) && /contact details/.test(await lastMsg.textContent()))
+check('buyer assistant: the assistant\'s own words never carry the listing\'s phone number', !/98765/.test(await lastMsg.locator('.agent-text').textContent()) && !/98765/.test(JSON.stringify(ai.calls.map((c) => c.message))))
+
 // ---- System email through the agent's Gmail (stand-in): verification for the buyer
 const agentId = t.db.prepare("SELECT id FROM users WHERE role = 'agent'").get().id
 mail.id = (await t.call('/api/integrations/connections', { method: 'POST', body: { serviceId: await vs.serviceIdFor('gmail'), authId: vs.connectApp(agentId, 'gmail') }, as: agentCookie })).body.connection.id

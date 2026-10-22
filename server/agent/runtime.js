@@ -10,6 +10,7 @@ import { getProperty } from '../properties/service.js'
 import { requestViewing } from '../viewings/service.js'
 import { describeInZone, todayIn } from '../time.js'
 import { parseRequest } from './parse.js'
+import { cleanText, forModel, hasContact } from './untrusted.js'
 import { DECISION_SCHEMA, systemPrompt } from './prompt.js'
 import { MAX_SLOTS, TOOLS, ToolInputError, toolError, toolsFor } from './tools.js'
 
@@ -18,11 +19,16 @@ const RATE = { max: 20, windowMs: 10 * 60 * 1000 }
 const parse = (s) => (s ? JSON.parse(s) : null)
 const recent = new Map() // userId → message times, for the per-user rate limit
 
-// A reply may not claim what only the agent's confirmation does: a sentence stating a booking as done. Sentences
-// that explain the condition ("booked only after your agent confirms", "not booked yet") are fine.
-const CLAIM = /\b(booked|scheduled|confirmed|(?:added|put) (?:it )?(?:to|in(?:to)?) (?:your|the|their) calendar|calendar invite)\b/i
-const CONDITION = /\b(only|after|once|when|until|unless|if|not|never|yet|will|would|can|could|before|pending|waiting)\b|n't\b/i
-export const claimsBooking = (text) => String(text).split(/(?<=[.!?])\s+|\n+/).some((sentence) => CLAIM.test(sentence) && !CONDITION.test(sentence))
+// A reply may not claim what only the agent's confirmation does. Judged per clause (sentences split at
+// "but/however/although" and ; :): a clause that states a booking is a claim unless it carries a real condition
+// ("only after", "once", "when", "until", "if") or a negation ("not", "isn't", "nothing"). Ability or future words
+// ("can", "will") are not conditions: "I can confirm your viewing is booked" is a claim. This is a second line only;
+// nothing is sent without the buyer's Confirm, whatever the model says.
+const CLAIM = /\b(booked|scheduled|confirmed|reserved|(?:added|put) (?:it )?(?:to|in(?:to)?) (?:your|the|their) calendar|calendar invite)\b/i
+const CONDITION = /\b(after|once|when|until|unless|if|before)\b/i
+const NEGATION = /\b(not|never|nothing|no longer|none)\b|n['’]t\b/i
+const clauses = (text) => String(text).split(/(?<=[.!?])\s+|\n+/).flatMap((sentence) => sentence.split(/\b(?:but|however|although|though)\b|[;:]/i))
+export const claimsBooking = (text) => clauses(text).some((c) => CLAIM.test(c) && !CONDITION.test(c) && !NEGATION.test(c))
 
 function withTimeout(promise, ms, code) {
   let timer
@@ -65,6 +71,10 @@ function expireActions(db, userId) {
   db.prepare("UPDATE agent_actions SET status = 'expired', updated_at = ? WHERE user_id = ? AND status = 'awaiting_confirmation' AND expires_at < ?").run(now(), userId, now())
 }
 
+/** What the model may read of a tool result or request: listing text cleaned (untrusted.js). */
+const modelResult = (r) => ({ ...r, ...(r.listings ? { listings: r.listings.map(forModel) } : {}), ...(r.listing ? { listing: forModel(r.listing) } : {}) })
+const modelAction = (a) => ({ ...a, properties: a.properties.map((p) => ({ ...p, title: cleanText(p.title) || '(title withheld)' })) })
+
 /** The JSON the model reads each step. Compact, the user's own data only, no contact details. */
 function contextFor(db, ctx, turn) {
   const history = db.prepare('SELECT role, content FROM agent_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 9').all(ctx.conversationId).reverse().slice(0, -1)
@@ -72,10 +82,10 @@ function contextFor(db, ctx, turn) {
   return JSON.stringify({
     today: todayIn('Asia/Kolkata'), timezone: 'Asia/Kolkata', helping: 'a buyer',
     conversation: history.map((m) => ({ role: m.role, text: m.content.slice(0, 600) })),
-    listings_shown_earlier: stillVisible(db, ctx.user, ctx.state.shown).slice(0, 10),
+    listings_shown_earlier: stillVisible(db, ctx.user, ctx.state.shown).slice(0, 10).map(forModel),
     free_times_shown_earlier: (ctx.state.offers || []).map((o) => ({ property_id: o.property_id, title: o.title, date: o.date, timezone: o.timezone, agent_name: o.agent_name, free_times: o.slots.slice(0, MAX_SLOTS) })),
     criteria_in_use: ctx.state.criteria || null,
-    viewing_request_waiting_for_buyer_confirm: pending ? describeAction(db, pending) : null,
+    viewing_request_waiting_for_buyer_confirm: pending ? modelAction(describeAction(db, pending)) : null,
     this_turn: { buyer_message: turn.message, read_from_message: parseRequest(turn.message), steps: turn.observations },
     limits_left: { decisions: LIMITS.decisions - turn.decisions, tool_calls: LIMITS.toolCalls - turn.toolCalls }
   })
@@ -94,6 +104,7 @@ function readDecision(content, allowed) {
   }
   const message = typeof d.message === 'string' ? d.message.trim() : ''
   if (!message) return { error: 'message is required for ask and answer.' }
+  if (hasContact(message)) return { error: 'Do not include phone numbers, email addresses or links: viewings are arranged only through DealSaathi. Rephrase.' }
   if (claimsBooking(message)) return { error: 'Do not say a viewing is booked or in a calendar: only the agent\'s confirmation books it. Rephrase.' }
   const ids = Array.isArray(d.listing_ids) ? d.listing_ids.filter(Number.isInteger).slice(0, 10) : []
   return { decision: { type: d.type, message: message.slice(0, LIMITS.reply), listingIds: ids } }
@@ -231,9 +242,9 @@ export async function handleAgentMessage(db, ai, vs, user, { conversationId, mes
         if (tool.consequential) {
           action = { id: result.action_id }
           const a = describeAction(db, db.prepare('SELECT * FROM agent_actions WHERE id = ?').get(action.id))
-          return finish('awaiting_approval', `I have prepared a viewing request for ${a.properties.map((p) => p.title).join(', ')} at ${result.when ?? 'the time you chose'}. Nothing is sent yet: press Confirm to send it to ${result.agent_name ?? 'your agent'}. It is booked in their Google Calendar only after they confirm it.`)
+          return finish('awaiting_approval', `I have prepared a viewing request for ${a.properties.map((p) => cleanText(p.title) || 'the listing').join(', ')} at ${result.when ?? 'the time you chose'}. Nothing is sent yet: press Confirm to send it to ${result.agent_name ?? 'your agent'}. It is booked in their Google Calendar only after they confirm it.`)
         }
-        turn.observations.push({ tool: d.tool, result })
+        turn.observations.push({ tool: d.tool, result: modelResult(result) })
       } catch (error) {
         const e = toolError(error.code === 'tool_timeout' ? new AppError(504, 'tool_timeout', 'This step took too long.') : error)
         if (e.code === 'tool_failed' || e.code === 'tool_timeout') { turn.errors++; console.error(`[agent] run ${runId.slice(0, 8)} tool ${d.tool} failed: ${String(error?.message || error).slice(0, 200)}`) }
