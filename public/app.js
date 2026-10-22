@@ -859,7 +859,7 @@ async function renderIntegrations() {
         <p class="small muted">Used by: ${esc(a.usedBy.join(', '))}</p>
         ${a.liveBlocked ? `<div class="notice warn small"><strong>Not available for live use.</strong> ${esc(a.liveBlocked)}</div>` : a.inUse ? '' : '<div class="notice info small">DealSaathi does not use this app yet. You can connect it now; nothing will run on it until that feature is built.</div>'}
         ${a.error ? `<div class="notice err small">${esc(a.error)}</div>` : ''}
-        ${a.connections.length ? `<ul class="timeline">${a.connections.map((c) => `<li class="conn-row"><div style="flex:1;min-width:0"><strong>${esc(c.label || a.name)}</strong> ${STATUS_BADGE[c.status] || ''}
+        ${a.connections.length ? `<ul class="timeline">${a.connections.map((c) => `<li class="conn-row"><div class="conn-info"><strong>${esc(c.label || a.name)}</strong> ${STATUS_BADGE[c.status] || ''}
             <div class="small muted">connection #${c.id} · connected ${esc(fmtDate(c.createdAt))}${c.verification ? ` · access check ${esc(fmtDateTime(c.verification.at))}: <span style="color:${c.verification.status === 'ok' ? 'inherit' : 'var(--danger)'}">${esc(c.verification.detail)}</span>` : ' · access not checked yet'}</div></div>
             ${c.status === 'active' && a.inUse ? `<button class="btn ghost small" data-verify="${c.id}">Check access</button>` : ''}
             ${c.status === 'active' && ['gmail', 'slack', 'google-calendar'].includes(a.slug) ? `<button class="btn ghost small" data-livetest="${c.id}" data-slug="${a.slug}">Send test</button>` : ''}

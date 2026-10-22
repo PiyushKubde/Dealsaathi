@@ -519,6 +519,9 @@ test('Send test (stand-in for viaSocket): needs confirmation, records the provid
     const c = (await t.call(`/api/integrations/connections/${cal.id}/test`, { method: 'POST', body: { confirm: true } })).body
     assert.equal(c.status, 'sent')
     assert.match(c.detail, /created event evt\d+ .* and deleted it again/)
+    const created = vs.calls.filter((x) => x.name === 'runAction' && x.args[1] === 'vcalcreate').at(-1).args[2]
+    assert.equal(created.attendees, 'me@example.com', 'the owner only: required by the action, invites nobody else')
+    assert.equal(created.location, 'DealSaathi test')
     assert.equal((await t.call(`/api/integrations/connections/${slack.id}/test`, { method: 'POST', body: { confirm: true } })).status, 400, 'Slack needs a channel')
     vs.fail.runAction = vsError('channel_not_found', 404)
     const s = (await t.call(`/api/integrations/connections/${slack.id}/test`, { method: 'POST', body: { confirm: true, slackChannelId: 'C0LEADS' } })).body

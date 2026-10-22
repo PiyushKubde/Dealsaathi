@@ -135,6 +135,10 @@ export function fakeVs({ gmailServiceId = 'rowo0bqrhj5g' } = {}) {
         return { kind: 'calendar#freeBusy', timeMin: `${inputData.date}T00:00:00.000Z`, timeMax: `${inputData.date}T23:59:59.000Z`, calendars: { 'me@example.com': { busy: state.busy } } }
       }
       if (actionVersionId === VERSIONS.rowuitv4m6uy) {
+        // Like the real Create Calendar Event V23: every field its schema marks required must be non-empty
+        // (an empty attendees list was answered "Bad Request" in production).
+        const missing = ['calendar_id', 'summary', 'description', 'attendees', 'timeZone', 'starttime', 'startdate', 'meeting_duration', 'location'].filter((k) => !String(inputData[k] ?? '').trim())
+        if (missing.length) throw vsError('Bad Request', 400)
         const id = `evt${++events}`
         state.events[id] = { id, ...inputData }
         return { id, status: 'confirmed', htmlLink: `https://calendar.google.com/event?eid=${id}` }

@@ -328,11 +328,14 @@ export async function sendLiveTest(db, vs, user, connectionId, { slackChannelId,
     const calendars = await pickOptions(db, vs, user.id, connectionId, 'calendar_free_busy', 'calendar_id')
     const cal = calendars.find((c) => c.value === calendarId) || calendars.find((c) => c.value === 'primary') || calendars[0]
     if (!cal) throw new AppError(409, 'no_calendar', 'This Google account lists no calendar to test with.')
+    const owner = (row.label || '').split(',').map((x) => x.trim()).find((x) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(x)) || (/@/.test(cal.value) ? cal.value : null)
+    if (!owner) throw new AppError(409, 'calendar_owner_unknown', 'DealSaathi cannot tell which email owns this Google Calendar connection. Reconnect it and try again.')
     const tomorrow = new Date(Date.now() + 5.5 * 3600 * 1000 + 86400000).toISOString().slice(0, 10)
     const [y, m, d] = tomorrow.split('-')
     const created = await runOnce(db, vs, user.id, connectionId, 'calendar_create_event', {
       calendar_id: cal.value, summary: 'DealSaathi test event (deleted automatically)', description: `Created and removed by a DealSaathi test at ${stampText}.`,
-      attendees: '', timeZone: 'Asia/Kolkata', startdate: `${d}-${m}-${y}`, starttime: '09:00', meeting_duration: '00:15', location: '', status: 'confirmed', transparency: 'transparent'
+      // attendees and location are required by the action: the owner's own address (no invitation to anyone else).
+      attendees: owner, timeZone: 'Asia/Kolkata', startdate: `${d}-${m}-${y}`, starttime: '09:00', meeting_duration: '00:15', location: 'DealSaathi test', status: 'confirmed', transparency: 'transparent'
     })
     const ev = created.outcome === 'answered' ? readCalendarEvent(created.result) : { ok: false, unknown: created.outcome === 'unknown', reason: created.reason }
     if (!ev.ok) out = { status: ev.unknown ? 'unknown' : 'failed', detail: `Creating the test event: ${ev.reason}` }

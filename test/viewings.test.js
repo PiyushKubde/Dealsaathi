@@ -75,7 +75,8 @@ test('review → confirm: re-checks, creates the event with the documented input
     assert.equal(input.meeting_duration, '01:30')
     assert.equal(input.timeZone, TZ)
     assert.equal(input.transparency, 'opaque', 'the viewing blocks the slot')
-    assert.equal(input.attendees, '', 'no invitation unless the broker asks')
+    assert.equal(input.attendees, 'me@example.com', 'not inviting the lead: the calendar owner is the only attendee (the action requires one)')
+    assert.ok(Object.values(input).every((x) => x !== ''), 'no required field is sent empty')
     assert.match(input.location, /12 Baner Road, Baner, Pune/)
     assert.match(input.summary, /Rahul Sharma – 2 BHK in Baner/)
 
@@ -232,5 +233,24 @@ test('authorization, samples and setup: other brokers cannot touch it; sample li
     assert.equal(s.status, 400)
     assert.match(s.body.error.details.fields.properties, /sample listing/)
     assert.equal((await draft(t, { leadId: lead.id, propertyIds: [property.id], start: '2020-01-01T00:00:00Z' })).status, 400)
+  } finally { await t.close() }
+})
+
+test('regression: Google Calendar requires attendees — an uninvited viewing books with the owner as attendee; unknown owner is refused before claiming', async () => {
+  const { t, vs, lead, property } = await setup({ confirmation: 'none' })
+  try {
+    const d = (await draft(t, { leadId: lead.id, propertyIds: [property.id], start: at('10:00') })).body.viewing
+    const ok = (await book(t, d.id)).body.viewing
+    assert.equal(ok.status, 'booked', 'the real action refused an empty attendees list with Bad Request')
+    assert.equal(runs(vs, V.rowuitv4m6uy).at(-1).args[2].attendees, 'me@example.com')
+    // A connection whose label carries no email, on a non-email calendar id: refused cleanly, nothing claimed or sent.
+    t.db.prepare("UPDATE connections SET label = 'Work account'").run()
+    const d2 = (await draft(t, { leadId: lead.id, propertyIds: [property.id], start: at('11:00') })).body.viewing
+    const before = runs(vs, V.rowuitv4m6uy).length
+    const refused = await book(t, d2.id)
+    assert.equal(refused.status, 409)
+    assert.equal(refused.body.error.code, 'calendar_owner_unknown')
+    assert.equal(runs(vs, V.rowuitv4m6uy).length, before, 'no calendar call')
+    assert.equal(t.db.prepare('SELECT status FROM viewings WHERE id = ?').get(d2.id).status, 'draft', 'not stuck in booking')
   } finally { await t.close() }
 })

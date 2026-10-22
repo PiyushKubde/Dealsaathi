@@ -5,10 +5,12 @@
 //   calendar_id      PICK: the broker's calendar, chosen in the automation's settings
 //   summary          product data: "Property viewing: <lead> – <listing>"
 //   description      product data: the listings and their addresses
-//   attendees        the broker's choice per viewing: the lead's saved email, or "" (no invitation sent)
+//   attendees        REQUIRED (non-empty) by the action: the lead's saved email when the broker invites them, otherwise
+//                    the calendar owner's own address (the organiser: no invitation goes to anyone). An empty value
+//                    was answered "Bad Request" in production.
 //   timeZone         the broker's setting (one of the action's 20 zones)
 //   startdate/starttime/meeting_duration  the slot the broker picked, written in that zone (DD-MM-YYYY, HH:MM, HH:MM)
-//   location         product data: the listings' address, locality and city
+//   location         REQUIRED: the listings' address, locality and city (never empty)
 //   status           constant "confirmed"
 //   transparency     constant "opaque" (Busy), so the viewing blocks the slot in later free/busy checks
 //   colorId, recurrence, useDefault, visibility, guestsCanModify: left out on purpose (defaults)
@@ -179,7 +181,14 @@ export function draftViewing(db, user, input, { requestedBy = null } = {}) {
   return { viewing: getViewing(db, user.id, id), confirmationWillBeSent: cfg.confirmation === 'gmail' && Boolean(lead.email) }
 }
 
+/** The calendar owner's address: the connection's account email (viaSocket's label), else an email calendar id. */
+export function calendarOwnerEmail(db, connectionId, calendarId) {
+  const label = db.prepare('SELECT label FROM connections WHERE id = ?').get(connectionId)?.label || ''
+  return label.split(',').map((x) => x.trim()).find((x) => EMAIL_RE.test(x)) || (EMAIL_RE.test(calendarId || '') ? calendarId : null)
+}
+
 function eventInput(db, row) {
+  const owner = calendarOwnerEmail(db, row.calendar_connection_id, row.calendar_id)
   const lead = getLead(db, row.lead_id)
   const props = JSON.parse(row.property_ids).map((id) => getProperty(db, id)).filter(Boolean)
   const local = utcToZoned(row.start_at, row.timezone)
@@ -189,12 +198,12 @@ function eventInput(db, row) {
     summary: `Property viewing: ${lead.full_name} – ${props.map((p) => p.title).join(', ')}`.slice(0, 250),
     description: [`Viewing with ${lead.full_name}.`, '', 'Properties:', ...props.map((p) => `• ${p.title} (${[p.address, p.locality, p.city].filter(Boolean).join(', ')})`),
       ...(row.note ? ['', `Note: ${row.note}`] : []), '', 'Booked with DealSaathi.'].join('\n'),
-    attendees: row.invite_lead && lead.email ? lead.email : '',
+    attendees: row.invite_lead && lead.email ? lead.email : owner,
     timeZone: row.timezone,
     startdate: local.dmy,
     starttime: local.time,
     meeting_duration: hhmm(minutes),
-    location: row.location || '',
+    location: row.location || 'Address shared by your agent',
     status: 'confirmed',
     transparency: 'opaque'
   }
@@ -246,6 +255,9 @@ export async function bookViewing(db, vs, user, id, { confirmNotInCalendar = fal
   stillOnMarket(db, row)
 
   await recheck(db, vs, user, row, cfg)
+  // Built before the claim, so a missing owner address can never leave the viewing stuck in 'booking'.
+  const input = eventInput(db, row)
+  if (!input.attendees) throw new AppError(409, 'calendar_owner_unknown', 'DealSaathi cannot tell which email owns this Google Calendar connection. Reconnect Google Calendar on the Integrations page, or invite the lead to this viewing.')
   try {
     const claimed = db.prepare("UPDATE viewings SET status = 'booking', error = NULL, updated_at = ? WHERE id = ? AND status IN ('draft','failed','unknown')").run(now(), id)
     if (claimed.changes !== 1) throw new AppError(409, 'viewing_busy', 'This viewing is already being booked.')
@@ -255,7 +267,7 @@ export async function bookViewing(db, vs, user, id, { confirmNotInCalendar = fal
   }
 
   const runId = startRun(db, { userId: user.id, key: 'viewing_scheduler', trigger: 'Broker confirmed a viewing', subjectType: 'viewing', subjectId: id })
-  const ran = await runOnce(db, vs, user.id, row.calendar_connection_id, 'calendar_create_event', eventInput(db, row))
+  const ran = await runOnce(db, vs, user.id, row.calendar_connection_id, 'calendar_create_event', input)
   const read = ran.outcome === 'answered' ? readCalendarEvent(ran.result) : { ok: false, unknown: ran.outcome === 'unknown', reason: ran.reason }
   const lead = getLead(db, row.lead_id)
   if (!read.ok) {

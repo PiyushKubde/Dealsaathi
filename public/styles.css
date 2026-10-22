@@ -163,7 +163,9 @@ dialog::backdrop { background: rgba(0, 0, 0, .4); }
 .account + .sidebar-foot { margin-top: 0; }
 .btn.small { padding: .3rem .65rem; font-size: .82rem; }
 .badge.danger-badge { background: var(--danger-soft); color: var(--danger); }
-.conn-row { display: flex; align-items: center; gap: .75rem; }
+.conn-row { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+/* Integration cards are narrow: account details take the full width, the buttons wrap below them. */
+.int-card .conn-row .conn-info { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
 .app-icon { width: 28px; height: 28px; border-radius: 6px; object-fit: contain; background: #fff; flex: none; }
 .app-icon-fallback { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--muted); font-weight: 700; }
 .app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: .5rem; margin-top: .75rem; }
