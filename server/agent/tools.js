@@ -20,6 +20,15 @@ export class ToolInputError extends Error {
 }
 
 export const ACTION_TTL_MS = 30 * 60 * 1000
+const CALENDAR_READS = { max: 20, windowMs: 15 * 60 * 1000 }
+const calendarReads = new Map() // userId → times: each check reads the agent's real calendar through viaSocket
+function calendarRead(userId) {
+  const t = Date.now()
+  const list = (calendarReads.get(userId) || []).filter((x) => t - x < CALENDAR_READS.windowMs)
+  if (list.length >= CALENDAR_READS.max) throw new AppError(429, 'too_many_requests', 'Too many calendar checks in a short time. Try again in a few minutes.')
+  list.push(t)
+  calendarReads.set(userId, list)
+}
 const UNITS = ['rupees', 'thousand', 'lakh', 'crore']
 const TZ = 'Asia/Kolkata'
 const words = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter((w) => w.length > 2)
@@ -59,20 +68,31 @@ function buyerLead(db, user) {
 }
 
 /**
- * Where a search value may come from: the buyer's own messages in this conversation, their saved requirements,
- * or the criteria already in use. Anything else would be the model changing what the buyer asked for.
+ * What the buyer has asked for, field by field: the newest of their messages (ctx.userMessages, newest first) that
+ * states or explicitly lifts it ("any number of bedrooms"). Fields they never mentioned are undefined; for those
+ * the saved requirements or the criteria already in use may be used, never a value the model made up.
  */
-function allowedValues(ctx) {
+const FIELDS = ['bedrooms', 'budget_max', 'budget_min', 'property_type', 'listing_type']
+function stated(ctx) {
+  const out = {}
+  for (const text of ctx.userMessages) {
+    const h = parseRequest(text)
+    for (const f of FIELDS) {
+      if (f in out) continue
+      if (h.cleared.includes(f)) out[f] = null
+      else if (h[f] !== null && h[f] !== undefined) out[f] = h[f]
+    }
+  }
+  return out
+}
+function fallbackValues(ctx) {
   const saved = ctx.savedRequirements || {}
   const used = ctx.state.criteria || {}
-  const parsed = ctx.userMessages.map(parseRequest)
-  const from = (key, savedKey = key) => new Set([...parsed.map((h) => h[key]), saved[savedKey], used[key]].filter((v) => v !== null && v !== undefined))
-  return {
-    bedrooms: from('bedrooms'), budget_max: from('budget_max'), budget_min: from('budget_min'), property_type: from('property_type'),
-    listing_type: new Set([...from('listing_type'), ...(saved.customer_type === 'tenant' ? ['rent'] : saved.customer_type === 'buyer' ? ['sale'] : [])]),
-    placeWords: new Set([...ctx.userMessages.flatMap(words), ...words(saved.preferred_location), ...words(used.location)])
-  }
+  const savedType = saved.customer_type === 'tenant' ? 'rent' : saved.customer_type === 'buyer' ? 'sale' : null
+  return Object.fromEntries(FIELDS.map((f) => [f, new Set([f === 'listing_type' ? savedType : saved[f], used[f]].filter((v) => v !== null && v !== undefined))]))
 }
+const show = (key, v) => (v === null ? 'any' : key.startsWith('budget') ? inr(v) : v)
+const placeWords = (ctx) => new Set([...ctx.userMessages.flatMap(words), ...words(ctx.savedRequirements?.preferred_location), ...words(ctx.state.criteria?.location)])
 
 function describeCriteria(c) {
   return [c.bedrooms ? `${c.bedrooms} BHK` : null, c.property_type ? c.property_type.replace('_', ' ') : null, c.location,
@@ -117,14 +137,21 @@ export const TOOLS = {
       }
       const limit = int(a.limit, 'limit', 1, 10) ?? 5
       if (c.budget_min && c.budget_max && c.budget_min > c.budget_max) throw new ToolInputError('budget_min is above budget_max.')
-      const ok = allowedValues(ctx)
-      for (const key of ['bedrooms', 'budget_max', 'budget_min', 'property_type', 'listing_type']) {
-        if (c[key] !== null && !ok[key].has(c[key])) {
-          const said = [...ok[key]]
-          throw new ToolInputError(`${key} ${c[key]} is not what the buyer asked for${said.length ? ` (they said: ${said.map((v) => (key.startsWith('budget') ? inr(v) : v)).join(' or ')})` : ''}. Use only the buyer's own words or saved requirements; ask before changing them.`)
+      // Grounding: what the buyer said wins, exactly; a field they never mentioned may come from their saved
+      // requirements or the search already in use, or be left out. Anything else goes back to the model to ask.
+      const said = stated(ctx)
+      const fallback = fallbackValues(ctx)
+      for (const key of FIELDS) {
+        if (key in said) {
+          if (c[key] === said[key]) continue
+          if (said[key] === null) throw new ToolInputError(`${key}: the buyer said any, so leave it null.`)
+          throw new ToolInputError(`${key}: the buyer asked for ${show(key, said[key])}${c[key] === null ? '; include it, or ask before dropping it' : `, not ${show(key, c[key])}; use exactly that, or ask before changing it`}.`)
+        }
+        if (c[key] !== null && !fallback[key].has(c[key])) {
+          throw new ToolInputError(`${key} ${show(key, c[key])} is not something the buyer asked for or saved. Leave it null or ask them.`)
         }
       }
-      const extra = words(location).filter((w) => !ok.placeWords.has(w))
+      const extra = words(location).filter((w) => !placeWords(ctx).has(w))
       if (extra.length) throw new ToolInputError(`location "${location}" adds words the buyer did not say (${extra.join(', ')}). Use the place exactly as the buyer named it.`)
       return { ...c, limit }
     },
@@ -141,10 +168,11 @@ export const TOOLS = {
       let relaxations = null
       if (ranked.length < 3) {
         relaxations = {}
-        if (c.budget_max) relaxations.up_to_10_percent_over_budget = rank(pool, { ...criteria, budget_max: Math.round(c.budget_max * 1.1) }).length
-        if (c.bedrooms) relaxations.any_bedroom_count = rank(pool, { ...criteria, bedrooms: null }).length
-        if (c.property_type) relaxations.any_property_type = rank(pool, { ...criteria, property_type: null }).length
-        relaxations.anywhere = rank(pool, { ...criteria, preferred_location: null }).length
+        // How many would fit (in total) if the buyer relaxed one thing: for the model to offer, never to apply.
+        if (c.budget_max) relaxations.would_fit_with_budget_10_percent_higher = rank(pool, { ...criteria, budget_max: Math.round(c.budget_max * 1.1) }).length
+        if (c.bedrooms) relaxations.would_fit_with_any_bedroom_count = rank(pool, { ...criteria, bedrooms: null }).length
+        if (c.property_type) relaxations.would_fit_with_any_property_type = rank(pool, { ...criteria, property_type: null }).length
+        relaxations.would_fit_in_any_location = rank(pool, { ...criteria, preferred_location: null }).length
       }
       return {
         criteria_used: { ...used, summary: describeCriteria(used), budget_max_text: c.budget_max ? inr(c.budget_max) : null },
@@ -196,6 +224,7 @@ export const TOOLS = {
     },
     async run(ctx, a) {
       const listing = card(viewProperty(ctx.db, ctx.user, a.property_id))
+      calendarRead(ctx.user.id)
       const r = await buyerSlots(ctx.db, ctx.vs, ctx.user, { propertyId: a.property_id, date: a.date })
       const slots = r.slots.map((s) => ({ start: s.start, label: s.label }))
       ctx.state.offers = [{ property_id: a.property_id, title: listing.title, date: a.date, timezone: r.timezone, agent_name: r.agentName, slots, at: now() }, ...(ctx.state.offers || [])].slice(0, 3)

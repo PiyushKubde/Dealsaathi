@@ -2165,10 +2165,14 @@ async function renderAgentAssistant() {
         const { action } = await api(`/api/agent/actions/${card.dataset.action}/confirm`, { method: 'POST', body: {} })
         card.outerHTML = agentActionHtml(action)
         await load()
-      } catch (error) { toast(error.message); e.target.disabled = false }
+      } catch (error) {
+        toast(error.message)
+        if (error.status === 409) await load() // expired, cancelled or already sent: show its real state
+        else e.target.disabled = false
+      }
     })
     card.querySelector('[data-cancel]')?.addEventListener('click', async () => {
-      try { const { action } = await api(`/api/agent/actions/${card.dataset.action}/cancel`, { method: 'POST', body: {} }); card.outerHTML = agentActionHtml(action) } catch (error) { toast(error.message) }
+      try { const { action } = await api(`/api/agent/actions/${card.dataset.action}/cancel`, { method: 'POST', body: {} }); card.outerHTML = agentActionHtml(action) } catch (error) { toast(error.message); if (error.status === 409) await load() }
     })
   }
   const load = async () => {
@@ -2183,8 +2187,10 @@ async function renderAgentAssistant() {
       throw error
     }
   }
+  let sending = false
   const send = async (text) => {
-    if (!text.trim()) return
+    if (!text.trim() || sending) return // one message at a time (Enter and free-time buttons too)
+    sending = true
     const btn = document.getElementById('ag-send')
     btn.disabled = true
     if (log.querySelector('p.muted')) log.innerHTML = ''
@@ -2204,7 +2210,7 @@ async function renderAgentAssistant() {
       wait.className = 'msg error'
       wait.textContent = error.message
       if (error.status === 404) { conversationId = null; store.set('ds_agent_conversation', null) }
-    } finally { btn.disabled = false; input.focus() }
+    } finally { sending = false; btn.disabled = false; input.focus() }
   }
   form.addEventListener('submit', (e) => { e.preventDefault(); const text = input.value; input.value = ''; send(text) })
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit() } })

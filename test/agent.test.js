@@ -52,9 +52,11 @@ test('parse: Indian budgets, bedrooms, buy or rent, type and place are read dete
   const p = parseRequest(ASK)
   assert.deepEqual([p.bedrooms, p.budget_max, p.location], [2, 5000000, 'Vijay Nagar'])
   assert.equal(parseRequest('3bhk villa in Indore 1.2 crore budget').budget_max, 12000000)
-  assert.deepEqual(parseRequest('flat on rent in Baner below 25k'), { bedrooms: null, budget_max: 25000, budget_min: null, listing_type: 'rent', property_type: 'apartment', location: 'Baner', ambiguous_budget: false })
+  assert.deepEqual(parseRequest('flat on rent in Baner below 25k'), { bedrooms: null, budget_max: 25000, budget_min: null, listing_type: 'rent', property_type: 'apartment', location: 'Baner', ambiguous_budget: false, cleared: [] })
   assert.deepEqual([parseRequest('two bedroom apartment 40-50 lakhs').budget_min, parseRequest('two bedroom apartment 40-50 lakhs').budget_max], [4000000, 5000000])
   assert.equal(parseRequest('a house under Rs 48,00,000').budget_max, 4800000)
+  assert.equal(parseRequest('a flat or a house in Pune').property_type, null, 'two types named: neither is assumed')
+  assert.deepEqual(parseRequest('any number of bedrooms is fine').cleared, ['bedrooms'])
   const vague = parseRequest('2 BHK under 50')
   assert.equal(vague.budget_max, null, 'a bare 50 is not guessed to be lakh')
   assert.equal(vague.ambiguous_budget, true)
@@ -152,7 +154,7 @@ test('the model cannot silently change what the buyer asked for: budget, bedroom
     const r = await say(ASK)
     assert.equal(r.body.status, 'answered')
     assert.equal(r.body.steps.length, 1, 'only the search with the buyer\'s own criteria ran')
-    assert.match(JSON.parse(ai.calls[1].message).this_turn.steps[0].error.message, /budget_max 6000000 is not what the buyer asked for \(they said: ₹50 L or ₹55 L\)/)
+    assert.match(JSON.parse(ai.calls[1].message).this_turn.steps[0].error.message, /budget_max: the buyer asked for ₹50 L, not ₹60 L/)
     assert.equal(JSON.parse(ai.calls[2].message).this_turn.steps[1].result.criteria_used.budget_max, 5000000)
     const r2 = await say('Anything else?', r.body.conversationId)
     assert.equal(r2.body.steps.length, 0)
@@ -308,4 +310,98 @@ test('migration 8 adds the agent tables to a v7 database without touching its da
     for (const table of ['agent_conversations', 'agent_messages', 'agent_runs', 'agent_steps', 'agent_actions']) assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table), table)
     db.close()
   } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+// ---- Regression tests for defects found in review (each failed before its fix)
+
+test('review: the model cannot drop or swap a requirement the buyer stated (no silent widening)', async () => {
+  const ai = fakeAi(
+    tool('search_listings', { location: 'Vijay Nagar' }), // drops "2 BHK" and "under 50 lakh"
+    tool('search_listings', { ...SEARCH, budget_max_amount: 55 }), // the saved ₹55 L instead of the ₹50 L just said
+    answer('stopped'),
+  )
+  const { t, say } = await setup({ ai })
+  try {
+    const r = await say(ASK)
+    assert.equal(r.body.status, 'stopped')
+    assert.equal(r.body.steps.length, 0, 'no search ran')
+    assert.match(JSON.parse(ai.calls[1].message).this_turn.steps[0].error.message, /bedrooms: the buyer asked for 2/)
+    // A requirement the buyer explicitly lifts may then be left out.
+    ai.queue = [tool('search_listings', { location: 'Vijay Nagar', budget_max_amount: 50, budget_max_unit: 'lakh' }), answer('Here they are.')]
+    const r2 = await say('Show me any number of bedrooms', r.body.conversationId)
+    assert.equal(r2.body.status, 'answered')
+    assert.equal(r2.body.steps.length, 1)
+  } finally { await t.close() }
+})
+
+test('review: a correct explanation of when a viewing is booked is not mistaken for a booking claim', async () => {
+  const ai = fakeAi(answer('I can prepare a request. It is booked in your agent\'s Google Calendar only after they confirm it.'))
+  const { t, say } = await setup({ ai })
+  try {
+    const r = await say('how do viewings work?')
+    assert.equal(r.body.status, 'answered')
+  } finally { await t.close() }
+  const ai2 = fakeAi(answer('Your viewing is scheduled for tomorrow at 11.'), answer('ok'))
+  const s2 = await setup({ ai: ai2 })
+  try { assert.equal((await s2.say('status?')).body.reply, 'ok', 'a plain scheduling claim is still refused') } finally { await s2.t.close() }
+})
+
+test('review: a listing that left the market is not shown again from an earlier turn', async () => {
+  const ai = fakeAi(tool('search_listings', SEARCH), answer('Two fit.', []), answer('Still these.', []))
+  const { t, say, ids } = await setup({ ai })
+  try {
+    ai.queue[1] = answer('Two fit.', [ids.best, ids.second])
+    const r = await say(ASK)
+    assert.equal(r.body.listings.length, 2)
+    await t.call(`/api/properties/${ids.best}`, { method: 'PATCH', body: { property: { status: 'sold' } } })
+    ai.queue[0] = answer('Still these.', [ids.best, ids.second])
+    const r2 = await say('show them again', r.body.conversationId)
+    assert.deepEqual(r2.body.listings.map((l) => l.id), [ids.second])
+    assert.ok(!JSON.parse(ai.calls.at(-1).message).listings_shown_earlier.some((l) => l.id === ids.best), 'nor offered to the model')
+  } finally { await t.close() }
+})
+
+test('review: AI and tool waits are cut to the time left in the turn, so the conversation lock cannot lapse mid-turn', async () => {
+  const hang = { configured: true, calls: [], send: () => new Promise(() => {}) }
+  const { t, say } = await setup({ ai: hang })
+  const saved = { ...LIMITS }
+  Object.assign(LIMITS, { turnMs: 150, aiTimeoutMs: 30000 })
+  try {
+    const started = Date.now()
+    const r = await say(ASK)
+    assert.equal(r.body.status, 'failed')
+    assert.ok(Date.now() - started < 3000, `ended within the turn budget, not the 30 s AI timeout (${Date.now() - started} ms)`)
+  } finally { Object.assign(LIMITS, saved); await t.close() }
+})
+
+test('review: calendar availability checks through the assistant are capped per buyer', async () => {
+  const day = addDays(todayIn('Asia/Kolkata'), 2)
+  const ai = fakeAi()
+  const { t, say, ids, vs } = await setup({ ai })
+  try {
+    let conv = null
+    for (let i = 0; i < 6; i++) {
+      ai.queue.push(...[0, 1, 2, 3].map((n) => tool('get_viewing_slots', { property_id: ids.best, date: addDays(day, n + i * 4) })), answer('done'))
+      conv = (await say(`check ${i}`, conv)).body.conversationId
+    }
+    const reads = vs.calls.filter((c) => c.name === 'runAction' && c.args[1] === 'vcalfreebusy').length
+    assert.ok(reads <= 20, `at most 20 calendar reads in 15 minutes, got ${reads}`)
+    assert.ok(t.db.prepare("SELECT COUNT(*) AS n FROM agent_steps WHERE error_code = 'too_many_requests'").get().n > 0)
+  } finally { await t.close() }
+})
+
+test('review: cancelling an expired request reports its state instead of an error', async () => {
+  const day = addDays(todayIn('Asia/Kolkata'), 2)
+  const ai = fakeAi()
+  const { t, b, say, ids } = await setup({ ai })
+  try {
+    ai.queue.push(tool('get_viewing_slots', { property_id: ids.best, date: day }), ask('Which time?'))
+    const s = await say(`listing ${ids.best} on ${day}`)
+    ai.queue.push(tool('propose_viewing_request', { property_ids: [ids.best], start: s.body.offer.slots[0].start }))
+    const p = await say('first', s.body.conversationId)
+    t.db.prepare("UPDATE agent_actions SET expires_at = '2000-01-01T00:00:00.000Z'").run()
+    const c = await b(`/api/agent/actions/${p.body.action.id}/cancel`, { method: 'POST', body: {} })
+    assert.equal(c.status, 200)
+    assert.equal(c.body.action.status, 'expired')
+  } finally { await t.close() }
 })

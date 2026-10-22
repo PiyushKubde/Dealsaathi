@@ -36,7 +36,7 @@ function money(numText, unitWord) {
 export function parseRequest(text) {
   const s = String(text || '').replace(/\s+/g, ' ')
   const lower = s.toLowerCase()
-  const out = { bedrooms: null, budget_max: null, budget_min: null, listing_type: null, property_type: null, location: null, ambiguous_budget: false }
+  const out = { bedrooms: null, budget_max: null, budget_min: null, listing_type: null, property_type: null, location: null, ambiguous_budget: false, cleared: [] }
 
   const bhk = lower.match(/\b(\d)\s*-?\s*(?:bhk|rk|bed(?:room)?s?)\b/) || lower.match(/\b(one|two|three|four|five|six)\s*-?\s*(?:bhk|bed(?:room)?s?)\b/)
   if (bhk) out.bedrooms = Number(bhk[1]) || WORD_NUM[bhk[1]] || null
@@ -59,10 +59,15 @@ export function parseRequest(text) {
   if (/\b(rent|rental|renting|lease|on rent|per month|monthly rent)\b/.test(lower)) out.listing_type = 'rent'
   else if (/\b(buy|buying|purchase|for sale|to own)\b/.test(lower)) out.listing_type = 'sale'
 
-  if (/\b(apartment|flat)s?\b/.test(lower)) out.property_type = 'apartment'
-  else if (/\bvillas?\b/.test(lower)) out.property_type = 'villa'
-  else if (/\b(independent house|house|bungalow)s?\b/.test(lower)) out.property_type = 'independent_house'
-  else if (/\b(plot|land)s?\b/.test(lower)) out.property_type = 'plot'
+  // One property type only when exactly one is named ("a flat or a house" states none).
+  const types = [[/\b(apartment|flat)s?\b/, 'apartment'], [/\bvillas?\b/, 'villa'], [/\b(independent house|house|bungalow)s?\b/, 'independent_house'], [/\b(plot|land)s?\b/, 'plot']]
+    .filter(([re]) => re.test(lower)).map(([, t]) => t)
+  if (types.length === 1) out.property_type = types[0]
+
+  // A requirement the buyer explicitly lifts ("any number of bedrooms", "budget doesn't matter").
+  if (/\bany (?:number of )?(?:bhk|bed(?:room)?s?)\b|\b(?:bhk|bedrooms?) (?:doesn'?t|does not|don'?t|do not) matter\b/.test(lower)) out.cleared.push('bedrooms')
+  if (/\b(?:any|no) (?:budget|price)\b|\b(?:budget|price) (?:doesn'?t|does not) matter\b/.test(lower)) out.cleared.push('budget_max', 'budget_min')
+  if (/\bany (?:property )?type\b|\b(?:type|kind) (?:doesn'?t|does not) matter\b/.test(lower) || types.length > 1) out.cleared.push('property_type')
 
   // "near Vijay Nagar", "in Indore": capitalised place words after the preposition, up to the next clause.
   const places = []

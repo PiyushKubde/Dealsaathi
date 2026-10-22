@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto'
 import { now, transaction } from '../db.js'
 import { AppError } from '../errors.js'
-import { requireRole } from '../access.js'
+import { canViewProperty, requireRole } from '../access.js'
 import { getProperty } from '../properties/service.js'
 import { requestViewing } from '../viewings/service.js'
 import { describeInZone, todayIn } from '../time.js'
@@ -15,12 +15,14 @@ import { TOOLS, ToolInputError, toolError, toolsFor } from './tools.js'
 
 export const LIMITS = { decisions: 6, toolCalls: 4, errors: 2, aiTimeoutMs: 30000, toolTimeoutMs: 20000, turnMs: 60000, message: 1000, reply: 1500 }
 const RATE = { max: 20, windowMs: 10 * 60 * 1000 }
-const BUSY_MS = 90 * 1000
 const parse = (s) => (s ? JSON.parse(s) : null)
 const recent = new Map() // userId → message times, for the per-user rate limit
 
-// A reply may not claim what only the agent's confirmation does.
-const BOOKING_CLAIM = /\b(i(?:'ve| have)? booked|is (?:now )?booked|has been booked|booking (?:is )?confirmed|viewing is confirmed|(?:added|put) (?:it )?(?:to|in(?:to)?) (?:your|the|their) calendar|calendar invite (?:has been |was )?sent)\b/i
+// A reply may not claim what only the agent's confirmation does: a sentence stating a booking as done. Sentences
+// that explain the condition ("booked only after your agent confirms", "not booked yet") are fine.
+const CLAIM = /\b(booked|scheduled|confirmed|(?:added|put) (?:it )?(?:to|in(?:to)?) (?:your|the|their) calendar|calendar invite)\b/i
+const CONDITION = /\b(only|after|once|when|until|unless|if|not|never|yet|will|would|can|could|before|pending|waiting)\b|n't\b/i
+export const claimsBooking = (text) => String(text).split(/(?<=[.!?])\s+|\n+/).some((sentence) => CLAIM.test(sentence) && !CONDITION.test(sentence))
 
 function withTimeout(promise, ms, code) {
   let timer
@@ -56,6 +58,9 @@ function describeAction(db, row) {
   }
 }
 
+/** Cards from earlier turns are shown (or offered to the model) again only while the listing is still visible. */
+const stillVisible = (db, user, cards) => (cards || []).filter((c) => canViewProperty(user, getProperty(db, c.id)))
+
 function expireActions(db, userId) {
   db.prepare("UPDATE agent_actions SET status = 'expired', updated_at = ? WHERE user_id = ? AND status = 'awaiting_confirmation' AND expires_at < ?").run(now(), userId, now())
 }
@@ -67,7 +72,7 @@ function contextFor(db, ctx, turn) {
   return JSON.stringify({
     today: todayIn('Asia/Kolkata'), timezone: 'Asia/Kolkata', helping: 'a buyer',
     conversation: history.map((m) => ({ role: m.role, text: m.content.slice(0, 600) })),
-    listings_shown_earlier: (ctx.state.shown || []).slice(0, 10),
+    listings_shown_earlier: stillVisible(db, ctx.user, ctx.state.shown).slice(0, 10),
     free_times_shown_earlier: (ctx.state.offers || []).map((o) => ({ property_id: o.property_id, title: o.title, date: o.date, timezone: o.timezone, agent_name: o.agent_name, free_times: o.slots.slice(0, 16) })),
     criteria_in_use: ctx.state.criteria || null,
     viewing_request_waiting_for_buyer_confirm: pending ? describeAction(db, pending) : null,
@@ -89,7 +94,7 @@ function readDecision(content, allowed) {
   }
   const message = typeof d.message === 'string' ? d.message.trim() : ''
   if (!message) return { error: 'message is required for ask and answer.' }
-  if (BOOKING_CLAIM.test(message)) return { error: 'Do not say a viewing is booked or in a calendar: only the agent\'s confirmation books it. Rephrase.' }
+  if (claimsBooking(message)) return { error: 'Do not say a viewing is booked or in a calendar: only the agent\'s confirmation books it. Rephrase.' }
   const ids = Array.isArray(d.listing_ids) ? d.listing_ids.filter(Number.isInteger).slice(0, 10) : []
   return { decision: { type: d.type, message: message.slice(0, LIMITS.reply), listingIds: ids } }
 }
@@ -114,7 +119,7 @@ export async function handleAgentMessage(db, ai, vs, user, { conversationId, mes
   }
   // One turn at a time per conversation: a second message while one runs is refused, not interleaved.
   const locked = db.prepare('UPDATE agent_conversations SET busy_until = ? WHERE id = ? AND (busy_until IS NULL OR busy_until < ?)')
-    .run(new Date(Date.now() + BUSY_MS).toISOString(), conv.id, now()).changes
+    .run(new Date(Date.now() + LIMITS.turnMs + 30000).toISOString(), conv.id, now()).changes
   if (!locked) throw new AppError(409, 'agent_busy', 'The assistant is still working on your last message.')
 
   const runId = randomUUID()
@@ -123,7 +128,8 @@ export async function handleAgentMessage(db, ai, vs, user, { conversationId, mes
   const turn = { message: message.trim(), observations: [], decisions: 0, toolCalls: 0, errors: 0 }
   const ctx = {
     db, vs, user, conversationId: conv.id, state: parse(conv.state) || {},
-    userMessages: [...db.prepare("SELECT content FROM agent_messages WHERE conversation_id = ? AND role = 'user' ORDER BY id DESC LIMIT 10").all(conv.id).map((m) => m.content), message.trim()],
+    // Newest first: the buyer's latest word on a requirement wins (tools.js stated()).
+    userMessages: [message.trim(), ...db.prepare("SELECT content FROM agent_messages WHERE conversation_id = ? AND role = 'user' ORDER BY id DESC LIMIT 10").all(conv.id).map((m) => m.content)],
     savedRequirements: null
   }
   const pr = db.prepare('SELECT b.lead_id FROM buyer_profiles b WHERE b.user_id = ?').get(user.id)
@@ -147,8 +153,9 @@ export async function handleAgentMessage(db, ai, vs, user, { conversationId, mes
       steps.push(row)
     }
     const finish = (status, reply, { stopReason = null, listingIds = [] } = {}) => {
-      const listings = listingIds.map((id) => seen.get(id) || (ctx.state.shown || []).find((x) => x.id === id)).filter(Boolean)
-      if (seen.size) ctx.state.shown = [...seen.values(), ...(ctx.state.shown || []).filter((x) => !seen.has(x.id))].slice(0, 10)
+      const earlier = stillVisible(db, user, ctx.state.shown)
+      const listings = listingIds.map((id) => seen.get(id) || earlier.find((x) => x.id === id)).filter(Boolean)
+      ctx.state.shown = [...seen.values(), ...earlier.filter((x) => !seen.has(x.id))].slice(0, 10)
       const payload = { status, steps: steps.filter((s) => s.kind === 'tool' && s.label).map((s) => ({ label: s.label, status: s.status })), listings, offer, actionId: action?.id ?? null }
       transaction(db, () => {
         addMessage(db, conv.id, 'assistant', reply, payload)
@@ -165,10 +172,12 @@ export async function handleAgentMessage(db, ai, vs, user, { conversationId, mes
       if (turn.errors >= LIMITS.errors) return finish('stopped', 'I could not complete that reliably, so I stopped without doing anything. Please rephrase, or use Browse listings and My viewings directly.', { stopReason: 'too_many_errors' })
 
       turn.decisions++
+      // No wait may outlast the turn (the conversation lock is held for the turn plus a margin).
+      const left = () => Math.max(1, LIMITS.turnMs - (Date.now() - started))
       const t0 = Date.now()
       let reply
       try {
-        reply = await withTimeout(ai.send({ threadId: `ds-agent-${runId.slice(0, 13)}-${turn.decisions}`, message: contextFor(db, ctx, turn), prompt, responseType: 'json_schema', jsonSchema: DECISION_SCHEMA }, { userId: user.id }), LIMITS.aiTimeoutMs, 'ai_timeout')
+        reply = await withTimeout(ai.send({ threadId: `ds-agent-${runId.slice(0, 13)}-${turn.decisions}`, message: contextFor(db, ctx, turn), prompt, responseType: 'json_schema', jsonSchema: DECISION_SCHEMA }, { userId: user.id }), Math.min(LIMITS.aiTimeoutMs, left()), 'ai_timeout')
       } catch (error) {
         step({ kind: 'decision', status: 'error', code: error.code === 'ai_timeout' ? 'ai_timeout' : 'ai_error', ms: Date.now() - t0 })
         return finish('failed', error.code === 'ai_timeout' ? 'The AI service did not answer in time, so nothing was done. Please try again.' : 'The AI service is not answering right now, so nothing was done. Please try again later.', { stopReason: error.code === 'ai_timeout' ? 'ai_timeout' : 'ai_error' })
@@ -213,7 +222,7 @@ export async function handleAgentMessage(db, ai, vs, user, { conversationId, mes
       turn.toolCalls++
       const t1 = Date.now()
       try {
-        const result = await withTimeout(Promise.resolve().then(() => tool.run(ctx, args)), LIMITS.toolTimeoutMs, 'tool_timeout')
+        const result = await withTimeout(Promise.resolve().then(() => tool.run(ctx, args)), Math.min(LIMITS.toolTimeoutMs, left()), 'tool_timeout')
         for (const l of [...(result.listings || []), ...(result.listing ? [result.listing] : [])]) if (l && typeof l === 'object' && l.id) seen.set(l.id, l)
         if (d.tool === 'search_listings') ctx.state.criteria = result.criteria_used
         if (d.tool === 'get_viewing_slots') offer = ctx.state.offers[0]
@@ -304,8 +313,10 @@ export async function confirmAgentAction(db, vs, user, id) {
 
 export function cancelAgentAction(db, user, id) {
   requireRole(user, 'buyer')
+  expireActions(db, user.id)
   const row = ownAction(db, user, id)
   const changed = db.prepare("UPDATE agent_actions SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'awaiting_confirmation'").run(now(), row.id).changes
-  if (!changed && row.status !== 'cancelled') throw new AppError(409, 'action_not_pending', 'This request can no longer be cancelled here. Use My viewings.')
+  // Nothing was sent for a cancelled or expired request: report its state. A sent one is cancelled in My viewings.
+  if (!changed && !['cancelled', 'expired'].includes(row.status)) throw new AppError(409, 'action_not_pending', 'This request can no longer be cancelled here. Use My viewings.')
   return { action: describeAction(db, db.prepare('SELECT * FROM agent_actions WHERE id = ?').get(row.id)) }
 }

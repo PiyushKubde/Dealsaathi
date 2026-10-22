@@ -126,6 +126,7 @@ The skill's test-connection step, for proving Gmail · Send Email works before a
 | `server/agent/` | The buyer's AI Assistant: bounded agent loop (`runtime.js`), fixed tools over existing services (`tools.js`), decision format (`prompt.js`), budget/BHK parsing (`parse.js`) |
 | `public/` | The web pages (the Connect popup uses `/vendor/viasocket-apps-browser.js`, served from the installed package) |
 | `scripts/live-gmail-check.js` | The live Gmail check above |
+| `scripts/live-agent-check.mjs` | Live check of the buyer AI Assistant: real viaSocket AI, made-up data, Calendar stand-in, nothing confirmed |
 | `test/` | Automated tests |
 | `docs/action-mapping.md` | Every viaSocket action: ids, where each input comes from, confirmation, status |
 

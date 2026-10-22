@@ -246,6 +246,17 @@ check('buyer assistant: no calendar event before the agent confirms', t.db.prepa
 await go(buyerPage, '#/assistant')
 await buyerPage.waitForSelector('.agent-msg')
 check('buyer assistant: the conversation is there after a reload', /Which time suits you/.test(await buyerPage.textContent('#ag-log')))
+// An expired request: Confirm is refused and the card shows that nothing was sent.
+const second = JSON.parse(t.db.prepare('SELECT state FROM agent_conversations').get().state).offers[0].slots[2]
+ai.queue.push(decide('tool', { tool: 'propose_viewing_request', args: { property_ids: [hills], start: second.start } }))
+await buyerPage.fill('#ag-input', `And ${second.label} as well`)
+await buyerPage.click('#ag-send')
+await buyerPage.waitForSelector('[data-action] [data-confirm]')
+t.db.prepare("UPDATE agent_actions SET expires_at = '2000-01-01T00:00:00.000Z' WHERE status = 'awaiting_confirmation'").run()
+const beforeExpired = t.db.prepare('SELECT COUNT(*) AS n FROM viewings').get().n
+await buyerPage.click('[data-action] [data-confirm]')
+await buyerPage.waitForSelector('.agent-action .notice.warn')
+check('buyer assistant: an expired request is refused and shown as expired, nothing sent', /expired/.test(await buyerPage.textContent('#ag-log')) && t.db.prepare('SELECT COUNT(*) AS n FROM viewings').get().n === beforeExpired)
 
 // ---- System email through the agent's Gmail (stand-in): verification for the buyer
 const agentId = t.db.prepare("SELECT id FROM users WHERE role = 'agent'").get().id

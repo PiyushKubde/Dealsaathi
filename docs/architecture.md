@@ -94,14 +94,20 @@ gets SQL, HTTP, shell or other users' data.
   (`listProperties` market scope + `scoreMatch`, with the buyer's feedback exclusions), `get_listing` (`viewProperty`),
   `get_my_recommendations` (`buyerRecommendations`), `get_viewing_slots` (`buyerSlots`: the agent's real free/busy,
   read only) and `propose_viewing_request` (prepares an `agent_actions` row; sends nothing).
-- **Criteria guard**: a search may only use values from the buyer's own messages (parsed by `parse.js`), their saved
-  requirements or the criteria already in use. Anything else is refused back to the model, so it must ask.
+- **Criteria guard**: for budget, bedrooms, type and buy/rent, the buyer's newest message that states (or explicitly
+  lifts, e.g. "any number of bedrooms") a requirement wins, exactly: the model may neither change nor drop it. A field
+  the buyer never mentioned may come from their saved requirements or the search already in use, or be left out. The
+  place may only use words the buyer said or saved. Anything else is refused back to the model, so it must ask.
 - **Approval**: only the buyer's Confirm (`POST /api/agent/actions/:id/confirm`) runs `requestViewing`, once (atomic
   claim; a repeat returns the first result; an identical request already sent is reused). That creates a *request*;
   the agent's own confirmation books it in Google Calendar, exactly as from the listing page.
-- **Limits**: 6 decisions, 4 tool calls and 2 errors per message; 30 s per AI call, 20 s per tool, 60 s per message;
-  no identical call twice; one message at a time per conversation; 20 messages per 10 minutes per buyer; prepared
-  requests expire after 30 minutes. A reply that claims a booking is rejected.
+- **Limits**: 6 decisions, 4 tool calls and 2 errors per message; 30 s per AI call and 20 s per tool, both cut to the
+  time left of 60 s per message (the conversation lock lasts the turn plus 30 s); no identical call twice; one message at
+  a time per conversation; 20 messages per 10 minutes and 20 calendar checks per 15 minutes per buyer; prepared requests
+  expire after 30 minutes. A sentence stating a booking as done is rejected ("booked only after…" is fine). Listings
+  from earlier turns are shown again only while still on the market.
+- **Live check** (`scripts/live-agent-check.mjs`): the real viaSocket AI against a throwaway database of made-up listings
+  and the Calendar stand-in; never confirms a request. Run only with approval: it makes real AI calls.
 - **Records** (schema v8, new tables only): `agent_conversations` (with working context: listings and free times
   shown), `agent_messages`, `agent_runs` and `agent_steps` (tool names, outcomes, timings: no message text),
   `agent_actions`. The log gets one line per run and per confirmed action, with no content.
