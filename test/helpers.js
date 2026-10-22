@@ -64,7 +64,7 @@ export async function startApp({ ai = fakeAi(), vs = { configured: false }, db =
 }
 
 /** An error shaped like viasocket-apps' ViaSocketError. */
-export const vsError = (message, status) => Object.assign(new Error(message), { name: 'ViaSocketError', status })
+export const vsError = (message, status, body) => Object.assign(new Error(message), { name: 'ViaSocketError', status, ...(body !== undefined ? { body } : {}) })
 
 /**
  * A stand-in for the viaSocket gateway. `state.connections[userId]` and `state.flows[userId]` play
@@ -125,7 +125,7 @@ export function fakeVs({ gmailServiceId = 'rowo0bqrhj5g' } = {}) {
     },
     async listOptions(userId, actionVersionId, params) {
       step('listOptions', [userId, actionVersionId, params])
-      const options = params.fieldKey === 'destination.channel_id' ? state.slackChannels : params.fieldKey === 'calendar_id' ? state.calendars : state.options
+      const options = params.fieldKey === 'destination.channel_id' ? state.slackChannels : params.fieldKey === 'calendar_id' ? (state.calendarsByAuth?.[params.authId] ?? state.calendars) : state.options
       return { options, offset: null }
     },
     async runAction(scriptId, actionVersionId, inputData) {

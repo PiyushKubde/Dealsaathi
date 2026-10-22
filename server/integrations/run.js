@@ -3,7 +3,8 @@
 // https://flow.viasocket.com/documentation/skill/actions-and-events.md
 import { now } from '../db.js'
 import { AppError } from '../errors.js'
-import { cleanViasocketMessage, requireOwnConnection, requireViasocket, viasocketError } from './service.js'
+import { cleanViasocketMessage, redact, requireOwnConnection, requireViasocket, upstreamDiagnosis, viasocketError } from './service.js'
+import { getSetting } from '../automations/store.js'
 import { claimExternal, finishExternal } from '../notifications/service.js'
 
 /** The only actions DealSaathi runs. Code picks one of these by name; nothing else can be run. */
@@ -164,7 +165,10 @@ export async function execute(vs, prepared, inputData) {
     return { outcome: 'answered', result: await vs.runAction(prepared.scriptId, prepared.versionId, inputData) }
   } catch (error) {
     if (error?.status === null || error?.status === undefined) return { outcome: 'unknown', reason: `No answer from viaSocket, so it is not known whether ${prepared.action.app} acted: ${prepared.action.check} before trying again.` }
-    return { outcome: 'failed', reason: cleanViasocketMessage(error), status: error.status }
+    const diag = upstreamDiagnosis(error)
+    // One redacted line for diagnosis: app, action, status, reason code. No input, body, ids or addresses.
+    console.log(`[action] ${prepared.action.app} ${prepared.action.actionId} failed: HTTP ${diag.status ?? error.status}${diag.reason ? `, reason ${diag.reason}` : ''}`)
+    return { outcome: 'failed', reason: cleanViasocketMessage(error), status: diag.status ?? error.status, providerReason: diag.reason }
   }
 }
 
@@ -292,6 +296,42 @@ export async function verifyAccess(db, vs, userId, connectionId) {
   return { status, detail, checkedAt: new Date().toISOString() }
 }
 
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+// A Google calendar id: 'primary' or an email-shaped id (holiday and group calendars contain '#'). No spaces or quotes.
+const CALENDAR_ID = /^(primary|[^\s"'<>\\]{3,254})$/
+
+/** Create Calendar Event V23 refuses an empty value in any of these (its schema marks them required). */
+export const CREATE_EVENT_REQUIRED = ['calendar_id', 'summary', 'description', 'attendees', 'timeZone', 'starttime', 'startdate', 'meeting_duration', 'location']
+export function requireCreateEventFields(input) {
+  const missing = CREATE_EVENT_REQUIRED.filter((k) => typeof input[k] !== 'string' || !input[k].trim())
+  if (missing.length) throw new AppError(500, 'calendar_input_incomplete', `The calendar event is missing ${missing.join(', ')}; nothing was sent.`)
+}
+
+/**
+ * The calendar the Send test writes to:
+ *   - one asked for explicitly: only if it is in THIS connection's own calendar list (else refused);
+ *   - otherwise the Property Viewing Scheduler's calendar, only when the scheduler is set to this same connection
+ *     and the calendar is in this connection's list;
+ *   - otherwise Google's own 'primary'. Never "the first calendar listed" (that may be a holiday calendar).
+ */
+async function testCalendar(db, vs, user, connection, requested) {
+  const primary = (why) => ({ id: 'primary', source: 'primary', describe: 'your primary calendar', why })
+  const explicit = requested !== undefined && requested !== null && requested !== ''
+  if (explicit && (typeof requested !== 'string' || !CALENDAR_ID.test(requested))) throw new AppError(400, 'validation_failed', 'That is not a valid calendar.')
+  const cfg = getSetting(db, user.id, 'viewing_scheduler').config
+  const fromScheduler = Number(cfg.calendarConnectionId) === connection.id && typeof cfg.calendarId === 'string' ? cfg.calendarId : null
+  const wanted = explicit ? requested : fromScheduler
+  if (!wanted) return primary(cfg.calendarConnectionId && Number(cfg.calendarConnectionId) !== connection.id ? 'scheduler uses another connection' : 'no scheduler calendar')
+  if (wanted === 'primary') return primary('scheduler set to primary')
+  if (!CALENDAR_ID.test(wanted)) return primary('scheduler calendar id not valid')
+  const calendars = await pickOptions(db, vs, user.id, connection.id, 'calendar_free_busy', 'calendar_id')
+  if (!calendars.some((c) => c.value === wanted)) {
+    if (explicit) throw new AppError(409, 'calendar_not_in_connection', 'That calendar does not belong to this Google Calendar connection.')
+    return primary('scheduler calendar not in this connection')
+  }
+  return { id: wanted, source: explicit ? 'requested' : 'scheduler', describe: explicit ? 'the chosen calendar' : 'your Viewing Scheduler calendar' }
+}
+
 /**
  * A real test through one of the agent's own connections, started by the agent and confirmed by them first:
  *   Gmail            sends one email to the agent's own address
@@ -325,24 +365,28 @@ export async function sendLiveTest(db, vs, user, connectionId, { slackChannelId,
     const read = ran.outcome === 'answered' ? readSlackResult(ran.result) : { ok: false, unknown: ran.outcome === 'unknown', reason: ran.reason }
     out = read.ok ? { status: 'sent', detail: `Slack accepted the message: ts ${read.ts}`, providerIds: { ts: read.ts } } : { status: read.unknown ? 'unknown' : 'failed', detail: read.reason }
   } else {
-    const calendars = await pickOptions(db, vs, user.id, connectionId, 'calendar_free_busy', 'calendar_id')
-    const cal = calendars.find((c) => c.value === calendarId) || calendars.find((c) => c.value === 'primary') || calendars[0]
-    if (!cal) throw new AppError(409, 'no_calendar', 'This Google account lists no calendar to test with.')
-    const owner = (row.label || '').split(',').map((x) => x.trim()).find((x) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(x)) || (/@/.test(cal.value) ? cal.value : null)
+    const cal = await testCalendar(db, vs, user, row, calendarId)
+    const owner = (row.label || '').split(',').map((x) => x.trim()).find((x) => EMAIL.test(x)) || (EMAIL.test(cal.id) ? cal.id : null)
     if (!owner) throw new AppError(409, 'calendar_owner_unknown', 'DealSaathi cannot tell which email owns this Google Calendar connection. Reconnect it and try again.')
     const tomorrow = new Date(Date.now() + 5.5 * 3600 * 1000 + 86400000).toISOString().slice(0, 10)
     const [y, m, d] = tomorrow.split('-')
-    const created = await runOnce(db, vs, user.id, connectionId, 'calendar_create_event', {
-      calendar_id: cal.value, summary: 'DealSaathi test event (deleted automatically)', description: `Created and removed by a DealSaathi test at ${stampText}.`,
+    const input = {
+      calendar_id: cal.id, summary: 'DealSaathi test event (deleted automatically)', description: `Created and removed by a DealSaathi test at ${stampText}.`,
       // attendees and location are required by the action: the owner's own address (no invitation to anyone else).
       attendees: owner, timeZone: 'Asia/Kolkata', startdate: `${d}-${m}-${y}`, starttime: '09:00', meeting_duration: '00:15', location: 'DealSaathi test', status: 'confirmed', transparency: 'transparent'
-    })
+    }
+    requireCreateEventFields(input)
+    const created = await runOnce(db, vs, user.id, connectionId, 'calendar_create_event', input)
     const ev = created.outcome === 'answered' ? readCalendarEvent(created.result) : { ok: false, unknown: created.outcome === 'unknown', reason: created.reason }
-    if (!ev.ok) out = { status: ev.unknown ? 'unknown' : 'failed', detail: `Creating the test event: ${ev.reason}` }
-    else {
-      const del = await runOnce(db, vs, user.id, connectionId, 'calendar_delete_event', { calendarId: cal.value, eventId: ev.eventId, sendUpdates: 'none' })
+    if (!ev.ok) {
+      const diag = created.outcome === 'answered' ? upstreamDiagnosis(created.result) : { status: created.status ?? null, reason: created.providerReason ?? null }
+      if (created.outcome === 'answered') console.log(`[action] Google Calendar rowuitv4m6uy refused: HTTP ${diag.status ?? '—'}${diag.reason ? `, reason ${diag.reason}` : ''}`)
+      const code = [diag.status ? `HTTP ${diag.status}` : null, diag.reason ? `reason ${diag.reason}` : null].filter(Boolean).join(', ')
+      out = { status: ev.unknown ? 'unknown' : 'failed', detail: `Creating the test event in ${cal.describe}: ${redact(ev.reason)}${code ? ` (${code})` : ''}`, diagnosis: { ...diag, calendar: cal.source } }
+    } else {
+      const del = await runOnce(db, vs, user.id, connectionId, 'calendar_delete_event', { calendarId: cal.id, eventId: ev.eventId, sendUpdates: 'none' })
       const deleted = del.outcome === 'answered' && !(del.result?.success === false || del.result?.error)
-      out = { status: deleted ? 'sent' : 'failed', detail: `Google Calendar created event ${ev.eventId} in ${cal.label}${deleted ? ' and deleted it again' : `, but deleting it failed (${del.reason || 'refused'}): remove it from the calendar yourself`}`, providerIds: { eventId: ev.eventId } }
+      out = { status: deleted ? 'sent' : 'failed', detail: `Google Calendar created event ${ev.eventId} in ${cal.describe}${deleted ? ' and deleted it again' : `, but deleting it failed (${redact(del.reason || 'refused')}): remove it from the calendar yourself`}`, providerIds: { eventId: ev.eventId }, calendar: cal.source }
     }
   }
   record(out.status, out.detail)

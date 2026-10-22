@@ -18,11 +18,42 @@ export function requireViasocket(vs) {
 /** viaSocket's own reason, without anything that could carry a credential (run URLs, script ids, tokens). */
 export function cleanViasocketMessage(error) {
   const raw = typeof error?.message === 'string' ? error.message : 'viaSocket did not accept the request.'
-  return raw
+  return redact(raw).slice(0, 300)
+}
+
+/**
+ * Removes what must never reach logs or stored messages: links, script ids, tokens, email addresses and
+ * calendar ids (Google calendar ids are email-shaped, e.g. en.indian#holiday@group.v.calendar.google.com).
+ */
+export function redact(text) {
+  return String(text ?? '')
     .replace(/https?:\/\/\S+/g, '[link]')
     .replace(/\bscri[A-Za-z0-9]{6,}\b/g, '[id]')
     .replace(/\beyJ[A-Za-z0-9._-]{10,}/g, '[token]')
-    .slice(0, 300)
+    .replace(/\b(?:ya29|1\/\/)[A-Za-z0-9._-]{10,}/g, '[token]')
+    .replace(/(?:Bearer|token[=:])\s*[A-Za-z0-9._~+/-]{8,}=*/gi, '[token]')
+    .replace(/[^\s@"'<>(),;]+@[^\s@"'<>(),;]+/g, '[email]')
+}
+
+/**
+ * The provider's own diagnosis of a failed call, safe to show and log: the HTTP status and a short reason code
+ * (Google's error.errors[0].reason / error.status, wherever viaSocket nests it). Never the raw body.
+ */
+export function upstreamDiagnosis(source) {
+  const seen = new Set()
+  const codes = []
+  const walk = (o, depth) => {
+    if (!o || typeof o !== 'object' || depth > 5 || seen.has(o)) return
+    seen.add(o)
+    for (const k of ['reason', 'code', 'status']) if (typeof o[k] === 'string' && /^[A-Za-z_][A-Za-z0-9_.]{1,40}$/.test(o[k])) codes.push(o[k])
+    if (Array.isArray(o.errors)) o.errors.forEach((e) => walk(e, depth + 1))
+    for (const k of ['error', 'data', 'response', 'body']) walk(o[k], depth + 1)
+  }
+  walk(source?.body ?? source, 0)
+  const numeric = [source?.status, source?.statusCode, source?.body?.status, source?.response?.status, source?.data?.response?.status, source?.error?.code]
+    .map(Number).find((n) => Number.isInteger(n) && n >= 400 && n < 600)
+  const reason = codes.find((c) => !/^(error|failed|false|true)$/i.test(c)) || null
+  return { status: numeric ?? null, reason: reason ? redact(reason).slice(0, 40) : null }
 }
 
 /** Turns a failed viaSocket call into an answer the broker can act on. */
@@ -31,7 +62,11 @@ export function viasocketError(error, what) {
   const status = error?.status
   if (status === 401 || status === 403) return new AppError(502, 'viasocket_auth', `viaSocket refused ${what}: this app's viaSocket credentials were not accepted.`)
   if (status === null || status === undefined) return new AppError(504, 'viasocket_unreachable', `Could not reach viaSocket to ${what}. Try again in a moment.`)
-  return new AppError(502, 'viasocket_error', `viaSocket could not ${what}: ${cleanViasocketMessage(error)}`)
+  const diag = upstreamDiagnosis(error)
+  console.log(`[viasocket] could not ${what}: HTTP ${diag.status ?? status}${diag.reason ? `, reason ${diag.reason}` : ''}`)
+  const message = cleanViasocketMessage(error)
+  const extra = [!message.includes(String(diag.status ?? status)) ? `HTTP ${diag.status ?? status}` : null, diag.reason && !message.includes(diag.reason) ? `reason ${diag.reason}` : null].filter(Boolean).join(', ')
+  return new AppError(502, 'viasocket_error', `viaSocket could not ${what}: ${message}${extra ? ` (${extra})` : ''}`)
 }
 
 const safeJson = (s) => {
