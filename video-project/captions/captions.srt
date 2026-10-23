@@ -1,181 +1,181 @@
 1
-00:00:00,600 --> 00:00:05,080
+00:00:00,520 --> 00:00:07,140
 What if you could build an AI-powered application
 starting from a single prompt,
 
 2
-00:00:05,200 --> 00:00:09,030
+00:00:07,200 --> 00:00:09,950
 connect real-world integrations
 without building them from scratch,
 
 3
-00:00:09,150 --> 00:00:10,830
+00:00:10,010 --> 00:00:11,710
 and deploy it with ease?
 
 4
-00:00:10,950 --> 00:00:14,580
+00:00:12,630 --> 00:00:15,940
 Meet DealSaathi, built using
 Claude Code and the ViaSocket SDK,
 
 5
-00:00:14,700 --> 00:00:16,380
+00:00:16,000 --> 00:00:17,880
 and deployed on Embarko.
 
 6
-00:00:16,500 --> 00:00:19,080
+00:00:18,810 --> 00:00:21,400
 Let me show you how it all comes together.
 
 7
-00:00:20,600 --> 00:00:25,676
+00:00:23,600 --> 00:00:26,280
 I started with a single,
 detailed prompt in Claude Code,
 
 8
-00:00:25,796 --> 00:00:30,032
+00:00:26,340 --> 00:00:28,590
 describing the application
 I wanted to build,
 
 9
-00:00:30,152 --> 00:00:34,922
+00:00:28,650 --> 00:00:31,560
 and refined it with follow-up
 prompts along the way.
 
 10
-00:00:35,042 --> 00:00:41,265
+00:00:32,630 --> 00:00:36,270
 With the ViaSocket SDK and skill
 available in the development workflow,
 
 11
-00:00:41,385 --> 00:00:47,607
+00:00:36,330 --> 00:00:41,130
 Claude could build DealSaathi and
 integrate the capabilities it needed,
 
 12
-00:00:47,727 --> 00:00:52,956
+00:00:41,350 --> 00:00:44,470
 without us having to build
 every integration from scratch.
 
 13
-00:00:53,076 --> 00:00:58,153
+00:00:44,950 --> 00:00:48,210
 The goal is to spend less
 time wiring services together,
 
 14
-00:00:58,273 --> 00:01:02,279
+00:00:48,270 --> 00:00:50,490
 and more time building the product itself.
 
 15
-00:01:02,399 --> 00:01:06,405
+00:00:51,310 --> 00:00:54,620
 But building the app is only half the job.
 
 16
-00:01:06,525 --> 00:01:09,080
+00:00:54,680 --> 00:00:56,430
 Now, let's get it live.
 
 17
-00:01:10,600 --> 00:01:15,898
+00:00:59,761 --> 00:01:03,761
 Now that the application is
 built, we need to get it online.
 
 18
-00:01:16,018 --> 00:01:23,723
+00:01:04,241 --> 00:01:08,951
 This is Embarko, a hosting platform designed
 to make deploying applications straightforward.
 
 19
-00:01:23,843 --> 00:01:29,667
+00:01:09,761 --> 00:01:13,401
 We follow its hosting workflow,
 provide the required configuration,
 
 20
-00:01:29,787 --> 00:01:34,784
+00:01:13,681 --> 00:01:18,801
 and let our AI coding agent
 handle the deployment steps.
 
 21
-00:01:34,904 --> 00:01:41,706
+00:01:19,691 --> 00:01:25,521
 Once the deployment succeeds, DealSaathi
 is accessible through its own live URL.
 
 22
-00:01:41,826 --> 00:01:49,080
+00:01:26,331 --> 00:01:31,531
 Embarko also gives us a dashboard to monitor
 traffic, performance, and scheduled jobs.
 
 23
-00:01:50,600 --> 00:01:53,894
+00:01:37,031 --> 00:01:39,421
 Now let's see DealSaathi in action.
 
 24
-00:01:54,014 --> 00:01:57,381
+00:01:40,031 --> 00:01:42,891
 A seller lists a four-bedroom villa.
 
 25
-00:01:57,501 --> 00:02:02,612
+00:01:43,271 --> 00:01:47,781
 A buyer finds it, taps
 "I'm interested", and makes an offer.
 
 26
-00:02:02,732 --> 00:02:09,077
+00:01:48,561 --> 00:01:54,041
 The buyer's agent forwards the offer to
 the owner, who makes a counter-offer.
 
 27
-00:02:09,197 --> 00:02:14,744
+00:01:54,871 --> 00:01:59,661
 The buyer accepts in principle,
 and the agent records the outcome.
 
 28
-00:02:14,864 --> 00:02:18,303
+00:02:00,511 --> 00:02:02,321
 Every step notifies the right people,
 
 29
-00:02:18,423 --> 00:02:23,171
+00:02:02,381 --> 00:02:06,451
 and the buyer's identity
 stays private from the seller.
 
 30
-00:02:23,291 --> 00:02:29,055
+00:02:08,131 --> 00:02:11,841
 Behind the scenes, the ViaSocket SDK
 connects each agent's own Gmail,
 
 31
-00:02:29,175 --> 00:02:34,213
+00:02:11,901 --> 00:02:16,031
 Slack and Google Calendar, and
 each one passed a live test.
 
 32
-00:02:34,333 --> 00:02:39,080
+00:02:16,511 --> 00:02:20,231
 One workflow, three roles,
 and far less back-and-forth.
 
 33
-00:02:40,600 --> 00:02:45,356
+00:02:23,212 --> 00:02:27,232
 And that's DealSaathi: built with Claude Code,
 integrated using the ViaSocket SDK,
 
 34
-00:02:45,476 --> 00:02:47,223
+00:02:27,292 --> 00:02:28,982
 and deployed on Embarko.
 
 35
-00:02:47,343 --> 00:02:52,047
+00:02:29,832 --> 00:02:34,912
 We've gone from an idea to a working,
 integrated application that's running live.
 
 36
-00:02:52,167 --> 00:02:55,989
+00:02:36,202 --> 00:02:40,622
 Less time building integrations
 and dealing with infrastructure.
 
 37
-00:02:56,109 --> 00:02:58,426
+00:02:40,892 --> 00:02:42,932
 More time building useful products.
 
 38
-00:02:58,546 --> 00:03:01,331
+00:02:43,732 --> 00:02:45,632
 If you're building your next AI application,
 
 39
-00:03:01,451 --> 00:03:04,080
+00:02:45,692 --> 00:02:49,362
 give the ViaSocket SDK and Embarko a try.

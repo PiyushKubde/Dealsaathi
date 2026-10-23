@@ -1,0 +1,139 @@
+1
+00:00:00,600 --> 00:00:04,220
+Buying, selling or renting a home
+still runs on endless calls,
+
+2
+00:00:04,340 --> 00:00:06,040
+messages and follow-ups.
+
+3
+00:00:06,160 --> 00:00:10,083
+Agents juggle chat groups and
+spreadsheets, buyers wait for updates,
+
+4
+00:00:10,203 --> 00:00:12,762
+and sellers rarely know who's interested.
+
+5
+00:00:12,882 --> 00:00:17,513
+Today, we're launching DealSaathi:
+an AI-powered real estate workspace for agents,
+
+6
+00:00:17,633 --> 00:00:19,080
+buyers and sellers.
+
+7
+00:00:20,600 --> 00:00:28,250
+Agents get one dashboard for their
+leads, listings, viewings and follow-ups.
+
+8
+00:00:28,370 --> 00:00:34,343
+They can add a lead just by
+describing it in plain words,
+
+9
+00:00:34,463 --> 00:00:39,023
+and DealSaathi's AI fills in the details.
+
+10
+00:00:39,143 --> 00:00:43,173
+Sellers list a property in minutes,
+
+11
+00:00:43,293 --> 00:00:49,354
+and it's matched against every
+buyer's saved requirements.
+
+12
+00:00:49,474 --> 00:00:56,330
+Buyers see what fits them, tap
+"I'm interested", and make an offer.
+
+13
+00:00:56,450 --> 00:01:02,687
+Their agent forwards it to
+the owner, the owner can counter,
+
+14
+00:01:02,807 --> 00:01:06,837
+and the buyer accepts in principle.
+
+15
+00:01:06,957 --> 00:01:11,164
+Every step notifies the right people,
+
+16
+00:01:11,284 --> 00:01:17,080
+and the buyer's identity
+stays private from the seller.
+
+17
+00:01:18,600 --> 00:01:25,922
+Each agent connects their own Gmail,
+Slack and Google Calendar, for alerts,
+
+18
+00:01:26,042 --> 00:01:32,080
+reminders, and viewings booked
+straight into their calendar.
+
+19
+00:01:33,600 --> 00:01:37,668
+We built DealSaathi with Claude Code,
+
+20
+00:01:37,788 --> 00:01:44,163
+starting from one detailed prompt
+and refining it along the way.
+
+21
+00:01:44,283 --> 00:01:49,975
+The ViaSocket SDK gave us
+those integrations and the AI,
+
+22
+00:01:50,095 --> 00:01:54,932
+without building each
+connection from scratch.
+
+23
+00:01:55,052 --> 00:02:02,282
+And Embarko took it live: one hosting
+prompt, and Claude Code deployed it,
+
+24
+00:02:02,402 --> 00:02:07,495
+with traffic and scheduled
+jobs in one dashboard.
+
+25
+00:02:07,615 --> 00:02:13,820
+Every release since, up to
+the design you just saw, was built,
+
+26
+00:02:13,940 --> 00:02:17,580
+tested and shipped the same way.
+
+27
+00:02:19,100 --> 00:02:21,289
+DealSaathi is live today.
+
+28
+00:02:21,409 --> 00:02:25,845
+Sign up as a buyer or a seller,
+or bring your team of agents.
+
+29
+00:02:25,965 --> 00:02:31,337
+Built with Claude Code, powered by
+the ViaSocket SDK, and hosted on Embarko.
+
+30
+00:02:31,457 --> 00:02:36,580
+DealSaathi: find, show and agree on
+property, with your agent alongside.

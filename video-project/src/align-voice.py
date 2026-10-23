@@ -3,6 +3,7 @@
 
     python3 src/align-voice.py <recording>            # one take of the whole script
     python3 src/align-voice.py --scenes               # or: audio/voice/scene1..5.* already cut by you
+    add --cut launch for the launch cut (narration-launch.md, audio/voice/launch/, captions/launch/)
 
 Writes audio/voice/scene<N>.wav (one take is cut into scenes at the pauses between them) and
 captions/scene<N>.words.json (each word's time in that file), which build.py uses to place each sentence,
@@ -15,7 +16,7 @@ wording while recording, change the '> ' lines in narration.md to match first.
 import json, subprocess, sys, tempfile, wave
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from narr import ROOT, narration, spoken_words
+from narr import ROOT, narration, spoken_words, VOICE, CAPTIONS
 
 try:
     from pocketsphinx import Decoder
@@ -53,16 +54,17 @@ def duration(p):
 
 
 scenes = narration()
-(ROOT / 'audio/voice').mkdir(parents=True, exist_ok=True)
-(ROOT / 'captions').mkdir(exist_ok=True)
+(ROOT / VOICE).mkdir(parents=True, exist_ok=True)
+(ROOT / CAPTIONS).mkdir(parents=True, exist_ok=True)
+args = [a for i, a in enumerate(sys.argv[1:]) if a != '--cut' and (i == 0 or sys.argv[i] != '--cut')]
 tmp = Path(tempfile.mkdtemp())
 
-if sys.argv[1:2] == ['--scenes']:
+if args[:1] == ['--scenes']:
     jobs = []
     for sid in scenes:
-        src = next((ROOT / f'audio/voice/scene{sid}{e}' for e in ('.wav', '.mp3', '.m4a') if (ROOT / f'audio/voice/scene{sid}{e}').exists()), None)
+        src = next((ROOT / f'{VOICE}/scene{sid}{e}' for e in ('.wav', '.mp3', '.m4a') if (ROOT / f'{VOICE}/scene{sid}{e}').exists()), None)
         if not src:
-            sys.exit(f'missing audio/voice/scene{sid}.*')
+            sys.exit(f'missing {VOICE}/scene{sid}.*')
         jobs.append((sid, src))
     for sid, src in jobs:
         words, owner = [], []
@@ -73,11 +75,11 @@ if sys.argv[1:2] == ['--scenes']:
         to16k(src, tmp / 'a.wav')
         seg = align(tmp / 'a.wav', words)
         out = [{'word': w, 'line': o, 'start': a, 'end': b} for w, o, (a, b) in zip(words, owner, seg)]
-        (ROOT / f'captions/scene{sid}.words.json').write_text(json.dumps({'source': src.name, 'words': out}, indent=0))
+        (ROOT / f'{CAPTIONS}/scene{sid}.words.json').write_text(json.dumps({'source': src.name, 'words': out}, indent=0))
         print(f'scene {sid}: {len(out)} words aligned in {src.name}')
     sys.exit(0)
 
-take = Path(sys.argv[1])
+take = Path(args[0])
 words, owner = [], []
 for sid, lines in scenes.items():
     for li, line in enumerate(lines):
@@ -96,8 +98,8 @@ for i, sid in enumerate(ids):
     # cut half-way through the pause between scenes, never into a word
     start = 0.0 if i == 0 else (spans[ids[i - 1]][1] + spans[sid][0]) / 2
     end = total if i == len(ids) - 1 else (spans[sid][1] + spans[ids[i + 1]][0]) / 2
-    out = ROOT / f'audio/voice/scene{sid}.wav'
+    out = ROOT / f'{VOICE}/scene{sid}.wav'
     subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-ss', f'{start:.3f}', '-to', f'{end:.3f}', '-i', str(take), '-ac', '1', '-ar', '48000', str(out)], check=True)
     ws = [{'word': w, 'line': o[1], 'start': round(a - start, 3), 'end': round(b - start, 3)} for w, o, (a, b) in zip(words, owner, seg) if o[0] == sid]
-    (ROOT / f'captions/scene{sid}.words.json').write_text(json.dumps({'source': f'{take.name} {start:.2f}–{end:.2f} s', 'words': ws}, indent=0))
-    print(f'scene {sid}: {start:6.2f}–{end:6.2f} s of {take.name} → audio/voice/scene{sid}.wav ({len(ws)} words)')
+    (ROOT / f'{CAPTIONS}/scene{sid}.words.json').write_text(json.dumps({'source': f'{take.name} {start:.2f}–{end:.2f} s', 'words': ws}, indent=0))
+    print(f'scene {sid}: {start:6.2f}–{end:6.2f} s of {take.name} → {VOICE}/scene{sid}.wav ({len(ws)} words)')

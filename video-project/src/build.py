@@ -4,6 +4,7 @@
     python3 src/build.py            # full render
     python3 src/build.py --fast     # quicker, lower-quality preview (same timing)
     python3 src/build.py --plan     # print the timing only
+    python3 src/build.py --cut launch   # the launch cut: narration-launch.md + timeline-launch.json
 
 Inputs it looks for (all optional; see README.md):
   audio/voice/scene1..5.(wav|mp3|m4a)   your narration, one file per scene -> scene lengths and captions follow it
@@ -21,11 +22,11 @@ written either way.
 import json, math, re, subprocess, sys, wave
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from narr import spoken_words
+from narr import spoken_words, TIMELINE, VOICE, CAPTIONS, NAME, CUT
 
 ROOT = Path(__file__).resolve().parent.parent
 FAST = '--fast' in sys.argv
-TL = json.loads((ROOT / 'timeline.json').read_text())
+TL = json.loads(TIMELINE.read_text())
 W, H, FPS, T = TL['width'], TL['height'], TL['fps'], TL['transition']
 OUT = ROOT / 'out'
 SEG = OUT / 'segments'
@@ -135,7 +136,7 @@ def line_layout(sid, voice, breaks):
     """With captions/scene<N>.words.json: the take cut into pieces at each sentence (and at any phrase in
     the scene's "breaks"), placed with a breath after each, and every word's time in the scene.
     None without word timings."""
-    wj = ROOT / f'captions/scene{sid}.words.json'
+    wj = ROOT / f'{CAPTIONS}/scene{sid}.words.json'
     if not voice or not wj.exists():
         return None
     words = json.loads(wj.read_text())['words']
@@ -176,7 +177,7 @@ plan, draft_reasons = [], []
 t = 0.0
 for sc in TL['scenes']:
     sid = sc['id']
-    voice = find(f'audio/voice/scene{sid}')
+    voice = find(f'{VOICE}/scene{sid}')
     layout = line_layout(sid, voice, sc.get('breaks', {}))
     planned = sum(s['dur'] for s in sc['segments'])
     if layout:
@@ -321,7 +322,7 @@ run(args)
 cues = []
 for p in plan:
     sid, lines = p['id'], lines_by_scene.get(p['id'], [])
-    manual = ROOT / f'captions/scene{sid}.srt'
+    manual = ROOT / f'{CAPTIONS}/scene{sid}.srt'
     v0 = p['start'] + LEAD
     if manual.exists():
         cues += [(v0 + a, v0 + b, txt) for a, b, txt in parse_srt(manual)]
@@ -347,8 +348,8 @@ for p in plan:
         cues.append((tt, tt + d - 0.12, wrap2(c)))
         tt += d
 srt = '\n'.join(f'{i + 1}\n{srt_time(a)} --> {srt_time(b)}\n{txt}\n' for i, (a, b, txt) in enumerate(cues))
-(ROOT / 'captions').mkdir(exist_ok=True)
-(ROOT / 'captions/captions.srt').write_text(srt)
+(ROOT / CAPTIONS).mkdir(parents=True, exist_ok=True)
+(ROOT / CAPTIONS / 'captions.srt').write_text(srt)
 style = ('FontName=Inter,FontSize=15,PrimaryColour=&H00FFFFFF,OutlineColour=&H66101010,BackColour=&H8C0B1410,'
          'BorderStyle=4,Outline=0,Shadow=0,MarginV=24,MarginL=60,MarginR=60,Bold=0,Spacing=0.2')
 
@@ -430,8 +431,8 @@ args += ['-filter_complex', ';'.join(parts), '-map', '[a]', '-t', f'{TOTAL:.3f}'
 run(args)
 
 # ---------- final ----------
-final = OUT / 'DealSaathi-Demo-DRAFT.mp4' if draft else ROOT / 'DealSaathi-Demo.mp4'
-vf = f"subtitles=filename='{ROOT / 'captions/captions.srt'}':fontsdir=/usr/share/fonts/opentype/inter:force_style='{style}'"
+final = OUT / f'{NAME}-DRAFT.mp4' if draft else ROOT / f'{NAME}.mp4'
+vf = f"subtitles=filename='{ROOT / CAPTIONS / 'captions.srt'}':fontsdir=/usr/share/fonts/opentype/inter:force_style='{style}'"
 args = ['ffmpeg', '-y', '-loglevel', 'error', '-i', str(video), '-i', str(audio)]
 if draft:
     args += ['-loop', '1', '-framerate', str(FPS), '-i', str(ROOT / 'assets/overlays/o-draft.png')]

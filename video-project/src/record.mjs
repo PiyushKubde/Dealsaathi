@@ -193,6 +193,12 @@ const CLIPS = {
     for (const n of (await page.locator('main li').filter({ hasText: TITLE }).all()).slice(0, 4)) await hover(n, 450)
     await wait(1200)
   }),
+  // Buyer's matches with their scores and reasons (read-only).
+  'buyer-recommendations': () => withClip('buyer-recommendations', { who: 'buyer', url: `${STAGING}/#/dashboard` }, async ({ page, nav, hover, scroll, wait }) => {
+    await nav('recommendations'); await wait(1200)
+    for (const c of (await page.locator('main .card, main li').all()).slice(0, 3)) await hover(c, 650)
+    await scroll(300, 1400); await wait(1200)
+  }),
   // Production: the public, signed-out landing page only.
   'prod-landing': () => withClip('prod-landing', { url: PRODUCTION }, async ({ scroll, wait }) => {
     await wait(1800); await scroll(600, 2200); await wait(1500); await scroll(-600, 1600); await wait(800)

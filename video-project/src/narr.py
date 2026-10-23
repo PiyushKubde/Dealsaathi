@@ -1,8 +1,17 @@
 """Shared by build.py and align-voice.py: the narration lines and how their words are spelled for alignment."""
-import re
+import re, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# Which cut: the default walkthrough (narration.md, timeline.json) or a named one, e.g. --cut launch
+# (narration-launch.md, timeline-launch.json, audio/voice/launch/, captions/launch/).
+CUT = sys.argv[sys.argv.index('--cut') + 1] if '--cut' in sys.argv else ''
+NARRATION = ROOT / (f'narration-{CUT}.md' if CUT else 'narration.md')
+TIMELINE = ROOT / (f'timeline-{CUT}.json' if CUT else 'timeline.json')
+VOICE = f'audio/voice/{CUT}' if CUT else 'audio/voice'
+CAPTIONS = f'captions/{CUT}' if CUT else 'captions'
+NAME = f'DealSaathi-{CUT.capitalize()}' if CUT else 'DealSaathi-Demo'
 
 # Spoken forms of words the recogniser would otherwise not know or would split differently.
 SPOKEN = [('dealsaathi', 'deal saathi'), ('viasocket', 'via socket'), ('ai-powered', 'a i powered'), ('back-and-forth', 'back and forth'),
@@ -10,9 +19,9 @@ SPOKEN = [('dealsaathi', 'deal saathi'), ('viasocket', 'via socket'), ('ai-power
 
 
 def narration():
-    """{scene id: [line, ...]} from the '> ' lines of narration.md."""
+    """{scene id: [line, ...]} from the '> ' lines of the narration file."""
     scenes, cur = {}, None
-    for line in (ROOT / 'narration.md').read_text().split('\n'):
+    for line in NARRATION.read_text().split('\n'):
         m = re.match(r'^## Scene (\d+)', line)
         if m:
             cur = int(m.group(1))

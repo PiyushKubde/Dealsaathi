@@ -1,0 +1,397 @@
+{
+  "_doc": "Launch cut. Same fields as timeline.json (see README.md). Build with: python3 src/build.py --cut launch",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "transition": 0.5,
+  "line_gap": 1.0,
+  "scenes": [
+    {
+      "id": 1,
+      "name": "The launch",
+      "hold": 0.8,
+      "segments": [
+        {
+          "type": "card",
+          "src": "assets/cards/c00-hook.png",
+          "dur": 9,
+          "zoom": [
+            1.0,
+            1.04
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c00-launch.png",
+          "dur": 11,
+          "zoom": [
+            1.0,
+            1.06
+          ],
+          "cue": "Today, we're launching DealSaathi"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Meet DealSaathi",
+      "hold": 1.0,
+      "breaks": {
+        "the owner can counter": 0.8,
+        "and the buyer accepts in principle": 0.8
+      },
+      "segments": [
+        {
+          "type": "clip",
+          "src": "recordings/agent-dashboard.mp4",
+          "src_in": 0.8,
+          "src_out": 15.8,
+          "dur": 12,
+          "tail": 15,
+          "overlays": [
+            [
+              "assets/overlays/o-l-agent.png",
+              0.2,
+              6.0
+            ],
+            [
+              "assets/overlays/o-l-ai.png",
+              6.0,
+              12.3
+            ]
+          ],
+          "zoom": [
+            1.0,
+            1.05
+          ]
+        },
+        {
+          "type": "clip",
+          "src": "recordings/seller-listing.mp4",
+          "src_in": 1.0,
+          "src_out": 29.5,
+          "dur": 8,
+          "tail": 3,
+          "overlays": [
+            [
+              "assets/overlays/o-l-seller.png",
+              0.2,
+              8.3
+            ]
+          ],
+          "cue": "Sellers list a property"
+        },
+        {
+          "type": "clip",
+          "src": "recordings/buyer-recommendations.mp4",
+          "src_in": 0.8,
+          "src_out": 9.0,
+          "dur": 5,
+          "tail": 5,
+          "overlays": [
+            [
+              "assets/overlays/o-l-match.png",
+              0.2,
+              5.3
+            ]
+          ],
+          "cue": "Buyers see what fits them"
+        },
+        {
+          "type": "clip",
+          "src": "recordings/buyer-offer.mp4",
+          "src_in": 0.8,
+          "src_out": 29.8,
+          "dur": 8,
+          "tail": 3,
+          "overlays": [
+            [
+              "assets/overlays/o-l-offer.png",
+              0.2,
+              8.3
+            ]
+          ],
+          "cue": "tap \"I'm interested\""
+        },
+        {
+          "type": "clip",
+          "src": "recordings/agent-forward.mp4",
+          "src_in": 1.0,
+          "src_out": 17.2,
+          "dur": 5,
+          "tail": 2.5,
+          "overlays": [
+            [
+              "assets/overlays/o-l-forward.png",
+              0.2,
+              5.3
+            ]
+          ],
+          "cue": "Their agent forwards it"
+        },
+        {
+          "type": "clip",
+          "src": "recordings/seller-counter.mp4",
+          "src_in": 1.0,
+          "src_out": 21.6,
+          "dur": 5,
+          "tail": 2.5,
+          "overlays": [
+            [
+              "assets/overlays/o-l-counter.png",
+              0.2,
+              5.3
+            ]
+          ],
+          "cue": "the owner can counter"
+        },
+        {
+          "type": "clip",
+          "src": "recordings/buyer-accept.mp4",
+          "src_in": 1.0,
+          "src_out": 21.9,
+          "dur": 6,
+          "tail": 3.5,
+          "overlays": [
+            [
+              "assets/overlays/o-l-accept.png",
+              0.2,
+              6.3
+            ]
+          ],
+          "cue": "and the buyer accepts in principle"
+        },
+        {
+          "type": "clip",
+          "src": "recordings/agent-close.mp4",
+          "src_in": 11.0,
+          "src_out": 26.0,
+          "dur": 9,
+          "tail": 6,
+          "overlays": [
+            [
+              "assets/overlays/o-l-notify.png",
+              0.2,
+              9.3
+            ]
+          ],
+          "cue": "Every step notifies"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Connected to the tools agents already use",
+      "hold": 2.0,
+      "segments": [
+        {
+          "type": "clip",
+          "src": "recordings/agent-integrations.mp4",
+          "src_in": 0.8,
+          "src_out": 12.0,
+          "dur": 8,
+          "tail": 4,
+          "overlays": [
+            [
+              "assets/overlays/o-viasocket.png",
+              0.2,
+              8.3
+            ]
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c10-live-tests.png",
+          "dur": 7,
+          "zoom": [
+            1.0,
+            1.05
+          ],
+          "cue": "for alerts, reminders"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "How we built it",
+      "hold": 2.5,
+      "breaks": {
+        "one hosting prompt": 0.5
+      },
+      "segments": [
+        {
+          "type": "card",
+          "src": "assets/cards/c02-prompt.png",
+          "dur": 6,
+          "zoom": [
+            1.0,
+            1.04
+          ],
+          "overlays": [
+            [
+              "assets/overlays/o-l-built.png",
+              0.4,
+              5.8
+            ]
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c03-steps.png",
+          "dur": 5,
+          "zoom": [
+            1.0,
+            1.04
+          ],
+          "cue": "and refining it"
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/m05-viasocket-home.png",
+          "dur": 4,
+          "zoom": [
+            1.0,
+            1.05
+          ],
+          "supplied": "recordings/supplied/viasocket-home.png",
+          "cue": "The ViaSocket SDK gave us",
+          "overlays": [
+            [
+              "assets/overlays/o-viasocket-site.png",
+              0.4,
+              3.8
+            ]
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c05-sdk.png",
+          "dur": 5,
+          "zoom": [
+            1.02,
+            1.08
+          ],
+          "cue": "without building each connection"
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/m06-embarko-home.png",
+          "dur": 4,
+          "zoom": [
+            1.0,
+            1.05
+          ],
+          "supplied": "recordings/supplied/embarko-home.png",
+          "cue": "And Embarko took it live",
+          "overlays": [
+            [
+              "assets/overlays/o-embarko.png",
+              0.4,
+              3.8
+            ]
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c07-hosting-prompt.png",
+          "dur": 4,
+          "zoom": [
+            1.0,
+            1.05
+          ],
+          "cue": "one hosting prompt"
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c08-deploy.png",
+          "dur": 5,
+          "zoom": [
+            1.0,
+            1.05
+          ],
+          "cue": "and Claude Code deployed it"
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/m03-embarko-dashboard.png",
+          "dur": 4,
+          "zoom": [
+            1.0,
+            1.06
+          ],
+          "supplied": "recordings/supplied/embarko-dashboard.png",
+          "crop": [
+            0.235,
+            0.06,
+            0.535,
+            0.6
+          ],
+          "cue": "with traffic and scheduled jobs"
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/m03-embarko-dashboard.png",
+          "dur": 3.5,
+          "zoom": [
+            1.0,
+            1.03
+          ],
+          "supplied": "recordings/supplied/embarko-dashboard.png",
+          "crop": [
+            0.24,
+            0.71,
+            0.52,
+            0.29
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c08-deploy.png",
+          "dur": 5,
+          "zoom": [
+            1.04,
+            1.1
+          ],
+          "cue": "Every release since"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Live today",
+      "hold": 3.5,
+      "segments": [
+        {
+          "type": "clip",
+          "src": "recordings/prod-landing.mp4",
+          "src_in": 0.5,
+          "src_out": 9.5,
+          "dur": 7,
+          "tail": 9,
+          "overlays": [
+            [
+              "assets/overlays/o-live.png",
+              0.2,
+              7.3
+            ]
+          ],
+          "zoom": [
+            1.0,
+            1.05
+          ]
+        },
+        {
+          "type": "closing",
+          "src": "assets/cards/c12-closing-launch.png",
+          "supplied": "assets/supplied/closing.png",
+          "dur": 12,
+          "zoom": [
+            1.0,
+            1.03
+          ],
+          "cue": "Built with Claude Code"
+        }
+      ]
+    }
+  ]
+}

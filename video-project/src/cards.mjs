@@ -73,6 +73,37 @@ const ARROW = '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" strok
 const LOGO = (s = 96) => `<svg width="${s}" height="${s}" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#34d399"/><path d="M8 15.5 16 9l8 6.5V24H8z" fill="#fff"/></svg>`
 
 const CARDS = {
+  // ---------- launch cut ----------
+  'c00-hook': () => ({ css: `body{background:#0b0f0d;color:#f7f5ef}.w{opacity:.92}`, html: `
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding-left:170px;gap:14px">
+      <div style="font-size:120px;font-weight:800;letter-spacing:-.035em;line-height:1.02">Calls.</div>
+      <div style="font-size:120px;font-weight:800;letter-spacing:-.035em;line-height:1.02;color:#cbd5c8">Messages.</div>
+      <div style="font-size:120px;font-weight:800;letter-spacing:-.035em;line-height:1.02;color:#8a9a8f">Follow-ups.</div>
+      <div style="font-size:36px;color:#a7b5ad;margin-top:30px;font-weight:500">Buying, selling or renting a home still runs on all three.</div>
+    </div>` }),
+  'c00-launch': () => ({ css: `body{background:radial-gradient(1100px 700px at 75% 20%,#0b7a5a 0%,transparent 60%),linear-gradient(135deg,#064e3b,#042f24);color:#f7f5ef}`, html: `
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30px">
+      <div style="font-size:30px;font-weight:700;letter-spacing:.32em;color:#6ee7b7">INTRODUCING</div>
+      <div style="display:flex;align-items:center;gap:34px">${LOGO(132)}<span style="font-size:150px;font-weight:800;letter-spacing:-.035em;line-height:1">DealSaathi</span></div>
+      <div style="font-size:42px;font-weight:500;color:#d1fae5">The AI-powered real estate workspace for agents, buyers and sellers</div>
+    </div>` }),
+  'c12-closing-launch': () => {
+    const svg = (p) => `data:image/svg+xml;base64,${readFileSync(join(ROOT, p)).toString('base64')}`
+    return { css: `body{background:radial-gradient(900px 700px at 85% 40%,#dcefe6 0%,transparent 65%),#f7f5ef;color:#0f172a}`, html: `
+    <div style="position:absolute;left:120px;top:130px;width:780px">
+      <div style="display:inline-flex;align-items:center;gap:12px;background:#065f46;color:#ecfdf5;border-radius:99px;padding:10px 22px;font-size:24px;font-weight:700;letter-spacing:.06em"><span style="width:12px;height:12px;border-radius:50%;background:#6ee7b7"></span>LIVE NOW</div>
+      <div style="display:flex;align-items:center;gap:22px;margin-top:30px">${LOGO(78)}<span style="font-size:72px;font-weight:800;letter-spacing:-.03em;color:#064e3b">DealSaathi</span></div>
+      <div class="mono" style="font-size:30px;color:#065f46;margin-top:18px">dealsaathi-app.embarko.app</div>
+      <div style="font-size:28px;color:#475569;margin-top:56px;font-weight:500">Built with Claude Code, powered by</div>
+      <div style="display:flex;align-items:center;gap:34px;margin-top:22px">
+        <img src="${svg('assets/brand/viasocket-logo.svg')}" style="height:70px;width:auto;display:block">
+        <span style="font-size:50px;font-weight:300;color:#94a3b8">×</span>
+        <span style="display:flex;align-items:center;gap:12px"><img src="${svg('assets/brand/embarko-icon.svg')}" style="height:58px;width:58px;border-radius:12px;display:block"><span style="font-size:60px;font-weight:700;color:#171a1e;letter-spacing:-.02em">Embarko</span></span>
+      </div>
+    </div>
+    <div style="position:absolute;right:90px;top:170px;width:900px;border-radius:18px;overflow:hidden;border:1px solid #d6e4dc;box-shadow:0 40px 90px -40px rgba(6,78,59,.55)"><img src="${img('assets/stills/dashboard.png')}" style="width:100%;display:block"></div>` }
+  },
+
   'c01-title': () => ({ css: `body{background:radial-gradient(1100px 700px at 75% 20%,#0b7a5a 0%,transparent 60%),linear-gradient(135deg,#064e3b,#042f24);color:#f7f5ef}`, html: `
     <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:34px">
       ${LOGO(132)}
@@ -253,6 +284,16 @@ const OVERLAYS = {
   'o-step4': () => step(4, 'Owner counters at ₹90 L') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
   'o-step5': () => step(5, 'Buyer accepts in principle') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
   'o-step6': () => step(6, 'Agent records the outcome; everyone is notified') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
+  'o-l-agent': () => step(1, 'Agents: one dashboard') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
+  'o-l-seller': () => step(2, 'Sellers list in minutes') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
+  'o-l-match': () => step(3, 'Buyers see what fits them') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
+  'o-l-offer': () => step(4, '“I’m interested”, then an offer') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
+  'o-l-forward': () => step(5, 'The agent forwards it to the owner') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
+  'o-l-counter': () => step(6, 'The owner counters') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
+  'o-l-accept': () => step(7, 'Accepted in principle') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
+  'o-l-notify': () => step(8, 'Everyone is kept in the loop') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
+  'o-l-ai': () => step(1, 'Add a lead with AI, in plain words') + tag('Staging copy of the same release · synthetic demo accounts and listings'),
+  'o-l-built': () => chip('How we built it', 'Claude Code · ViaSocket SDK · Embarko'),
   'o-draft': () => `<div style="position:absolute;right:28px;bottom:24px;background:rgba(180,83,9,.9);color:#fff;border-radius:10px;padding:8px 16px;font-size:20px;font-weight:700;letter-spacing:.06em">DRAFT · NO VOICE YET · TEMPORARY TIMING</div>`
 }
 
