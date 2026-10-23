@@ -4,10 +4,10 @@ A ~3-minute product demo (1920×1080, 16:9, 30 fps, H.264 + AAC, English caption
 from real recordings and evidence cards. No video framework is needed: everything here runs with what is
 already installed (FFmpeg 6 with libass, Python 3 with NumPy, Node 22 with Playwright and Chromium).
 
-**Current state:** `out/DealSaathi-Demo-DRAFT.mp4` is a draft. It has **no narration** (your voice has not
-been recorded yet), temporary caption timing, a temporary music bed, three MISSING-asset slates for the
-Embarko UI recordings, and a text-only closing card. It says DRAFT in the corner. `DealSaathi-Demo.mp4` is
-written only when all of those are replaced. See `asset-manifest.md` for the exact list.
+**Current state:** `out/DealSaathi-Demo-DRAFT.mp4` is a draft for one reason only: it has **no narration
+yet** (your voice has not been recorded), so the captions use temporary timing and a temporary music bed
+plays alone. It says DRAFT in the corner. Add your five voice files and `build.py` writes
+`DealSaathi-Demo.mp4` instead. See `asset-manifest.md`.
 
 ## Layout
 

@@ -154,7 +154,7 @@ for sc in TL['scenes']:
         if sup:
             s = dict(s, type='closing' if s['type'] == 'closing' else ('still' if sup.suffix.lower() in ('.png', '.jpg', '.jpeg') else 'supplied'), src=s['supplied'])
         elif s['type'] == 'closing':
-            draft_reasons.append('placeholder closing card (no assets/supplied/closing.png)')
+            s = dict(s, type='card')  # the closing card built from the official logo files
         if '/m0' in s['src'] and s['type'] == 'card':
             draft_reasons.append(f'placeholder slate {Path(s["src"]).name}')
         segs.append(s)
@@ -181,8 +181,13 @@ def render_segment(i, s, d):
     if s['type'] in ('card', 'still', 'closing'):
         if s['type'] == 'card':
             base = f'[0:v]{zoom_filter(z0, z1, d)},trim=duration={d:.3f},setpts=PTS-STARTPTS'
-        else:  # a supplied graphic: keep its proportions, centre it on the closing background
-            base = f'[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=0x04261d,trim=duration={d:.3f},setpts=PTS-STARTPTS'
+        elif s['type'] == 'still':  # a screenshot: optional close-up crop, shown whole over a blurred copy of itself
+            cx, cy, cw, ch = s.get('crop', [0, 0, 1, 1])
+            crop = f"crop=iw*{cw}:ih*{ch}:iw*{cx}:ih*{cy}," if s.get('crop') else ''
+            base = (f'[0:v]{crop}format=rgb24,split[fg][bg];[bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=40:2,eq=brightness=-0.06[bb];'
+                    f'[fg]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos[ff];[bb][ff]overlay=(W-w)/2:(H-h)/2,{zoom_filter(z0, z1, d)},trim=duration={d:.3f},setpts=PTS-STARTPTS')
+        else:  # the supplied closing graphic: proportions kept, centred on the closing background
+            base = f'[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=0xf7f5ef,trim=duration={d:.3f},setpts=PTS-STARTPTS'
         args += ['-loop', '1', '-framerate', str(FPS), '-t', f'{d:.3f}', '-i', str(ROOT / s['src'])]
     elif s['type'] == 'supplied':  # a user recording: fitted to the slot by speed, never cropped
         src_d = duration(ROOT / s['src'])

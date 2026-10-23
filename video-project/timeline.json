@@ -9,55 +9,376 @@
       "id": 1,
       "name": "The idea and DealSaathi",
       "segments": [
-        { "type": "card", "src": "assets/cards/c01-title.png", "dur": 5.5, "zoom": [1.0, 1.05] },
-        { "type": "clip", "src": "recordings/agent-dashboard.mp4", "src_in": 0.8, "src_out": 15.8, "dur": 14.5, "zoom": [1.0, 1.06], "overlays": [["assets/overlays/o-title.png", 0.6, 7.5], ["assets/overlays/o-staging.png", 0.0, 15.0]] }
+        {
+          "type": "card",
+          "src": "assets/cards/c01-title.png",
+          "dur": 5.5,
+          "zoom": [
+            1.0,
+            1.05
+          ]
+        },
+        {
+          "type": "clip",
+          "src": "recordings/agent-dashboard.mp4",
+          "src_in": 0.8,
+          "src_out": 15.8,
+          "dur": 14.5,
+          "zoom": [
+            1.0,
+            1.06
+          ],
+          "overlays": [
+            [
+              "assets/overlays/o-title.png",
+              0.6,
+              7.5
+            ],
+            [
+              "assets/overlays/o-staging.png",
+              0.0,
+              15.0
+            ]
+          ]
+        }
       ]
     },
     {
       "id": 2,
       "name": "Building with Claude Code and ViaSocket",
       "segments": [
-        { "type": "card", "src": "assets/cards/c02-prompt.png", "dur": 9, "zoom": [1.0, 1.04], "supplied": "recordings/supplied/claude-code-build.mp4" },
-        { "type": "card", "src": "assets/cards/c03-steps.png", "dur": 9, "zoom": [1.0, 1.04] },
-        { "type": "card", "src": "assets/cards/c04-skill.png", "dur": 7, "zoom": [1.02, 1.08] },
-        { "type": "card", "src": "assets/cards/c05-sdk.png", "dur": 8, "zoom": [1.02, 1.08] },
-        { "type": "clip", "src": "recordings/agent-integrations.mp4", "src_in": 0.8, "src_out": 12.0, "dur": 9, "tail": 4, "overlays": [["assets/overlays/o-viasocket.png", 1.2, 8.4]] },
-        { "type": "card", "src": "assets/cards/c06-actions.png", "dur": 8, "zoom": [1.02, 1.08] }
+        {
+          "type": "card",
+          "src": "assets/cards/c02-prompt.png",
+          "dur": 8,
+          "zoom": [
+            1.0,
+            1.04
+          ],
+          "supplied": "recordings/supplied/claude-code-build.mp4"
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c03-steps.png",
+          "dur": 8,
+          "zoom": [
+            1.0,
+            1.04
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/m05-viasocket-home.png",
+          "dur": 5,
+          "zoom": [
+            1.0,
+            1.05
+          ],
+          "supplied": "recordings/supplied/viasocket-home.png",
+          "overlays": [
+            [
+              "assets/overlays/o-viasocket-site.png",
+              0.4,
+              4.8
+            ]
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c04-skill.png",
+          "dur": 6,
+          "zoom": [
+            1.02,
+            1.08
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c05-sdk.png",
+          "dur": 7,
+          "zoom": [
+            1.02,
+            1.08
+          ]
+        },
+        {
+          "type": "clip",
+          "src": "recordings/agent-integrations.mp4",
+          "src_in": 0.8,
+          "src_out": 12.0,
+          "dur": 9,
+          "tail": 4,
+          "overlays": [
+            [
+              "assets/overlays/o-viasocket.png",
+              1.2,
+              8.4
+            ]
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c06-actions.png",
+          "dur": 7,
+          "zoom": [
+            1.02,
+            1.08
+          ]
+        }
       ]
     },
     {
       "id": 3,
       "name": "Hosting on Embarko",
       "segments": [
-        { "type": "card", "src": "assets/cards/m01-embarko-host.png", "dur": 4, "supplied": "recordings/supplied/embarko-host-new-app.mp4" },
-        { "type": "card", "src": "assets/cards/c07-hosting-prompt.png", "dur": 7, "zoom": [1.0, 1.05] },
-        { "type": "card", "src": "assets/cards/m02-claude-paste.png", "dur": 3, "supplied": "recordings/supplied/claude-code-deploy.mp4" },
-        { "type": "card", "src": "assets/cards/c08-deploy.png", "dur": 8, "zoom": [1.0, 1.05] },
-        { "type": "clip", "src": "recordings/prod-landing.mp4", "src_in": 0.5, "src_out": 7.5, "dur": 6, "zoom": [1.0, 1.05], "overlays": [["assets/overlays/o-live.png", 0.5, 5.8]] },
-        { "type": "card", "src": "assets/cards/m03-embarko-dashboard.png", "dur": 4, "supplied": "recordings/supplied/embarko-dashboard.mp4" },
-        { "type": "card", "src": "assets/cards/c09-running.png", "dur": 8, "zoom": [1.0, 1.05] }
+        {
+          "type": "card",
+          "src": "assets/cards/m06-embarko-home.png",
+          "dur": 5,
+          "zoom": [
+            1.0,
+            1.05
+          ],
+          "supplied": "recordings/supplied/embarko-home.png",
+          "overlays": [
+            [
+              "assets/overlays/o-embarko.png",
+              0.5,
+              4.8
+            ]
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c07-hosting-prompt.png",
+          "dur": 8,
+          "zoom": [
+            1.0,
+            1.05
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c08-deploy.png",
+          "dur": 8,
+          "zoom": [
+            1.0,
+            1.05
+          ]
+        },
+        {
+          "type": "clip",
+          "src": "recordings/prod-landing.mp4",
+          "src_in": 0.5,
+          "src_out": 7.5,
+          "dur": 5,
+          "zoom": [
+            1.0,
+            1.05
+          ],
+          "overlays": [
+            [
+              "assets/overlays/o-live.png",
+              0.5,
+              4.8
+            ]
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/m03-embarko-dashboard.png",
+          "dur": 5.5,
+          "zoom": [
+            1.0,
+            1.05
+          ],
+          "supplied": "recordings/supplied/embarko-dashboard.png",
+          "crop": [
+            0.235,
+            0.06,
+            0.535,
+            0.6
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/m03-embarko-dashboard.png",
+          "dur": 4.5,
+          "zoom": [
+            1.0,
+            1.03
+          ],
+          "supplied": "recordings/supplied/embarko-dashboard.png",
+          "crop": [
+            0.24,
+            0.71,
+            0.52,
+            0.29
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c09-running.png",
+          "dur": 4,
+          "zoom": [
+            1.0,
+            1.03
+          ]
+        }
       ]
     },
     {
       "id": 4,
       "name": "DealSaathi in action: the offer workflow",
       "segments": [
-        { "type": "clip", "src": "recordings/seller-listing.mp4", "src_in": 1.0, "src_out": 29.5, "dur": 8, "tail": 3, "overlays": [["assets/overlays/o-step1.png", 0.2, 8.3]] },
-        { "type": "clip", "src": "recordings/buyer-offer.mp4", "src_in": 0.8, "src_out": 29.8, "dur": 9, "tail": 3, "overlays": [["assets/overlays/o-step2.png", 0.2, 9.3]] },
-        { "type": "clip", "src": "recordings/agent-forward.mp4", "src_in": 1.0, "src_out": 17.2, "dur": 6, "tail": 2.5, "overlays": [["assets/overlays/o-step3.png", 0.2, 6.3]] },
-        { "type": "clip", "src": "recordings/seller-counter.mp4", "src_in": 1.0, "src_out": 21.6, "dur": 6, "tail": 2.5, "overlays": [["assets/overlays/o-step4.png", 0.2, 6.3]] },
-        { "type": "clip", "src": "recordings/buyer-accept.mp4", "src_in": 1.0, "src_out": 21.9, "dur": 7, "tail": 3.5, "overlays": [["assets/overlays/o-step5.png", 0.2, 7.3]] },
-        { "type": "clip", "src": "recordings/agent-close.mp4", "src_in": 1.0, "src_out": 26.0, "dur": 8, "tail": 4, "overlays": [["assets/overlays/o-step6.png", 0.2, 8.3]] },
-        { "type": "card", "src": "assets/cards/c10-live-tests.png", "dur": 6, "zoom": [1.0, 1.05] }
+        {
+          "type": "clip",
+          "src": "recordings/seller-listing.mp4",
+          "src_in": 1.0,
+          "src_out": 29.5,
+          "dur": 8,
+          "tail": 3,
+          "overlays": [
+            [
+              "assets/overlays/o-step1.png",
+              0.2,
+              8.3
+            ]
+          ]
+        },
+        {
+          "type": "clip",
+          "src": "recordings/buyer-offer.mp4",
+          "src_in": 0.8,
+          "src_out": 29.8,
+          "dur": 9,
+          "tail": 3,
+          "overlays": [
+            [
+              "assets/overlays/o-step2.png",
+              0.2,
+              9.3
+            ]
+          ]
+        },
+        {
+          "type": "clip",
+          "src": "recordings/agent-forward.mp4",
+          "src_in": 1.0,
+          "src_out": 17.2,
+          "dur": 6,
+          "tail": 2.5,
+          "overlays": [
+            [
+              "assets/overlays/o-step3.png",
+              0.2,
+              6.3
+            ]
+          ]
+        },
+        {
+          "type": "clip",
+          "src": "recordings/seller-counter.mp4",
+          "src_in": 1.0,
+          "src_out": 21.6,
+          "dur": 6,
+          "tail": 2.5,
+          "overlays": [
+            [
+              "assets/overlays/o-step4.png",
+              0.2,
+              6.3
+            ]
+          ]
+        },
+        {
+          "type": "clip",
+          "src": "recordings/buyer-accept.mp4",
+          "src_in": 1.0,
+          "src_out": 21.9,
+          "dur": 7,
+          "tail": 3.5,
+          "overlays": [
+            [
+              "assets/overlays/o-step5.png",
+              0.2,
+              7.3
+            ]
+          ]
+        },
+        {
+          "type": "clip",
+          "src": "recordings/agent-close.mp4",
+          "src_in": 1.0,
+          "src_out": 26.0,
+          "dur": 8,
+          "tail": 4,
+          "overlays": [
+            [
+              "assets/overlays/o-step6.png",
+              0.2,
+              8.3
+            ]
+          ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c10-live-tests.png",
+          "dur": 6,
+          "zoom": [
+            1.0,
+            1.05
+          ]
+        }
       ]
     },
     {
       "id": 5,
       "name": "The result and closing",
       "segments": [
-        { "type": "clip", "src": "recordings/buyer-accept.mp4", "src_in": 16.5, "src_out": 21.9, "dur": 4.5, "overlays": [["assets/overlays/o-staging.png", 0.0, 4.6]] },
-        { "type": "clip", "src": "recordings/agent-dashboard.mp4", "src_in": 1.0, "src_out": 13.0, "dur": 11, "tail": 11, "zoom": [1.0, 1.05], "overlays": [["assets/overlays/o-staging.png", 0.0, 11.5]] },
-        { "type": "closing", "src": "assets/cards/c11-closing.png", "supplied": "assets/supplied/closing.png", "dur": 9.5, "zoom": [1.0, 1.0] }
+        {
+          "type": "clip",
+          "src": "recordings/buyer-accept.mp4",
+          "src_in": 16.5,
+          "src_out": 21.9,
+          "dur": 4.5,
+          "overlays": [
+            [
+              "assets/overlays/o-staging.png",
+              0.0,
+              4.6
+            ]
+          ]
+        },
+        {
+          "type": "clip",
+          "src": "recordings/agent-dashboard.mp4",
+          "src_in": 1.0,
+          "src_out": 13.0,
+          "dur": 11,
+          "tail": 11,
+          "zoom": [
+            1.0,
+            1.05
+          ],
+          "overlays": [
+            [
+              "assets/overlays/o-staging.png",
+              0.0,
+              11.5
+            ]
+          ]
+        },
+        {
+          "type": "closing",
+          "src": "assets/cards/c11-closing.png",
+          "supplied": "assets/supplied/closing.png",
+          "dur": 9.5,
+          "zoom": [
+            1.0,
+            1.03
+          ]
+        }
       ]
     }
   ]

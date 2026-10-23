@@ -198,7 +198,9 @@ const CARDS = {
     ['m01-embarko-host', 'Embarko · “Host new app” page', 'Screen recording: open Embarko’s Host new app page and copy the deployment prompt.', 'recordings/supplied/embarko-host-new-app.mp4'],
     ['m02-claude-paste', 'Claude Code · prompt pasted, deploy running', 'Screen recording: paste the prompt into Claude Code and let the deployment run.', 'recordings/supplied/claude-code-deploy.mp4'],
     ['m03-embarko-dashboard', 'Embarko dashboard · Running, URL, traffic, scheduled jobs', 'Screen recording: the dealsaathi-app dashboard with Running status, production URL, traffic and scheduled jobs.', 'recordings/supplied/embarko-dashboard.mp4'],
-    ['m04-claude-build', 'Claude Code · building DealSaathi', 'Optional screen recording of Claude Code at work. The cards before this are real session-log evidence.', 'recordings/supplied/claude-code-build.mp4']
+    ['m04-claude-build', 'Claude Code · building DealSaathi', 'Optional screen recording of Claude Code at work. The cards before this are real session-log evidence.', 'recordings/supplied/claude-code-build.mp4'],
+    ['m05-viasocket-home', 'viasocket.com · “Copy setup prompt”', 'Screenshot or recording of the ViaSocket site with its setup prompt for Claude Code.', 'recordings/supplied/viasocket-home.png'],
+    ['m06-embarko-home', 'embarko.ai', 'Screenshot or recording of the Embarko site.', 'recordings/supplied/embarko-home.png']
   ].map(([id, title, what, path]) => [id, () => ({ css: `body{background:repeating-linear-gradient(135deg,#111827 0 28px,#151e2e 28px 56px);color:#e5e7eb}`, html: `
     <div style="position:absolute;inset:150px 220px;border:4px dashed #f59e0b;border-radius:28px;display:flex;flex-direction:column;justify-content:center;padding:0 90px;background:rgba(17,24,39,.88)">
       <div style="font-size:30px;font-weight:800;letter-spacing:.16em;color:#f59e0b">MISSING ASSET · PLACEHOLDER</div>
@@ -207,13 +209,23 @@ const CARDS = {
       <div class="mono" style="font-size:26px;margin-top:34px;color:#fbbf24">Drop it at video-project/${esc(path)}</div>
     </div>` })])),
 
-  'c11-closing': () => ({ css: `body{background:radial-gradient(1200px 760px at 50% 0%,#0b7a5a 0%,transparent 62%),#04261d;color:#f7f5ef}`, html: `
-    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30px">
-      <div style="display:flex;align-items:center;gap:26px">${LOGO(96)}<span style="font-size:84px;font-weight:800;letter-spacing:-.03em">DealSaathi</span></div>
-      <div style="font-size:92px;font-weight:800;letter-spacing:-.03em;margin-top:30px">ViaSocket <span style="color:#6ee7b7">×</span> Embarko</div>
-      <div style="font-size:50px;font-weight:500;color:#a7f3d0">Build. Integrate. Deploy.</div>
+  // Closing card: the official logo files (assets/brand/, from viasocket.com and embarko.ai, unaltered and
+  // scaled by height only) on DealSaathi's off-white, with the dashboard. Replaced by assets/supplied/closing.png if given.
+  'c11-closing': () => {
+    const svg = (p) => `data:image/svg+xml;base64,${readFileSync(join(ROOT, p)).toString('base64')}`
+    return { css: `body{background:radial-gradient(900px 700px at 85% 40%,#dcefe6 0%,transparent 65%),#f7f5ef;color:#0f172a}`, html: `
+    <div style="position:absolute;left:120px;top:150px;width:760px">
+      <div style="display:flex;align-items:center;gap:22px">${LOGO(78)}<span style="font-size:72px;font-weight:800;letter-spacing:-.03em;color:#064e3b">DealSaathi</span></div>
+      <div style="font-size:30px;color:#475569;margin-top:58px;font-weight:500">Built with Claude Code, powered by</div>
+      <div style="display:flex;align-items:center;gap:34px;margin-top:26px">
+        <img src="${svg('assets/brand/viasocket-logo.svg')}" style="height:74px;width:auto;display:block">
+        <span style="font-size:52px;font-weight:300;color:#94a3b8">×</span>
+        <span style="display:flex;align-items:center;gap:12px"><img src="${svg('assets/brand/embarko-icon.svg')}" style="height:60px;width:60px;border-radius:12px;display:block"><span style="font-size:62px;font-weight:700;color:#171a1e;letter-spacing:-.02em">Embarko</span></span>
+      </div>
+      <div style="font-size:58px;font-weight:700;color:#065f46;margin-top:64px;letter-spacing:-.02em">Build. Integrate. Deploy.</div>
     </div>
-    <div style="position:absolute;left:0;right:0;bottom:46px;text-align:center;font-size:22px;color:#fbbf24">Placeholder closing card (text only, no logos) · replace with the supplied graphic at assets/supplied/closing.png</div>` })
+    <div style="position:absolute;right:90px;top:180px;width:900px;border-radius:18px;overflow:hidden;border:1px solid #d6e4dc;box-shadow:0 40px 90px -40px rgba(6,78,59,.55)"><img src="${img('assets/stills/dashboard.png')}" style="width:100%;display:block"></div>` }
+  }
 }
 
 // ---------- overlays (transparent) ----------
@@ -231,6 +243,7 @@ const OVERLAYS = {
   'o-claude': () => chip('Built with Claude Code'),
   'o-viasocket': () => chip('Powered by ViaSocket SDK', 'Gmail · Slack · Google Calendar, connected per user'),
   'o-embarko': () => chip('Hosted on Embarko', null, { tone: 'light' }),
+  'o-viasocket-site': () => chip('Powered by ViaSocket SDK', 'viasocket.com · a setup prompt for Claude Code'),
   'o-live': () => chip('Deployed and running live', 'https://dealsaathi-app.embarko.app', { tone: 'light' }),
   'o-prod-url': () => `${chip('Production · signed-out landing page', 'https://dealsaathi-app.embarko.app', { pos: 'br', tone: 'light' })}`,
   'o-staging': () => tag('Staging copy of the same release · synthetic demo accounts and listings'),

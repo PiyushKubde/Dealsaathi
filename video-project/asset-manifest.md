@@ -2,24 +2,37 @@
 
 What the video is made of, where each piece came from, and what is still missing.
 Nothing in the video is mocked up: every screen is a real recording or a card built from a real file,
-API response or session-log line. The only made-up visuals are the clearly labelled MISSING-asset slates
-and the placeholder closing card.
+API response or session-log line. The only made-up visuals are the clearly labelled MISSING-asset slates, shown when a screenshot is
+absent, and the closing card's layout.
 
-## Still needed (the draft shows a placeholder for each)
+## Still needed
 
-| # | Asset | Scene | Put it at | What to record |
+| # | Asset | Scene | Put it at | Notes |
 |---|---|---|---|---|
-| 1 | **Your narration** | all | `audio/voice/scene1.wav` … `scene5.wav` | Read `narration.md`, one file per scene. |
-| 2 | **Closing graphic** with the DealSaathi dashboard and ViaSocket × Embarko logos | 5 | `assets/supplied/closing.png` (1920×1080 ideally; any size is fitted without distortion) | The supplied brand graphic. The draft has a text-only card and no logos, because no logo files were supplied. |
-| 3 | **Embarko "Host new app" page**, copying the deployment prompt | 3 | `recordings/supplied/embarko-host-new-app.mp4` | Screen recording in your browser, signed in to Embarko. |
-| 4 | **Claude Code with the prompt pasted, deploy running** | 3 | `recordings/supplied/claude-code-deploy.mp4` | Screen recording. Hide or crop the deploy token. |
-| 5 | **Embarko dashboard for dealsaathi-app**: Running status, production URL, traffic, scheduled jobs | 3 | `recordings/supplied/embarko-dashboard.mp4` | Screen recording of the app's page in the Embarko console. |
-| 6 | *(optional)* **Claude Code building DealSaathi** | 2 | `recordings/supplied/claude-code-build.mp4` | Replaces the starting-prompt card if supplied. The session-log cards already show the real steps. |
-| 7 | *(optional)* **Music** | all | `audio/music.wav` (or .mp3/.m4a) | A licensed instrumental track. Otherwise the generated temporary bed is used. |
+| 1 | **Your narration** | all | `audio/voice/scene1.wav` … `scene5.wav` | Read `narration.md`, one file per scene. This is the only thing keeping the render a draft. |
+| 2 | *(optional)* Your own closing graphic | 5 | `assets/supplied/closing.png` | Replaces the closing card, which is now built from the official logo files (see below). |
+| 3 | *(optional)* Screen recordings instead of screenshots | 2, 3 | `recordings/supplied/<same name>.mp4` | A recording with the same name as a screenshot below takes its place. |
+| 4 | *(optional)* Music | all | `audio/music.wav` (or .mp3/.m4a) | A licensed instrumental track. Otherwise the generated temporary bed is used. |
+| 5 | *(optional)* Claude Code with the Embarko prompt pasted | 3 | `recordings/supplied/claude-code-deploy.mp4` | Add a segment for it in `timeline.json` (slate `m02`). For now, the session-log card shows the pasted prompt. |
 
-Items 3–5 could not be recorded from here: the Embarko console needs your browser sign-in, and no
-Embarko UI recording was supplied. The Embarko facts the video shows instead (deployments, status,
-scheduled job, start-up log) come from Embarko's API (item E1 below).
+## Your screenshots (23 Oct 2026, `recordings/supplied/`, not in git)
+
+| File | Used for |
+|---|---|
+| `viasocket-home.png` | Scene 2: viasocket.com, "Copy setup prompt · Paste it into Cursor, Claude Code or Codex" |
+| `embarko-home.png` | Scene 3: embarko.ai, on "This is Embarko…" |
+| `embarko-dashboard.png` | Scene 3: the dealsaathi-app page in the Embarko console (Running, URL, traffic), then a close-up of the scheduled job. Your account name shows in its top-left corner. |
+
+The "Host new app" page and copying the prompt (the first two steps of the requested Scene 3 order)
+are not shown as screens: the embarko.ai screenshot and the hosting-prompt card from the session log
+stand in for them.
+
+## Brand files (`assets/brand/`)
+
+`viasocket-logo.svg` (from viasocket.com/new-home/assets/logo.svg) and `embarko-icon.svg` (from
+embarko.ai/assets/embarko-icon.svg), unaltered and scaled by height only. The Embarko lockup is the icon
+plus the word "Embarko", as on embarko.ai. `assets/stills/dashboard.png` is a frame of the staging
+dashboard recording.
 
 ## Real recordings (made for this video, `recordings/`, regenerate with `src/record.mjs`)
 
@@ -60,8 +73,8 @@ on-screen label saying so.
 | `c08-deploy` | First deploy under the account (18:04:22 building → 18:04:34 live, claimed) and the latest deployments v17–v20 | Session log line 665; Embarko API (E1) |
 | `c09-running` | Status live, start-up log (user counts removed), scheduled job `*/15 * * * *`, last run ok 200 | Embarko API (E1) |
 | `c10-live-tests` | Gmail and Slack live tests passed; Google Calendar test confirmed later that day | Your screenshot of 22 Oct 2026 (`evidence/screenshots/`, **e-mail addresses redacted**), and the session log |
-| `c11-closing` | **Placeholder** closing card, text only | — (replace with asset 2) |
-| `m01`–`m04` | **MISSING-asset slates** | — (replace with assets 3–6) |
+| `c11-closing` | Closing card: DealSaathi, the ViaSocket and Embarko logos, "Build. Integrate. Deploy.", the dashboard | `assets/brand/`, `assets/stills/dashboard.png` |
+| `m01`–`m06` | MISSING-asset slates, shown only when a screenshot or recording is absent | — |
 
 ## Evidence files (`evidence/`)
 
