@@ -10,3 +10,4 @@ audio/voice/*
 assets/supplied/*
 !assets/supplied/.gitkeep
 DealSaathi-Demo.mp4
+__pycache__/
