@@ -177,7 +177,9 @@ function duplicatesHtml(duplicates, { canOverride }) {
 // ---------- pages ----------
 async function renderDashboard() {
   main.innerHTML = '<p class="muted">Loading…</p>'
-  const d = await api('/api/dashboard')
+  const [d, me] = await Promise.all([api('/api/dashboard'), api('/api/me').catch(() => null)])
+  const firstStep = me?.profile && !me.profile.serviceAreas?.length
+    ? '<div class="notice info"><strong>First step:</strong> add the areas you serve in <a href="#/profile">Profile</a>. Buyers and sellers in those areas are then assigned to you automatically; until then, claim buyers from the <a href="#/pool">Lead pool</a>.</div>' : ''
   const t = d.byType
   const list = (leads, empty) => leads.length
     ? `<ul class="timeline">${leads.map((l) => `<li><a href="#/leads/${l.id}"><strong>${esc(l.full_name)}</strong></a> ${typeBadge(l.customer_type)}
@@ -186,6 +188,7 @@ async function renderDashboard() {
   main.innerHTML = `
     <div class="page-head"><div><h1>Dashboard</h1><p>All counts come from the leads saved in ${esc(storedIn())}.</p></div>
       <div class="row"><a class="btn primary" href="#/assistant">Add a lead with AI</a><a class="btn ghost" href="#/leads/new">New lead form</a></div></div>
+    ${firstStep}
     <div class="grid stats">
       <div class="card stat"><div class="label">Total leads</div><div class="value">${d.total}</div></div>
       <div class="card stat"><div class="label">Buyers</div><div class="value">${t.buyer || 0}</div></div>
@@ -588,11 +591,49 @@ async function renderAssistant() {
 const session = { mode: 'accounts', hosted: false, user: null, hasUsers: true, registrationNeedsCode: false }
 const storedIn = () => (session.hosted ? "DealSaathi's own database on its hosting server" : 'the local database on this computer')
 
+/** What DealSaathi stores, who sees it, and what leaves it (written from what the code does; keep it in step). */
+function renderPrivacy() {
+  document.querySelectorAll('[data-nav]').forEach((a) => a.classList.remove('active'))
+  main.innerHTML = `<article class="card prose" style="max-width:760px;margin:2rem auto">
+    <h1>Privacy</h1>
+    <p class="muted">How DealSaathi handles your information. <a href="#/dashboard">${session.user ? 'Back to DealSaathi' : 'Back to sign in'}</a></p>
+    <h2>What we store</h2>
+    <ul><li>Your account: name, email, optional phone, your role, and your password (stored only as a one-way hash).</li>
+      <li>Buyers and tenants: the requirements you save, listings you say you are interested in, viewing requests, offers and rental applications, and feedback after viewings.</li>
+      <li>Sellers and agents: the listings you create. Agents: their leads and the integrations they connect.</li>
+      <li>In-app notifications, and conversations with the AI Assistant (until you delete them).</li></ul>
+    <h2>Who sees what</h2>
+    <ul><li>Your assigned agent sees your requirements, contact details, interest, viewings and offers, to help you.</li>
+      <li>A listing’s owner sees only offers that the buyer’s agent forwarded to them: the amount, terms and the agent’s name, never the buyer’s name or contact details. Sellers see how many buyers match a listing, not who they are.</li>
+      <li>Buyers never see a listing’s street address, owner or private notes.</li></ul>
+    <h2>The AI Assistant</h2>
+    <p>When you message the Assistant, your message, the recent conversation, summaries of the listings it found (with contact details removed), your search criteria and any free viewing times are sent to viaSocket’s AI service to write the reply. Your name, email, phone number and street addresses are not sent.</p>
+    <p>viaSocket keeps these conversations on its side. DealSaathi cannot delete them there, and viaSocket has not published how long it keeps them. Deleting a conversation in DealSaathi removes it from DealSaathi only. You can use Browse listings, Recommendations and My requests without the Assistant.</p>
+    <p>The Assistant cannot book anything: it can only prepare a viewing request, which is sent when you press Confirm and booked only when your agent confirms it.</p>
+    <h2>Email and calendars</h2>
+    <p>Agents can connect their Google Calendar and Gmail through viaSocket. When an agent confirms a viewing, an event is created in their calendar and Google may send you an invitation; they may also email you a confirmation. Account emails (verification, password reset) are sent from DealSaathi’s connected Gmail account.</p>
+    <h2>What DealSaathi does not do</h2>
+    <p>DealSaathi does not take payments, deposits or electronic signatures, and does not transfer ownership. An offer “accepted in principle” is not an agreement; agreements and payments happen outside DealSaathi.</p>
+    <h2>How long we keep it</h2>
+    <p>Your information is kept while your account is in use, and database backups are kept by the service operator. Assistant conversations stay until you delete them. To have your account and data removed, ask your agent or the DealSaathi team.</p>
+  </article>`
+}
+
 function renderLogin(view = session.hasUsers ? 'signin' : 'register') {
   document.querySelectorAll('[data-nav]').forEach((a) => a.classList.remove('active'))
   const register = view === 'register'
-  main.innerHTML = `
-    <div class="card" style="max-width:440px;margin:3rem auto">
+  main.innerHTML = `<div class="landing">
+    <section class="landing-intro">
+      <h1>Find, show and agree on property, with your agent alongside</h1>
+      <p>DealSaathi connects buyers and tenants, sellers and landlords, and the agents who help them, in one place.</p>
+      <ul class="landing-roles">
+        <li><strong>Buyers and tenants</strong> save what they want, get matching listings with the reasons, say “I’m interested”, request viewings in their agent’s calendar, and make offers or rental applications.</li>
+        <li><strong>Sellers and landlords</strong> list a property, see how many buyers match (never who), and answer offers that buyers’ agents forward: accept in principle, decline or counter.</li>
+        <li><strong>Agents</strong> receive buyers in their area, confirm viewings, pass offers on and record outcomes.</li>
+      </ul>
+      <p class="small muted">An accepted offer is an agreement in principle only: DealSaathi takes no payments or signatures. <a href="#/privacy">Privacy</a></p>
+    </section>
+    <div class="card landing-card">
       <h1>${register ? 'Create your account' : 'Sign in'}</h1>
       <p class="muted">${register ? 'DealSaathi connects buyers, sellers and the agents who help them.' : 'Sign in to DealSaathi.'}</p>
       <form id="auth-form" class="stack" novalidate>
@@ -611,7 +652,7 @@ function renderLogin(view = session.hasUsers ? 'signin' : 'register') {
         <button class="btn ghost" type="button" id="auth-switch">${register ? 'I already have an account' : 'Create an account'}</button>
         ${register ? '' : '<button class="btn link small" type="button" id="auth-forgot">Forgot your password?</button>'}
       </form>
-    </div>`
+    </div></div>`
   const form = document.getElementById('auth-form')
   form.querySelector('input').focus()
   form.querySelectorAll('input[name=role]').forEach((r) => r.addEventListener('change', () => {
@@ -1062,7 +1103,7 @@ async function renderAutomations() {
       <label class="radio"><input type="checkbox" name="onDue" ${cfg.onDue !== false ? 'checked' : ''}> Also remind on the due date</label>
       <div class="field"><label for="razorpayConnectionId">Payment links (optional)</label>${(apps.bySlug.razorpay?.connections || []).filter((c) => c.status === 'active').length
         ? `<select id="razorpayConnectionId" name="razorpayConnectionId"><option value="">Don’t use Razorpay: I confirm payments myself</option>${apps.bySlug.razorpay.connections.filter((c) => c.status === 'active').map((c) => `<option value="${c.id}" ${String(c.id) === String(cfg.razorpayConnectionId) ? 'selected' : ''}>Razorpay: ${esc(c.label || 'account')}</option>`).join('')}</select>`
-        : '<div class="notice info small">Without Razorpay you confirm payments yourself on the Rent page. <a href="#/integrations">Connect Razorpay</a> to add payment links and automatic checks.</div>'}</div>
+        : '<div class="notice info small">You confirm payments yourself on the Rent page. Razorpay payment links are switched off on this server until a real-payment test has passed; DealSaathi takes no payments itself.</div>'}</div>
       <p class="small muted">Reminders go out between 9 am and 9 pm (India time), one per stage, and stop when Razorpay reports the link paid or you record a payment.</p>
       <div class="notice ${a.scheduler ? 'ok' : 'warn'} small">${a.scheduler ? 'The scheduler checks every 15 minutes.' : 'The 15-minute scheduler runs only on the hosted DealSaathi. Here, use Run check now.'}</div>
       <div class="row"><button class="btn ghost small" type="button" id="rent-run-now">Run check now</button><span id="rent-run-out" class="small"></span></div>`
@@ -2439,7 +2480,7 @@ function agentActionHtml(a) {
 }
 
 async function renderAgentAssistant() {
-  main.innerHTML = `<div class="page-head"><div><h1>Assistant</h1><p>Ask in your own words. It searches published listings, explains why they match and can check your agent’s free times. Nothing reaches your agent until you press <strong>Confirm</strong>, and a viewing is booked only when your agent confirms it.</p></div>
+  main.innerHTML = `<div class="page-head"><div><h1>Assistant</h1><p>Ask in your own words. It searches published listings, explains why they match and can check your agent’s free times. Your messages are processed by viaSocket’s AI service (<a href="#/privacy">Privacy</a>). Nothing reaches your agent until you press <strong>Confirm</strong>, and a viewing is booked only when your agent confirms it.</p></div>
       <div class="row"><button class="btn ghost" id="ag-delete" hidden>Delete conversation</button><button class="btn ghost" id="ag-new">New conversation</button></div></div>
     <section class="card chat agent-chat" aria-label="Conversation">
       <div class="chat-log" id="ag-log" aria-live="polite"></div>
@@ -2630,6 +2671,7 @@ async function route() {
   // Links from emails work signed in or not; an invitation waits for sign-in.
   if (parts[0] === 'verify-email' && parts[1]) return renderVerifyEmail(parts[1])
   if (parts[0] === 'reset-password' && parts[1]) return renderResetPassword(parts[1])
+  if (parts[0] === 'privacy') return renderPrivacy()
   if (parts[0] === 'invite' && parts[1]) store.set('pendingInvite', parts[1])
   if (!session.user) return renderLogin()
   const invite = store.get('pendingInvite')

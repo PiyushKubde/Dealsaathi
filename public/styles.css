@@ -151,6 +151,13 @@ dl.details dd { margin: 0; }
 .interest-control .notice { flex-basis: 100%; margin: .35rem 0 0; }
 .request-row { justify-content: space-between; align-items: flex-start; }
 .request-main { flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
+/* Sign-in page: what DealSaathi is, beside the form */
+.landing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 440px); gap: 2rem; max-width: 1040px; margin: 2rem auto; align-items: start; }
+.landing-intro h1 { font-size: 1.6rem; line-height: 1.25; margin-top: 0; }
+.landing-roles { padding-left: 1.1rem; display: grid; gap: .6rem; }
+.landing-card { width: 100%; }
+@media (max-width: 900px) { .landing { grid-template-columns: 1fr; margin: 1rem auto; } }
+.prose h2 { font-size: 1.05rem; margin-top: 1.25rem; }
 .offer-box { margin-top: .5rem; padding: .6rem .75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
 .offer-box .row { margin-top: .4rem; }
 .offer-form { max-width: 32rem; margin-top: .5rem; }

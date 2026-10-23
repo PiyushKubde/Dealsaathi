@@ -73,6 +73,9 @@ const agentPage = await newPage()
 await register(agentPage, { role: 'agent', name: 'Asha Broker', email: 'asha@agency.in' })
 const agentNav = await visitAllNav(agentPage, 'agent')
 check('agent: sees the agent sections', ['#/leads', '#/pool', '#/automations', '#/activity'].every((h) => agentNav.includes(h)), agentNav.join(' '))
+await go(agentPage, '#/dashboard')
+await agentPage.waitForSelector('main .page-head')
+check('agent: a new agent is told the first step (service areas)', /First step:/.test(await agentPage.textContent('main')) && Boolean(await agentPage.$('main a[href="#/profile"]')))
 await go(agentPage, `#/profile`)
 await agentPage.fill('#pr-areas', 'Pune, Baner')
 await agentPage.click('#pr-form button[type=submit]')
@@ -550,6 +553,13 @@ check('xss: listing detail page', !(await agentPage2.evaluate(() => window.__xss
 const anon = await newPage()
 await anon.goto(`${B}/`)
 await anon.waitForSelector('#auth-form')
+check('landing: explains DealSaathi for each role next to the form, with no payments promised', /Buyers and tenants/.test(await anon.textContent('main')) && /Sellers and landlords/.test(await anon.textContent('main')) && /takes no payments or signatures/.test(await anon.textContent('main')))
+await anon.click('.landing-intro a[href="#/privacy"]')
+await anon.waitForSelector('main .prose')
+const privacy = await anon.textContent('main')
+check('privacy: reachable signed out; discloses AI processing by viaSocket and its unknown retention', /sent to viaSocket’s AI service/.test(privacy) && /has not published how long it keeps them/.test(privacy) && /does not take payments, deposits or electronic signatures/.test(privacy))
+await anon.click('main .prose a[href="#/dashboard"]')
+await anon.waitForSelector('#auth-form')
 await anon.keyboard.press('Tab')
 const focused = await anon.evaluate(() => document.activeElement?.tagName)
 check('a11y: keyboard focus reaches a control', ['A', 'INPUT', 'BUTTON'].includes(focused), focused)
@@ -561,7 +571,7 @@ await anon.waitForTimeout(400)
 check('sign-in: wrong password gives a readable error', /do not match/.test(await anon.textContent('#auth-error')))
 
 // ---- Phone width: no horizontal scroll on the main pages of each role
-for (const [who, page, hrefs] of [['buyer', buyerPage, ['#/dashboard', '#/assistant', '#/recommendations', '#/my-requests', '#/my-viewings']], ['seller', sellerPage, ['#/dashboard', '#/my-listings', '#/listing-offers']], ['agent', agentPage2, ['#/dashboard', '#/leads', '#/interests', '#/offers', '#/viewings', '#/activity']]]) {
+for (const [who, page, hrefs] of [['buyer', buyerPage, ['#/dashboard', '#/privacy', '#/assistant', '#/recommendations', '#/my-requests', '#/my-viewings']], ['seller', sellerPage, ['#/dashboard', '#/my-listings', '#/listing-offers']], ['agent', agentPage2, ['#/dashboard', '#/leads', '#/interests', '#/offers', '#/viewings', '#/activity']]]) {
   await page.setViewportSize({ width: 390, height: 800 })
   for (const h of hrefs) {
     await go(page, h)
