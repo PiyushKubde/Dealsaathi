@@ -1,0 +1,557 @@
+{
+"source": "take-2026-10-23.m4a 18.66\u201347.66 s",
+"words": [
+{
+"word": "i",
+"line": 0,
+"start": 0.315,
+"end": 0.425
+},
+{
+"word": "started",
+"line": 0,
+"start": 0.435,
+"end": 0.855
+},
+{
+"word": "with",
+"line": 0,
+"start": 0.865,
+"end": 0.995
+},
+{
+"word": "a",
+"line": 0,
+"start": 1.005,
+"end": 1.035
+},
+{
+"word": "single",
+"line": 0,
+"start": 1.045,
+"end": 1.455
+},
+{
+"word": "detailed",
+"line": 0,
+"start": 1.465,
+"end": 1.765
+},
+{
+"word": "prompt",
+"line": 0,
+"start": 1.775,
+"end": 2.115
+},
+{
+"word": "in",
+"line": 0,
+"start": 2.125,
+"end": 2.255
+},
+{
+"word": "claude",
+"line": 0,
+"start": 2.265,
+"end": 2.485
+},
+{
+"word": "code",
+"line": 0,
+"start": 2.495,
+"end": 2.725
+},
+{
+"word": "describing",
+"line": 0,
+"start": 3.055,
+"end": 3.525
+},
+{
+"word": "the",
+"line": 0,
+"start": 3.535,
+"end": 3.605
+},
+{
+"word": "application",
+"line": 0,
+"start": 3.615,
+"end": 4.295
+},
+{
+"word": "i",
+"line": 0,
+"start": 4.305,
+"end": 4.365
+},
+{
+"word": "wanted",
+"line": 0,
+"start": 4.375,
+"end": 4.795
+},
+{
+"word": "to",
+"line": 0,
+"start": 4.805,
+"end": 4.905
+},
+{
+"word": "build",
+"line": 0,
+"start": 4.915,
+"end": 5.355
+},
+{
+"word": "and",
+"line": 0,
+"start": 5.365,
+"end": 5.535
+},
+{
+"word": "refined",
+"line": 0,
+"start": 5.545,
+"end": 5.915
+},
+{
+"word": "it",
+"line": 0,
+"start": 5.925,
+"end": 6.165
+},
+{
+"word": "with",
+"line": 0,
+"start": 6.285,
+"end": 6.435
+},
+{
+"word": "follow",
+"line": 0,
+"start": 6.445,
+"end": 6.725
+},
+{
+"word": "up",
+"line": 0,
+"start": 6.735,
+"end": 6.805
+},
+{
+"word": "prompts",
+"line": 0,
+"start": 6.815,
+"end": 7.135
+},
+{
+"word": "along",
+"line": 0,
+"start": 7.145,
+"end": 7.505
+},
+{
+"word": "the",
+"line": 0,
+"start": 7.515,
+"end": 7.585
+},
+{
+"word": "way",
+"line": 0,
+"start": 7.595,
+"end": 7.745
+},
+{
+"word": "with",
+"line": 1,
+"start": 8.345,
+"end": 8.535
+},
+{
+"word": "the",
+"line": 1,
+"start": 8.545,
+"end": 8.615
+},
+{
+"word": "via",
+"line": 1,
+"start": 8.625,
+"end": 8.765
+},
+{
+"word": "socket",
+"line": 1,
+"start": 8.775,
+"end": 9.025
+},
+{
+"word": "s",
+"line": 1,
+"start": 9.035,
+"end": 9.185
+},
+{
+"word": "d",
+"line": 1,
+"start": 9.195,
+"end": 9.315
+},
+{
+"word": "k",
+"line": 1,
+"start": 9.325,
+"end": 9.665
+},
+{
+"word": "and",
+"line": 1,
+"start": 9.675,
+"end": 9.875
+},
+{
+"word": "skill",
+"line": 1,
+"start": 9.885,
+"end": 10.205
+},
+{
+"word": "available",
+"line": 1,
+"start": 10.215,
+"end": 10.495
+},
+{
+"word": "in",
+"line": 1,
+"start": 10.505,
+"end": 10.665
+},
+{
+"word": "the",
+"line": 1,
+"start": 10.675,
+"end": 10.735
+},
+{
+"word": "development",
+"line": 1,
+"start": 10.745,
+"end": 11.165
+},
+{
+"word": "workflow",
+"line": 1,
+"start": 11.175,
+"end": 11.535
+},
+{
+"word": "claude",
+"line": 1,
+"start": 11.545,
+"end": 12.185
+},
+{
+"word": "could",
+"line": 1,
+"start": 12.195,
+"end": 12.335
+},
+{
+"word": "build",
+"line": 1,
+"start": 12.345,
+"end": 12.915
+},
+{
+"word": "deal",
+"line": 1,
+"start": 12.925,
+"end": 13.085
+},
+{
+"word": "saathi",
+"line": 1,
+"start": 13.095,
+"end": 13.555
+},
+{
+"word": "and",
+"line": 1,
+"start": 13.685,
+"end": 13.845
+},
+{
+"word": "integrate",
+"line": 1,
+"start": 13.855,
+"end": 14.245
+},
+{
+"word": "the",
+"line": 1,
+"start": 14.255,
+"end": 14.365
+},
+{
+"word": "capabilities",
+"line": 1,
+"start": 14.375,
+"end": 14.995
+},
+{
+"word": "it",
+"line": 1,
+"start": 15.005,
+"end": 15.205
+},
+{
+"word": "needed",
+"line": 1,
+"start": 15.215,
+"end": 15.815
+},
+{
+"word": "without",
+"line": 1,
+"start": 16.065,
+"end": 16.435
+},
+{
+"word": "us",
+"line": 1,
+"start": 16.445,
+"end": 16.595
+},
+{
+"word": "having",
+"line": 1,
+"start": 16.605,
+"end": 16.945
+},
+{
+"word": "to",
+"line": 1,
+"start": 16.955,
+"end": 17.075
+},
+{
+"word": "build",
+"line": 1,
+"start": 17.085,
+"end": 17.235
+},
+{
+"word": "every",
+"line": 1,
+"start": 17.245,
+"end": 17.535
+},
+{
+"word": "integration",
+"line": 1,
+"start": 17.545,
+"end": 18.065
+},
+{
+"word": "from",
+"line": 1,
+"start": 18.075,
+"end": 18.255
+},
+{
+"word": "scratch",
+"line": 1,
+"start": 18.265,
+"end": 18.655
+},
+{
+"word": "the",
+"line": 2,
+"start": 18.665,
+"end": 19.315
+},
+{
+"word": "goal",
+"line": 2,
+"start": 19.325,
+"end": 19.495
+},
+{
+"word": "is",
+"line": 2,
+"start": 19.505,
+"end": 19.695
+},
+{
+"word": "to",
+"line": 2,
+"start": 19.705,
+"end": 19.805
+},
+{
+"word": "spend",
+"line": 2,
+"start": 19.815,
+"end": 20.205
+},
+{
+"word": "less",
+"line": 2,
+"start": 20.215,
+"end": 20.395
+},
+{
+"word": "time",
+"line": 2,
+"start": 20.405,
+"end": 20.645
+},
+{
+"word": "wiring",
+"line": 2,
+"start": 20.655,
+"end": 21.065
+},
+{
+"word": "services",
+"line": 2,
+"start": 21.075,
+"end": 21.505
+},
+{
+"word": "together",
+"line": 2,
+"start": 21.515,
+"end": 21.975
+},
+{
+"word": "and",
+"line": 2,
+"start": 21.985,
+"end": 22.145
+},
+{
+"word": "more",
+"line": 2,
+"start": 22.155,
+"end": 22.355
+},
+{
+"word": "time",
+"line": 2,
+"start": 22.365,
+"end": 22.575
+},
+{
+"word": "building",
+"line": 2,
+"start": 22.585,
+"end": 22.895
+},
+{
+"word": "the",
+"line": 2,
+"start": 22.905,
+"end": 22.975
+},
+{
+"word": "product",
+"line": 2,
+"start": 22.985,
+"end": 23.275
+},
+{
+"word": "itself",
+"line": 2,
+"start": 23.285,
+"end": 23.675
+},
+{
+"word": "but",
+"line": 3,
+"start": 24.025,
+"end": 24.315
+},
+{
+"word": "building",
+"line": 3,
+"start": 24.325,
+"end": 24.935
+},
+{
+"word": "the",
+"line": 3,
+"start": 25.265,
+"end": 25.375
+},
+{
+"word": "app",
+"line": 3,
+"start": 25.385,
+"end": 25.705
+},
+{
+"word": "is",
+"line": 3,
+"start": 25.715,
+"end": 25.895
+},
+{
+"word": "only",
+"line": 3,
+"start": 25.905,
+"end": 26.225
+},
+{
+"word": "half",
+"line": 3,
+"start": 26.235,
+"end": 26.515
+},
+{
+"word": "the",
+"line": 3,
+"start": 26.525,
+"end": 26.715
+},
+{
+"word": "job",
+"line": 3,
+"start": 26.725,
+"end": 26.925
+},
+{
+"word": "now",
+"line": 3,
+"start": 27.395,
+"end": 27.575
+},
+{
+"word": "let's",
+"line": 3,
+"start": 27.585,
+"end": 27.915
+},
+{
+"word": "get",
+"line": 3,
+"start": 27.925,
+"end": 28.075
+},
+{
+"word": "it",
+"line": 3,
+"start": 28.085,
+"end": 28.455
+},
+{
+"word": "live",
+"line": 3,
+"start": 28.465,
+"end": 28.615
+}
+]
+}

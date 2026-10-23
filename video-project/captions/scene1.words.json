@@ -1,0 +1,341 @@
+{
+"source": "take-2026-10-23.m4a 0.00\u201318.66 s",
+"words": [
+{
+"word": "what",
+"line": 0,
+"start": 0.0,
+"end": 0.79
+},
+{
+"word": "if",
+"line": 0,
+"start": 0.8,
+"end": 0.86
+},
+{
+"word": "you",
+"line": 0,
+"start": 0.87,
+"end": 1.0
+},
+{
+"word": "could",
+"line": 0,
+"start": 1.01,
+"end": 1.23
+},
+{
+"word": "build",
+"line": 0,
+"start": 1.24,
+"end": 2.89
+},
+{
+"word": "an",
+"line": 0,
+"start": 2.9,
+"end": 3.15
+},
+{
+"word": "a",
+"line": 0,
+"start": 3.16,
+"end": 3.45
+},
+{
+"word": "i",
+"line": 0,
+"start": 3.46,
+"end": 3.49
+},
+{
+"word": "powered",
+"line": 0,
+"start": 3.5,
+"end": 4.2
+},
+{
+"word": "application",
+"line": 0,
+"start": 4.21,
+"end": 5.24
+},
+{
+"word": "starting",
+"line": 0,
+"start": 5.25,
+"end": 5.68
+},
+{
+"word": "from",
+"line": 0,
+"start": 5.69,
+"end": 5.85
+},
+{
+"word": "a",
+"line": 0,
+"start": 5.86,
+"end": 5.89
+},
+{
+"word": "single",
+"line": 0,
+"start": 5.9,
+"end": 6.26
+},
+{
+"word": "prompt",
+"line": 0,
+"start": 6.27,
+"end": 6.67
+},
+{
+"word": "connect",
+"line": 0,
+"start": 6.68,
+"end": 7.07
+},
+{
+"word": "real",
+"line": 0,
+"start": 7.08,
+"end": 7.3
+},
+{
+"word": "world",
+"line": 0,
+"start": 7.31,
+"end": 7.42
+},
+{
+"word": "integrations",
+"line": 0,
+"start": 7.43,
+"end": 8.08
+},
+{
+"word": "without",
+"line": 0,
+"start": 8.09,
+"end": 8.31
+},
+{
+"word": "building",
+"line": 0,
+"start": 8.32,
+"end": 8.67
+},
+{
+"word": "them",
+"line": 0,
+"start": 8.68,
+"end": 8.85
+},
+{
+"word": "from",
+"line": 0,
+"start": 8.86,
+"end": 9.06
+},
+{
+"word": "scratch",
+"line": 0,
+"start": 9.07,
+"end": 9.48
+},
+{
+"word": "and",
+"line": 0,
+"start": 9.49,
+"end": 9.68
+},
+{
+"word": "deploy",
+"line": 0,
+"start": 9.69,
+"end": 10.06
+},
+{
+"word": "it",
+"line": 0,
+"start": 10.07,
+"end": 10.2
+},
+{
+"word": "with",
+"line": 0,
+"start": 10.21,
+"end": 10.38
+},
+{
+"word": "ease",
+"line": 0,
+"start": 10.39,
+"end": 10.66
+},
+{
+"word": "meet",
+"line": 1,
+"start": 11.11,
+"end": 11.28
+},
+{
+"word": "deal",
+"line": 1,
+"start": 11.29,
+"end": 11.5
+},
+{
+"word": "saathi",
+"line": 1,
+"start": 11.51,
+"end": 11.9
+},
+{
+"word": "built",
+"line": 1,
+"start": 12.16,
+"end": 12.42
+},
+{
+"word": "using",
+"line": 1,
+"start": 12.43,
+"end": 12.71
+},
+{
+"word": "claude",
+"line": 1,
+"start": 12.72,
+"end": 13.02
+},
+{
+"word": "code",
+"line": 1,
+"start": 13.03,
+"end": 13.44
+},
+{
+"word": "and",
+"line": 1,
+"start": 13.45,
+"end": 13.56
+},
+{
+"word": "the",
+"line": 1,
+"start": 13.57,
+"end": 13.62
+},
+{
+"word": "via",
+"line": 1,
+"start": 13.63,
+"end": 13.74
+},
+{
+"word": "socket",
+"line": 1,
+"start": 13.75,
+"end": 14.04
+},
+{
+"word": "s",
+"line": 1,
+"start": 14.05,
+"end": 14.2
+},
+{
+"word": "d",
+"line": 1,
+"start": 14.21,
+"end": 14.32
+},
+{
+"word": "k",
+"line": 1,
+"start": 14.33,
+"end": 14.47
+},
+{
+"word": "and",
+"line": 1,
+"start": 14.48,
+"end": 14.82
+},
+{
+"word": "deployed",
+"line": 1,
+"start": 14.83,
+"end": 15.18
+},
+{
+"word": "on",
+"line": 1,
+"start": 15.19,
+"end": 15.3
+},
+{
+"word": "embarko",
+"line": 1,
+"start": 15.31,
+"end": 15.83
+},
+{
+"word": "let",
+"line": 2,
+"start": 16.29,
+"end": 16.48
+},
+{
+"word": "me",
+"line": 2,
+"start": 16.49,
+"end": 16.57
+},
+{
+"word": "show",
+"line": 2,
+"start": 16.58,
+"end": 16.75
+},
+{
+"word": "you",
+"line": 2,
+"start": 16.76,
+"end": 17.15
+},
+{
+"word": "how",
+"line": 2,
+"start": 17.19,
+"end": 17.38
+},
+{
+"word": "it",
+"line": 2,
+"start": 17.39,
+"end": 17.57
+},
+{
+"word": "all",
+"line": 2,
+"start": 17.58,
+"end": 17.7
+},
+{
+"word": "comes",
+"line": 2,
+"start": 17.71,
+"end": 17.89
+},
+{
+"word": "together",
+"line": 2,
+"start": 17.9,
+"end": 18.35
+}
+]
+}

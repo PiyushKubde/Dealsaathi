@@ -1,0 +1,437 @@
+{
+"source": "take-2026-10-23.m4a 47.66\u201374.94 s",
+"words": [
+{
+"word": "now",
+"line": 0,
+"start": 0.38,
+"end": 0.7
+},
+{
+"word": "that",
+"line": 0,
+"start": 1.07,
+"end": 1.25
+},
+{
+"word": "the",
+"line": 0,
+"start": 1.26,
+"end": 1.34
+},
+{
+"word": "application",
+"line": 0,
+"start": 1.35,
+"end": 1.86
+},
+{
+"word": "is",
+"line": 0,
+"start": 1.87,
+"end": 1.99
+},
+{
+"word": "built",
+"line": 0,
+"start": 2.0,
+"end": 2.31
+},
+{
+"word": "we",
+"line": 0,
+"start": 2.32,
+"end": 2.43
+},
+{
+"word": "need",
+"line": 0,
+"start": 2.44,
+"end": 2.62
+},
+{
+"word": "to",
+"line": 0,
+"start": 2.63,
+"end": 2.78
+},
+{
+"word": "get",
+"line": 0,
+"start": 2.79,
+"end": 3.06
+},
+{
+"word": "it",
+"line": 0,
+"start": 3.07,
+"end": 3.4
+},
+{
+"word": "online",
+"line": 0,
+"start": 3.41,
+"end": 3.85
+},
+{
+"word": "this",
+"line": 1,
+"start": 3.86,
+"end": 4.33
+},
+{
+"word": "is",
+"line": 1,
+"start": 4.34,
+"end": 4.45
+},
+{
+"word": "embarko",
+"line": 1,
+"start": 4.46,
+"end": 5.02
+},
+{
+"word": "a",
+"line": 1,
+"start": 5.03,
+"end": 5.05
+},
+{
+"word": "hosting",
+"line": 1,
+"start": 5.06,
+"end": 5.38
+},
+{
+"word": "platform",
+"line": 1,
+"start": 5.39,
+"end": 5.79
+},
+{
+"word": "designed",
+"line": 1,
+"start": 5.8,
+"end": 6.14
+},
+{
+"word": "to",
+"line": 1,
+"start": 6.15,
+"end": 6.22
+},
+{
+"word": "make",
+"line": 1,
+"start": 6.23,
+"end": 6.42
+},
+{
+"word": "deploying",
+"line": 1,
+"start": 6.43,
+"end": 6.76
+},
+{
+"word": "applications",
+"line": 1,
+"start": 6.77,
+"end": 7.36
+},
+{
+"word": "straightforward",
+"line": 1,
+"start": 7.37,
+"end": 8.04
+},
+{
+"word": "we",
+"line": 2,
+"start": 8.38,
+"end": 8.46
+},
+{
+"word": "follow",
+"line": 2,
+"start": 8.47,
+"end": 8.79
+},
+{
+"word": "its",
+"line": 2,
+"start": 8.8,
+"end": 8.96
+},
+{
+"word": "hosting",
+"line": 2,
+"start": 8.97,
+"end": 9.24
+},
+{
+"word": "workflow",
+"line": 2,
+"start": 9.25,
+"end": 9.56
+},
+{
+"word": "provide",
+"line": 2,
+"start": 9.57,
+"end": 10.07
+},
+{
+"word": "the",
+"line": 2,
+"start": 10.08,
+"end": 10.26
+},
+{
+"word": "required",
+"line": 2,
+"start": 10.27,
+"end": 10.74
+},
+{
+"word": "configuration",
+"line": 2,
+"start": 10.75,
+"end": 11.49
+},
+{
+"word": "and",
+"line": 2,
+"start": 11.5,
+"end": 11.67
+},
+{
+"word": "let",
+"line": 2,
+"start": 11.68,
+"end": 11.96
+},
+{
+"word": "our",
+"line": 2,
+"start": 11.97,
+"end": 12.05
+},
+{
+"word": "a",
+"line": 2,
+"start": 12.06,
+"end": 12.24
+},
+{
+"word": "i",
+"line": 2,
+"start": 12.25,
+"end": 12.34
+},
+{
+"word": "coding",
+"line": 2,
+"start": 12.35,
+"end": 12.7
+},
+{
+"word": "agent",
+"line": 2,
+"start": 12.71,
+"end": 13.24
+},
+{
+"word": "handle",
+"line": 2,
+"start": 13.25,
+"end": 13.63
+},
+{
+"word": "the",
+"line": 2,
+"start": 13.64,
+"end": 13.8
+},
+{
+"word": "deployment",
+"line": 2,
+"start": 14.91,
+"end": 15.42
+},
+{
+"word": "steps",
+"line": 2,
+"start": 15.43,
+"end": 16.09
+},
+{
+"word": "once",
+"line": 3,
+"start": 16.51,
+"end": 16.89
+},
+{
+"word": "the",
+"line": 3,
+"start": 16.9,
+"end": 16.97
+},
+{
+"word": "deployment",
+"line": 3,
+"start": 16.98,
+"end": 17.45
+},
+{
+"word": "succeeds",
+"line": 3,
+"start": 17.46,
+"end": 18.13
+},
+{
+"word": "deal",
+"line": 3,
+"start": 18.14,
+"end": 18.36
+},
+{
+"word": "saathi",
+"line": 3,
+"start": 18.37,
+"end": 18.91
+},
+{
+"word": "is",
+"line": 3,
+"start": 19.83,
+"end": 19.97
+},
+{
+"word": "accessible",
+"line": 3,
+"start": 19.98,
+"end": 20.49
+},
+{
+"word": "through",
+"line": 3,
+"start": 20.5,
+"end": 20.83
+},
+{
+"word": "its",
+"line": 3,
+"start": 20.84,
+"end": 21.0
+},
+{
+"word": "own",
+"line": 3,
+"start": 21.01,
+"end": 21.22
+},
+{
+"word": "live",
+"line": 3,
+"start": 21.23,
+"end": 21.45
+},
+{
+"word": "u",
+"line": 3,
+"start": 21.46,
+"end": 21.58
+},
+{
+"word": "r",
+"line": 3,
+"start": 21.59,
+"end": 21.67
+},
+{
+"word": "l",
+"line": 3,
+"start": 21.68,
+"end": 21.81
+},
+{
+"word": "embarko",
+"line": 4,
+"start": 22.15,
+"end": 22.57
+},
+{
+"word": "also",
+"line": 4,
+"start": 22.58,
+"end": 22.93
+},
+{
+"word": "gives",
+"line": 4,
+"start": 22.94,
+"end": 23.12
+},
+{
+"word": "us",
+"line": 4,
+"start": 23.13,
+"end": 23.3
+},
+{
+"word": "a",
+"line": 4,
+"start": 23.31,
+"end": 23.57
+},
+{
+"word": "dashboard",
+"line": 4,
+"start": 23.58,
+"end": 24.09
+},
+{
+"word": "to",
+"line": 4,
+"start": 24.39,
+"end": 24.47
+},
+{
+"word": "monitor",
+"line": 4,
+"start": 24.48,
+"end": 24.88
+},
+{
+"word": "traffic",
+"line": 4,
+"start": 24.89,
+"end": 25.34
+},
+{
+"word": "performance",
+"line": 4,
+"start": 25.35,
+"end": 25.94
+},
+{
+"word": "and",
+"line": 4,
+"start": 25.95,
+"end": 26.09
+},
+{
+"word": "scheduled",
+"line": 4,
+"start": 26.1,
+"end": 26.45
+},
+{
+"word": "jobs",
+"line": 4,
+"start": 26.46,
+"end": 26.82
+}
+]
+}

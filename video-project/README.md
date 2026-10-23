@@ -4,10 +4,9 @@ A ~3-minute product demo (1920×1080, 16:9, 30 fps, H.264 + AAC, English caption
 from real recordings and evidence cards. No video framework is needed: everything here runs with what is
 already installed (FFmpeg 6 with libass, Python 3 with NumPy, Node 22 with Playwright and Chromium).
 
-**Current state:** `out/DealSaathi-Demo-DRAFT.mp4` is a draft for one reason only: it has **no narration
-yet** (your voice has not been recorded), so the captions use temporary timing and a temporary music bed
-plays alone. It says DRAFT in the corner. Add your five voice files and `build.py` writes
-`DealSaathi-Demo.mp4` instead. See `asset-manifest.md`.
+**Current state:** narrated with your recording of 23 Oct 2026 (`audio/voice/take-2026-10-23.m4a`, cut
+into `scene1..5.wav`). `python3 src/build.py` writes `DealSaathi-Demo.mp4`. See `asset-manifest.md` for
+every source.
 
 ## Layout
 
@@ -38,25 +37,37 @@ python3 src/build.py --fast    # preview with the same timing, about 6 minutes
 
 The script prints the scene plan, the segments, and why the result is still a draft if it is one.
 
-## Replace the temporary timing with your voice
+## Your voice
 
-1. Record each scene of `narration.md` as its own file: `audio/voice/scene1.wav` to `scene5.wav`
-   (MP3 or M4A also work). Keep about half a second of silence at each end.
-2. Run `python3 src/build.py`.
+The narration is your recording, aligned word by word to `narration.md`:
 
-What changes automatically:
+```bash
+pip install pocketsphinx                                   # once; ~30 MB with its English model
+python3 src/align-voice.py audio/voice/<your take>.m4a    # one take of the whole script
+python3 src/align-voice.py --scenes                        # or: you recorded audio/voice/scene1..5 yourself
+python3 src/build.py
+```
 
-- **Scene lengths** follow your takes: each scene becomes *your take + 0.6 s lead-in + 1.0 s tail*,
-  and all its segments (and the overlays on them) are stretched or shortened in proportion.
-- **Captions** are re-timed across each take, by text length.
-- **Music** drops to a bed under your voice and ducks further while you speak (side-chain compression).
-  The mix is normalised to −16 LUFS, suitable for LinkedIn, X and YouTube.
+`align-voice.py` force-aligns the take to the script, cuts it into the five scenes at the pauses between
+them (`audio/voice/scene<N>.wav`), and writes each word's time (`captions/scene<N>.words.json`). Then
+`build.py`:
 
-For frame-accurate captions, write `captions/scene<N>.srt` with times relative to the start of that
-scene's voice file. It replaces the automatic timing for that scene. To change the caption text, edit the
-`> ` lines in `narration.md`, and say the same words in your recording.
+- **places each sentence** in its scene with a breath after it (`line_gap` in `timeline.json`, default
+  1 s), plus extra pauses at the phrases listed in a scene's `breaks`. Your delivery inside a sentence is
+  not changed;
+- **cues the visuals to your words:** a segment with `"cue": "A buyer finds it"` starts just before you
+  say that phrase, and the segments between cues share the time in between;
+- **times every caption** from its first word to its last;
+- cleans the voice lightly (rumble filter, gentle denoise, compression), ducks the music under it, and
+  normalises the mix to −16 LUFS.
 
-If you read the script in one take, cut it into the five files at the scene breaks (any audio editor).
+A scene's `hold` adds picture after its last sentence (the closing card holds for its final seconds this
+way). Run `python3 src/build.py --plan` to see the timing without rendering.
+
+If you re-record: keep the words of `narration.md`, or edit its `> ` lines to what you say first, then run
+`align-voice.py` again. Without word timings (no `.words.json`), a scene's voice file is placed whole and
+the captions are spread across it by length. For frame-accurate captions by hand, write
+`captions/scene<N>.srt`, with times relative to the start of that scene's voice file.
 
 ## Replace placeholders and recordings
 

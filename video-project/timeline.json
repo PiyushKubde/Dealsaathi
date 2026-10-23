@@ -39,9 +39,11 @@
               0.0,
               15.0
             ]
-          ]
+          ],
+          "cue": "connect real-world integrations"
         }
-      ]
+      ],
+      "hold": 0.5
     },
     {
       "id": 2,
@@ -64,7 +66,8 @@
           "zoom": [
             1.0,
             1.04
-          ]
+          ],
+          "cue": "and refined it"
         },
         {
           "type": "card",
@@ -81,7 +84,8 @@
               0.4,
               4.8
             ]
-          ]
+          ],
+          "cue": "With the ViaSocket SDK"
         },
         {
           "type": "card",
@@ -90,7 +94,8 @@
           "zoom": [
             1.02,
             1.08
-          ]
+          ],
+          "cue": "Claude could build"
         },
         {
           "type": "card",
@@ -99,7 +104,8 @@
           "zoom": [
             1.02,
             1.08
-          ]
+          ],
+          "cue": "without us having"
         },
         {
           "type": "clip",
@@ -114,7 +120,8 @@
               1.2,
               8.4
             ]
-          ]
+          ],
+          "cue": "The goal is"
         },
         {
           "type": "card",
@@ -123,9 +130,15 @@
           "zoom": [
             1.02,
             1.08
-          ]
+          ],
+          "cue": "But building the app"
         }
-      ]
+      ],
+      "hold": 1.5,
+      "breaks": {
+        "Claude could build": 0.5,
+        "without us having": 0.5
+      }
     },
     {
       "id": 3,
@@ -134,17 +147,34 @@
         {
           "type": "card",
           "src": "assets/cards/m06-embarko-home.png",
-          "dur": 5,
+          "dur": 4,
           "zoom": [
             1.0,
             1.05
           ],
+          "supplied": "recordings/supplied/embarko-home.png"
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/m06-embarko-home.png",
+          "dur": 5,
+          "zoom": [
+            1.0,
+            1.04
+          ],
           "supplied": "recordings/supplied/embarko-home.png",
+          "crop": [
+            0.2,
+            0.1,
+            0.6,
+            0.62
+          ],
+          "cue": "This is Embarko",
           "overlays": [
             [
               "assets/overlays/o-embarko.png",
-              0.5,
-              4.8
+              0.4,
+              6.0
             ]
           ]
         },
@@ -155,7 +185,8 @@
           "zoom": [
             1.0,
             1.05
-          ]
+          ],
+          "cue": "We follow its hosting workflow"
         },
         {
           "type": "card",
@@ -164,7 +195,8 @@
           "zoom": [
             1.0,
             1.05
-          ]
+          ],
+          "cue": "and let our AI"
         },
         {
           "type": "clip",
@@ -182,7 +214,8 @@
               0.5,
               4.8
             ]
-          ]
+          ],
+          "cue": "Once the deployment succeeds"
         },
         {
           "type": "card",
@@ -198,7 +231,8 @@
             0.06,
             0.535,
             0.6
-          ]
+          ],
+          "cue": "Embarko also gives us"
         },
         {
           "type": "card",
@@ -214,7 +248,8 @@
             0.71,
             0.52,
             0.29
-          ]
+          ],
+          "cue": "and scheduled jobs"
         },
         {
           "type": "card",
@@ -225,7 +260,11 @@
             1.03
           ]
         }
-      ]
+      ],
+      "hold": 3.5,
+      "breaks": {
+        "and let our AI coding agent": 0.8
+      }
     },
     {
       "id": 4,
@@ -259,7 +298,8 @@
               0.2,
               9.3
             ]
-          ]
+          ],
+          "cue": "A buyer finds it"
         },
         {
           "type": "clip",
@@ -274,7 +314,8 @@
               0.2,
               6.3
             ]
-          ]
+          ],
+          "cue": "The buyer's agent forwards"
         },
         {
           "type": "clip",
@@ -289,7 +330,8 @@
               0.2,
               6.3
             ]
-          ]
+          ],
+          "cue": "who makes a counter-offer"
         },
         {
           "type": "clip",
@@ -304,7 +346,8 @@
               0.2,
               7.3
             ]
-          ]
+          ],
+          "cue": "The buyer accepts"
         },
         {
           "type": "clip",
@@ -319,7 +362,8 @@
               0.2,
               8.3
             ]
-          ]
+          ],
+          "cue": "Every step notifies"
         },
         {
           "type": "card",
@@ -328,9 +372,32 @@
           "zoom": [
             1.0,
             1.05
+          ],
+          "cue": "Behind the scenes"
+        },
+        {
+          "type": "clip",
+          "src": "recordings/agent-close.mp4",
+          "src_in": 19.0,
+          "src_out": 26.0,
+          "dur": 5,
+          "tail": 7,
+          "cue": "One workflow, three roles",
+          "overlays": [
+            [
+              "assets/overlays/o-staging.png",
+              0.0,
+              5.5
+            ]
           ]
         }
-      ]
+      ],
+      "hold": 1.0,
+      "breaks": {
+        "A buyer finds it": 0.7,
+        "who makes a counter-offer": 0.9,
+        "and the agent records": 0.9
+      }
     },
     {
       "id": 5,
@@ -367,7 +434,8 @@
               0.0,
               11.5
             ]
-          ]
+          ],
+          "cue": "We've gone from"
         },
         {
           "type": "closing",
@@ -377,9 +445,12 @@
           "zoom": [
             1.0,
             1.03
-          ]
+          ],
+          "cue": "If you're building"
         }
-      ]
+      ],
+      "hold": 2.5
     }
-  ]
+  ],
+  "line_gap": 1.0
 }

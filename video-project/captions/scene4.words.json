@@ -1,0 +1,605 @@
+{
+"source": "take-2026-10-23.m4a 74.94\u2013110.03 s",
+"words": [
+{
+"word": "now",
+"line": 0,
+"start": 0.465,
+"end": 0.685
+},
+{
+"word": "let's",
+"line": 0,
+"start": 0.695,
+"end": 0.945
+},
+{
+"word": "see",
+"line": 0,
+"start": 0.955,
+"end": 1.185
+},
+{
+"word": "deal",
+"line": 0,
+"start": 1.195,
+"end": 1.385
+},
+{
+"word": "saathi",
+"line": 0,
+"start": 1.395,
+"end": 1.855
+},
+{
+"word": "in",
+"line": 0,
+"start": 1.865,
+"end": 1.985
+},
+{
+"word": "action",
+"line": 0,
+"start": 1.995,
+"end": 2.325
+},
+{
+"word": "a",
+"line": 1,
+"start": 2.465,
+"end": 2.525
+},
+{
+"word": "seller",
+"line": 1,
+"start": 2.535,
+"end": 2.775
+},
+{
+"word": "lists",
+"line": 1,
+"start": 3.175,
+"end": 3.765
+},
+{
+"word": "a",
+"line": 1,
+"start": 3.775,
+"end": 3.815
+},
+{
+"word": "four",
+"line": 1,
+"start": 3.825,
+"end": 4.165
+},
+{
+"word": "bedroom",
+"line": 1,
+"start": 4.175,
+"end": 4.505
+},
+{
+"word": "villa",
+"line": 1,
+"start": 4.515,
+"end": 4.795
+},
+{
+"word": "a",
+"line": 1,
+"start": 5.005,
+"end": 5.135
+},
+{
+"word": "buyer",
+"line": 1,
+"start": 5.145,
+"end": 5.425
+},
+{
+"word": "finds",
+"line": 1,
+"start": 5.435,
+"end": 5.835
+},
+{
+"word": "it",
+"line": 1,
+"start": 5.845,
+"end": 6.005
+},
+{
+"word": "taps",
+"line": 1,
+"start": 6.445,
+"end": 6.695
+},
+{
+"word": "i'm",
+"line": 1,
+"start": 6.705,
+"end": 6.885
+},
+{
+"word": "interested",
+"line": 1,
+"start": 6.895,
+"end": 8.075
+},
+{
+"word": "and",
+"line": 1,
+"start": 8.085,
+"end": 8.285
+},
+{
+"word": "makes",
+"line": 1,
+"start": 8.295,
+"end": 8.585
+},
+{
+"word": "an",
+"line": 1,
+"start": 8.595,
+"end": 8.685
+},
+{
+"word": "offer",
+"line": 1,
+"start": 8.695,
+"end": 8.985
+},
+{
+"word": "the",
+"line": 2,
+"start": 9.295,
+"end": 9.405
+},
+{
+"word": "buyer's",
+"line": 2,
+"start": 9.415,
+"end": 9.955
+},
+{
+"word": "agent",
+"line": 2,
+"start": 9.965,
+"end": 10.395
+},
+{
+"word": "forwards",
+"line": 2,
+"start": 10.405,
+"end": 10.775
+},
+{
+"word": "the",
+"line": 2,
+"start": 10.785,
+"end": 10.885
+},
+{
+"word": "offer",
+"line": 2,
+"start": 10.895,
+"end": 11.285
+},
+{
+"word": "to",
+"line": 2,
+"start": 11.295,
+"end": 11.425
+},
+{
+"word": "the",
+"line": 2,
+"start": 11.435,
+"end": 11.505
+},
+{
+"word": "owner",
+"line": 2,
+"start": 11.515,
+"end": 11.855
+},
+{
+"word": "who",
+"line": 2,
+"start": 11.865,
+"end": 12.325
+},
+{
+"word": "makes",
+"line": 2,
+"start": 12.335,
+"end": 12.635
+},
+{
+"word": "a",
+"line": 2,
+"start": 12.645,
+"end": 12.715
+},
+{
+"word": "counter",
+"line": 2,
+"start": 12.725,
+"end": 13.045
+},
+{
+"word": "offer",
+"line": 2,
+"start": 13.055,
+"end": 13.345
+},
+{
+"word": "the",
+"line": 3,
+"start": 13.705,
+"end": 13.825
+},
+{
+"word": "buyer",
+"line": 3,
+"start": 13.835,
+"end": 14.085
+},
+{
+"word": "accepts",
+"line": 3,
+"start": 14.095,
+"end": 14.865
+},
+{
+"word": "in",
+"line": 3,
+"start": 14.875,
+"end": 15.055
+},
+{
+"word": "principle",
+"line": 3,
+"start": 15.065,
+"end": 15.465
+},
+{
+"word": "and",
+"line": 3,
+"start": 15.475,
+"end": 15.865
+},
+{
+"word": "the",
+"line": 3,
+"start": 15.875,
+"end": 15.945
+},
+{
+"word": "agent",
+"line": 3,
+"start": 15.955,
+"end": 16.295
+},
+{
+"word": "records",
+"line": 3,
+"start": 16.305,
+"end": 16.635
+},
+{
+"word": "the",
+"line": 3,
+"start": 16.645,
+"end": 16.715
+},
+{
+"word": "outcome",
+"line": 3,
+"start": 16.725,
+"end": 17.065
+},
+{
+"word": "every",
+"line": 4,
+"start": 17.445,
+"end": 17.785
+},
+{
+"word": "step",
+"line": 4,
+"start": 17.795,
+"end": 18.165
+},
+{
+"word": "notifies",
+"line": 4,
+"start": 18.175,
+"end": 18.665
+},
+{
+"word": "the",
+"line": 4,
+"start": 18.675,
+"end": 18.815
+},
+{
+"word": "right",
+"line": 4,
+"start": 18.855,
+"end": 19.035
+},
+{
+"word": "people",
+"line": 4,
+"start": 19.045,
+"end": 19.305
+},
+{
+"word": "and",
+"line": 4,
+"start": 19.315,
+"end": 19.635
+},
+{
+"word": "the",
+"line": 4,
+"start": 19.645,
+"end": 19.715
+},
+{
+"word": "buyer's",
+"line": 4,
+"start": 19.725,
+"end": 20.045
+},
+{
+"word": "identity",
+"line": 4,
+"start": 20.055,
+"end": 20.635
+},
+{
+"word": "stays",
+"line": 4,
+"start": 20.645,
+"end": 21.165
+},
+{
+"word": "private",
+"line": 4,
+"start": 21.765,
+"end": 22.125
+},
+{
+"word": "from",
+"line": 4,
+"start": 22.135,
+"end": 22.315
+},
+{
+"word": "the",
+"line": 4,
+"start": 22.325,
+"end": 22.405
+},
+{
+"word": "seller",
+"line": 4,
+"start": 22.415,
+"end": 22.855
+},
+{
+"word": "behind",
+"line": 5,
+"start": 24.065,
+"end": 24.485
+},
+{
+"word": "the",
+"line": 5,
+"start": 24.495,
+"end": 24.565
+},
+{
+"word": "scenes",
+"line": 5,
+"start": 24.575,
+"end": 24.875
+},
+{
+"word": "the",
+"line": 5,
+"start": 24.885,
+"end": 25.005
+},
+{
+"word": "via",
+"line": 5,
+"start": 25.015,
+"end": 25.185
+},
+{
+"word": "socket",
+"line": 5,
+"start": 25.195,
+"end": 25.465
+},
+{
+"word": "s",
+"line": 5,
+"start": 25.475,
+"end": 25.605
+},
+{
+"word": "d",
+"line": 5,
+"start": 25.615,
+"end": 25.725
+},
+{
+"word": "k",
+"line": 5,
+"start": 25.735,
+"end": 25.835
+},
+{
+"word": "connects",
+"line": 5,
+"start": 25.845,
+"end": 26.385
+},
+{
+"word": "each",
+"line": 5,
+"start": 26.395,
+"end": 26.565
+},
+{
+"word": "agent's",
+"line": 5,
+"start": 26.575,
+"end": 26.985
+},
+{
+"word": "own",
+"line": 5,
+"start": 27.175,
+"end": 27.455
+},
+{
+"word": "gmail",
+"line": 5,
+"start": 27.465,
+"end": 27.825
+},
+{
+"word": "slack",
+"line": 5,
+"start": 27.835,
+"end": 28.215
+},
+{
+"word": "and",
+"line": 5,
+"start": 28.225,
+"end": 28.365
+},
+{
+"word": "google",
+"line": 5,
+"start": 28.375,
+"end": 28.575
+},
+{
+"word": "calendar",
+"line": 5,
+"start": 28.585,
+"end": 28.925
+},
+{
+"word": "and",
+"line": 5,
+"start": 29.405,
+"end": 29.755
+},
+{
+"word": "each",
+"line": 5,
+"start": 29.765,
+"end": 30.005
+},
+{
+"word": "one",
+"line": 5,
+"start": 30.015,
+"end": 30.175
+},
+{
+"word": "passed",
+"line": 5,
+"start": 30.185,
+"end": 30.505
+},
+{
+"word": "a",
+"line": 5,
+"start": 30.515,
+"end": 30.605
+},
+{
+"word": "live",
+"line": 5,
+"start": 30.615,
+"end": 30.795
+},
+{
+"word": "test",
+"line": 5,
+"start": 30.805,
+"end": 31.435
+},
+{
+"word": "one",
+"line": 6,
+"start": 31.445,
+"end": 31.695
+},
+{
+"word": "workflow",
+"line": 6,
+"start": 31.705,
+"end": 32.055
+},
+{
+"word": "three",
+"line": 6,
+"start": 32.065,
+"end": 32.405
+},
+{
+"word": "roles",
+"line": 6,
+"start": 32.415,
+"end": 32.795
+},
+{
+"word": "and",
+"line": 6,
+"start": 32.805,
+"end": 33.025
+},
+{
+"word": "far",
+"line": 6,
+"start": 33.035,
+"end": 33.315
+},
+{
+"word": "less",
+"line": 6,
+"start": 33.325,
+"end": 33.615
+},
+{
+"word": "back",
+"line": 6,
+"start": 33.625,
+"end": 34.145
+},
+{
+"word": "and",
+"line": 6,
+"start": 34.155,
+"end": 34.295
+},
+{
+"word": "forth",
+"line": 6,
+"start": 34.305,
+"end": 34.635
+}
+]
+}
