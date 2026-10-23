@@ -28,6 +28,47 @@ const FIELDS = [
 // ---------- helpers ----------
 /** Links that come from providers (payment, calendar) are shown only when they are plain https addresses. */
 const safeUrl = (u) => (/^https:\/\/[^\s"'<>]+$/.test(String(u || '')) ? u : null)
+/** Line icons for navigation and actions (24×24, stroke = currentColor). */
+const ICONS = {
+  dashboard: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+  notifications: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  assistant: '<path d="M12 3l1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6-4.6-1.9 4.6-1.9z"/><path d="M19 15l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"/>',
+  leads: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  pool: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  interests: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/>',
+  offers: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  properties: '<path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/><path d="M9 10h.01M15 10h.01"/>',
+  viewings: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  feedback: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  rent: '<path d="M6 3h12M6 8h12M6 13l8.5 8M6 13h3a5 5 0 0 0 0-10"/>',
+  integrations: '<path d="M9 2v6M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/>',
+  automations: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  profile: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  requirements: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  recommendations: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
+  browse: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  'my-requests': '<path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="m9 13 2 2 4-4"/>',
+  'my-tenancies': '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14 9l2 2"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  arrow: '<path d="M5 12h14M13 5l7 7-7 7"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14 9l2 2"/>',
+  apartment: '<rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 7h.01M15 7h.01M9 11h.01M15 11h.01M9 15h.01M15 15h.01M10 21v-3h4v3"/>',
+  house: '<path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/>',
+  plot: '<path d="M3 20h18"/><path d="m4 16 4-4 3 3 5-6 4 4"/>'
+}
+ICONS['my-viewings'] = ICONS['listing-viewings'] = ICONS.viewings
+ICONS['my-listings'] = ICONS.properties
+ICONS['listing-offers'] = ICONS.offers
+const icon = (name, cls = 'nav-icon') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`
+/** A neutral illustration of the property type (listings have no photos; this is never presented as one). */
+const PROP_ART = { apartment: 'apartment', commercial: 'properties', plot: 'plot', villa: 'house', independent_house: 'house', other: 'house' }
+const propArt = (type, cls = 'prop-thumb') => `<span class="${cls} t-${esc(type || 'other')}" aria-hidden="true">${icon(PROP_ART[type] || 'house', '')}</span>`
+const initialsOf = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
+
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const label = (group, v) => (v ? LABELS[group][v] || v : '')
 
@@ -53,6 +94,7 @@ function lookingFor(l) {
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '')
 const typeBadge = (t) => (t ? `<span class="badge ${esc(t)}">${esc(label('customer_type', t))}</span>` : '')
+const statusBadge = (s) => (s ? `<span class="status status-${esc(s)}">${esc(label('status', s))}</span>` : '')
 const VIA_LABELS = { buyer: 'the buyer (their own account)', assignment: 'assignment', form: 'form', assistant: 'AI assistant (confirmed by you)', gmail: 'Gmail via viaSocket', matching: 'automatic matching', automation: 'Buyer Follow-Up Reminders', calendar: 'Google Calendar via viaSocket', feedback: 'the buyer’s feedback', agent: 'the buyer’s agent', listing_owner: 'the listing’s owner' }
 const dash = (v) => (v == null || v === '' ? '<span class="muted">Unknown</span>' : esc(v))
 
@@ -176,33 +218,65 @@ function duplicatesHtml(duplicates, { canOverride }) {
 
 // ---------- pages ----------
 async function renderDashboard() {
-  main.innerHTML = '<p class="muted">Loading…</p>'
-  const [d, me] = await Promise.all([api('/api/dashboard'), api('/api/me').catch(() => null)])
+  main.innerHTML = '<p class="muted loading">Loading…</p>'
+  const [d, me, props, vws, unreadNow] = await Promise.all([api('/api/dashboard'), api('/api/me').catch(() => null),
+    api('/api/properties?scope=mine&limit=200').catch(() => null), api('/api/viewings').catch(() => null), api('/api/notifications?unread=1&limit=1').catch(() => null)])
   const firstStep = me?.profile && !me.profile.serviceAreas?.length
     ? '<div class="notice info"><strong>First step:</strong> add the areas you serve in <a href="#/profile">Profile</a>. Buyers and sellers in those areas are then assigned to you automatically; until then, claim buyers from the <a href="#/pool">Lead pool</a>.</div>' : ''
   const t = d.byType
   const list = (leads, empty) => leads.length
-    ? `<ul class="timeline">${leads.map((l) => `<li><a href="#/leads/${l.id}"><strong>${esc(l.full_name)}</strong></a> ${typeBadge(l.customer_type)}
-        <div class="small muted">${esc([l.preferred_location, lookingFor(l), budgetText(l)].filter(Boolean).join(' · ') || 'No preferences yet')} · ${esc(label('status', l.status))} · updated ${esc(fmtDate(l.updated_at))}</div></li>`).join('')}</ul>`
+    ? `<ul class="timeline">${leads.map((l) => `<li class="lead-item"><span class="initials" aria-hidden="true">${esc(initialsOf(l.full_name))}</span>
+        <div class="lead-main"><a href="#/leads/${l.id}"><strong>${esc(l.full_name)}</strong></a> ${typeBadge(l.customer_type)} ${statusBadge(l.status)}
+        <div class="small muted">${esc([l.preferred_location, lookingFor(l), budgetText(l)].filter(Boolean).join(' · ') || 'No preferences yet')} · updated ${esc(fmtDate(l.updated_at))}</div></div>
+        <a class="btn ghost small" href="#/leads/${l.id}" aria-label="Open ${esc(l.full_name)}">Open</a></li>`).join('')}</ul>`
     : `<p class="muted">${empty}</p>`
+  // Metric cards: real counts only; the bar is that count's share of all leads.
+  const share = (n) => (d.total ? Math.round((n / d.total) * 100) : 0)
+  const metric = (labelText, value, iconName, tone, note, pct) => `<div class="card stat metric tone-${tone}">
+      <div class="metric-top"><div class="label">${esc(labelText)}</div><span class="metric-icon">${icon(iconName, '')}</span></div>
+      <div class="value">${value}</div>${pct == null ? '' : `<div class="meter" role="img" aria-label="${pct}% of all leads"><span style="width:${pct}%"></span></div>`}<div class="metric-note">${esc(note)}</div></div>`
+  const listings = props ? (props.properties.length >= 200 ? '200+' : props.properties.length) : '—'
+  const hour = new Date().getHours()
+  const hello = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const unread = unreadNow?.unread ?? 0
+  const upcoming = (vws?.viewings || []).filter((v) => ['booked', 'booking', 'draft'].includes(v.status) && Date.parse(v.startAt) >= Date.now() - 3600000)
+    .sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt)).slice(0, 5)
+  const vChip = (v) => { const [, m, day] = String(v.localDate || '').split('-'); return `<span class="when-chip" aria-hidden="true"><b>${esc(Number(day) || '')}</b><span>${esc(['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(m)] || '')}</span></span>` }
+  const viewingsHtml = !vws ? '<p class="muted small">Viewings could not be loaded.</p>' : upcoming.length
+    ? `<ul class="timeline">${upcoming.map((v) => `<li class="lead-item">${vChip(v)}<div class="lead-main"><strong>${esc(v.leadName)}</strong> ${v.status === 'booked' ? '<span class="pill pill-on">Booked</span>' : '<span class="pill pill-setup">Awaiting your confirmation</span>'}
+        <div class="small muted">${esc(v.localTime || '')} · ${esc(v.properties.map((p) => p.title).join(', '))}</div></div></li>`).join('')}</ul>`
+    : '<p class="muted small">No upcoming viewings.</p>'
   main.innerHTML = `
-    <div class="page-head"><div><h1>Dashboard</h1><p>All counts come from the leads saved in ${esc(storedIn())}.</p></div>
-      <div class="row"><a class="btn primary" href="#/assistant">Add a lead with AI</a><a class="btn ghost" href="#/leads/new">New lead form</a></div></div>
+    <div class="hero"><div><h1>${hello}, ${esc(session.user.name.split(' ')[0])}</h1>
+      <div class="hero-date">${esc(new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))} · counts from the leads saved in ${esc(storedIn())}</div></div>
+      <div class="hero-actions">
+        <form class="search" id="dash-search" role="search">${icon('browse', '')}<label class="sr-only" for="dash-q">Search leads</label><input id="dash-q" name="q" type="search" placeholder="Search leads by name, phone, email or area" autocomplete="off"></form>
+        <a class="icon-btn" href="#/notifications" aria-label="Notifications${unread ? `, ${unread} unread` : ''}">${icon('notifications', '')}${unread ? `<span class="count">${unread > 99 ? '99+' : unread}</span>` : ''}</a>
+        <a class="btn primary" href="#/assistant">${icon('assistant', '')}Add a lead with AI</a><a class="btn ghost" href="#/leads/new">${icon('plus', '')}New lead form</a></div></div>
     ${firstStep}
     <div class="grid stats">
-      <div class="card stat"><div class="label">Total leads</div><div class="value">${d.total}</div></div>
-      <div class="card stat"><div class="label">Buyers</div><div class="value">${t.buyer || 0}</div></div>
-      <div class="card stat"><div class="label">Sellers</div><div class="value">${t.seller || 0}</div></div>
-      <div class="card stat"><div class="label">Tenants / Landlords</div><div class="value">${(t.tenant || 0) + (t.landlord || 0)}</div></div>
-      <div class="card stat"><div class="label">Need follow-up</div><div class="value">${d.followUp.total}</div></div>
+      ${metric('Total leads', d.total, 'leads', 'primary', 'Assigned to you', null)}
+      ${metric('Buyers', t.buyer || 0, 'browse', 'info', `${share(t.buyer || 0)}% of your leads`, share(t.buyer || 0))}
+      ${metric('Sellers', t.seller || 0, 'tag', 'gold', `${share(t.seller || 0)}% of your leads`, share(t.seller || 0))}
+      ${metric('Tenants / Landlords', (t.tenant || 0) + (t.landlord || 0), 'key', 'violet', `${share((t.tenant || 0) + (t.landlord || 0))}% of your leads`, share((t.tenant || 0) + (t.landlord || 0)))}
+      ${metric('Properties', listings, 'properties', 'primary', 'Listings you own or handle', null)}
+      ${metric('Need follow-up', d.followUp.total, 'clock', 'warn', `Not updated for ${d.followUpAfterDays}+ days`, share(d.followUp.total))}
     </div>
-    <div class="grid two-col">
-      <section class="card"><h2>Recent leads</h2>${list(d.recent, 'No leads yet. Add your first one with AI or the form.')}</section>
-      <section class="card"><h2>Need follow-up</h2><p class="small muted">Status New or Contacted, and not updated for ${d.followUpAfterDays}+ days.</p>
-        ${list(d.followUp.leads, 'Nothing to follow up right now.')}${d.followUp.total > 5 ? `<a href="#/leads?follow_up=1">See all ${d.followUp.total}</a>` : ''}</section>
+    <div class="dash-grid">
+      <section class="card"><div class="section-head"><h2>Recent leads</h2><a href="#/leads">All leads ${icon('arrow', 'nav-icon')}</a></div>${list(d.recent, 'No leads yet. Add your first one with AI or the form.')}</section>
+      <div class="dash-side">
+        <section class="card"><div class="section-head"><h2>Upcoming viewings</h2><a href="#/viewings">Viewings</a></div>${viewingsHtml}</section>
+        <section class="card"><div class="section-head"><h2>Need follow-up</h2>${d.followUp.total > 5 ? `<a href="#/leads?follow_up=1">See all ${d.followUp.total}</a>` : ''}</div><p class="small muted">Status New or Contacted, and not updated for ${d.followUpAfterDays}+ days.</p>
+          ${list(d.followUp.leads, 'Nothing to follow up right now.')}</section>
+      </div>
     </div>
-    <section class="card" style="margin-top:1rem"><h2>Your follow-up reminders</h2>
-      <p class="small muted">Created by the Buyer Follow-Up Reminders automation (<a href="#/automations">Automations</a>).</p><div id="reminders"><p class="muted">Loading…</p></div></section>`
+    <section class="card" style="margin-top:1.1rem"><div class="section-head"><h2>Your follow-up reminders</h2><a href="#/automations">Automations</a></div>
+      <p class="small muted">Created by the Buyer Follow-Up Reminders automation.</p><div id="reminders"><p class="muted loading">Loading…</p></div></section>`
+  document.getElementById('dash-search').addEventListener('submit', (e) => {
+    e.preventDefault()
+    const q = e.target.elements.q.value.trim()
+    location.hash = q ? `#/leads?q=${encodeURIComponent(q)}` : '#/leads'
+  })
   const box = document.getElementById('reminders')
   const loadReminders = async () => {
     try {
@@ -234,7 +308,7 @@ async function renderLeads(params) {
       <div class="field"><label for="location">Location</label><input id="location" name="location" value="${esc(state.location)}" placeholder="e.g. Pune"></div>
     </form>
     ${state.follow_up ? '<div class="notice info">Showing leads that need follow-up. <a href="#/leads">Show all</a></div>' : ''}
-    <div class="card" style="padding:0"><div class="table-wrap" id="results"><p class="empty">Loading…</p></div></div>`
+    <div class="card" style="padding:0"><div class="table-wrap" id="results"><p class="empty loading">Loading…</p></div></div>`
 
   const form = document.getElementById('filters')
   let timer
@@ -254,7 +328,7 @@ async function renderLeads(params) {
           <td><div class="cell-name">${esc(l.full_name)}</div><div class="code">${esc(l.code)}</div></td>
           <td>${typeBadge(l.customer_type)}</td><td>${esc(l.preferred_location || '')}</td><td>${esc(lookingFor(l))}</td>
           <td>${esc(budgetText(l))}</td><td>${esc(l.phone || '')}${l.phone && l.email ? '<br>' : ''}<span class="small">${esc(l.email || '')}</span></td>
-          <td>${esc(label('status', l.status))}</td><td class="small">${esc(fmtDate(l.created_at))}</td></tr>`).join('')}</tbody></table>
+          <td>${statusBadge(l.status)}</td><td class="small">${esc(fmtDate(l.created_at))}</td></tr>`).join('')}</tbody></table>
         <p class="small muted" style="padding:.5rem .75rem;margin:0">${total} lead${total === 1 ? '' : 's'}${total > leads.length ? `, showing the latest ${leads.length}` : ''}</p>`
         : `<p class="empty">${Object.values(values).some(Boolean) || state.follow_up ? 'No leads match these filters.' : 'No leads yet. <a href="#/assistant">Add one with AI</a>.'}</p>`
       results.querySelectorAll('tr[data-id]').forEach((tr) => {
@@ -272,7 +346,7 @@ async function renderLeads(params) {
 }
 
 async function renderLeadDetail(id) {
-  main.innerHTML = '<p class="muted">Loading…</p>'
+  main.innerHTML = '<p class="muted loading">Loading…</p>'
   let data
   try {
     data = await api(`/api/leads/${encodeURIComponent(id)}`)
@@ -284,7 +358,7 @@ async function renderLeadDetail(id) {
   const rows = [
     ['Lead ID', `<span class="code">${esc(l.code)}</span>`], ['Customer type', typeBadge(l.customer_type)], ['Phone', dash(l.phone)], ['Email', dash(l.email)],
     ['Preferred location', dash(l.preferred_location)], ['Property type', dash(label('property_type', l.property_type))], ['Interested in', dash(l.property_interest)],
-    ['Bedrooms', dash(l.bedrooms)], ['Budget', dash(budgetText(l))], ['Lead source', dash(label('source', l.source))], ['Status', esc(label('status', l.status))],
+    ['Bedrooms', dash(l.bedrooms)], ['Budget', dash(budgetText(l))], ['Lead source', dash(label('source', l.source))], ['Status', statusBadge(l.status)],
     ['Assigned to', l.buyer_user_id ? 'You (registered buyer, assigned by service area or claimed)' : 'You'], ['How assigned', dash((l.assignment_rule || '').replace(/_/g, ' '))],
     ['Self-registered buyer', l.buyer_user_id ? 'Yes: they manage their own requirements' : 'No'], ['Follow-up date', dash(l.follow_up_on)], ['Notes', dash(l.notes)], ['Created', esc(fmtDateTime(l.created_at))], ['Last updated', esc(fmtDateTime(l.updated_at))],
     ['Stored in', esc(storedIn())]
@@ -297,12 +371,12 @@ async function renderLeadDetail(id) {
       <section class="card"><h2>Activity</h2><ul class="timeline">${activities.map((a) => `<li><strong>${esc(a.summary)}</strong>
         <div class="small muted">${esc(fmtDateTime(a.created_at))} · via ${esc(VIA_LABELS[a.via] || a.via)}${a.user_name ? ` · by ${esc(a.user_name)}` : ''}</div></li>`).join('')}</ul></section>
     </div>
-    ${l.buyer_user_id ? '<section class="card" style="margin-top:1rem"><h2>Buyer interest</h2><p class="small muted">Listings this buyer said they are interested in, newest first.</p><div id="lead-interests"><p class="muted">Loading…</p></div></section><section class="card" style="margin-top:1rem"><h2>Offers</h2><div id="lead-offers"><p class="muted">Loading…</p></div></section>' : ''}
-    <section class="card" style="margin-top:1rem"><h2>Matching properties</h2><p class="small muted">Kept up to date automatically when this lead’s requirements or any listing change.</p><div id="lead-matches"><p class="muted">Loading…</p></div></section>
+    ${l.buyer_user_id ? '<section class="card" style="margin-top:1rem"><h2>Buyer interest</h2><p class="small muted">Listings this buyer said they are interested in, newest first.</p><div id="lead-interests"><p class="muted loading">Loading…</p></div></section><section class="card" style="margin-top:1rem"><h2>Offers</h2><div id="lead-offers"><p class="muted loading">Loading…</p></div></section>' : ''}
+    <section class="card" style="margin-top:1rem"><h2>Matching properties</h2><p class="small muted">Kept up to date automatically when this lead’s requirements or any listing change.</p><div id="lead-matches"><p class="muted loading">Loading…</p></div></section>
     <section class="card" style="margin-top:1rem"><h2>Transfer to another agent</h2><form id="transfer" class="row"><label for="t-agent" class="sr-only">Agent</label><select id="t-agent" name="agentId" style="width:auto"><option value="">Choose an agent</option></select><button class="btn ghost" type="submit">Transfer</button></form><div id="transfer-msg"></div></section>
     <section class="card" style="margin-top:1rem"><h2>Email this lead</h2>
       <p class="small muted">A follow-up or property recommendation, sent from your own connected Gmail through viaSocket (Gmail · Send Email). You review it before anything is sent.</p>
-      <div id="followup"><p class="muted">Loading…</p></div></section>`
+      <div id="followup"><p class="muted loading">Loading…</p></div></section>`
   const followupBox = document.getElementById('followup')
   renderLeadMatches(l, document.getElementById('lead-matches'), (preset) => renderFollowupPanel(l, followupBox, preset))
   if (l.buyer_user_id) renderInterestList(document.getElementById('lead-interests'), `/api/leads/${l.id}/interests`, { showLead: false })
@@ -755,7 +829,9 @@ const NAV = {
 function renderNav() {
   const nav = document.getElementById('nav')
   const items = session.user ? NAV[session.user.role] || [] : []
-  nav.innerHTML = items.map(([key, text]) => `<a href="#/${key}" data-nav="${key}">${esc(text)}${key === 'notifications' ? ' <span class="badge" id="unread" hidden></span>' : ''}</a>`).join('')
+  nav.innerHTML = items.map(([key, text]) => `<a href="#/${key}" data-nav="${key}">${icon(key)}<span>${esc(text)}</span>${key === 'notifications' ? ' <span class="badge" id="unread" hidden></span>' : ''}</a>`).join('')
+  const toggle = document.getElementById('nav-toggle')
+  if (toggle) toggle.hidden = !items.length
 }
 async function refreshUnread() {
   const el = document.getElementById('unread')
@@ -775,15 +851,16 @@ function updateAccessUi() {
   const box = document.createElement('div')
   box.id = 'account'
   box.className = 'account'
-  box.innerHTML = `<div class="small"><strong>${esc(session.user.name)}</strong> <span class="badge">${esc(ROLE_LABEL[session.user.role] || '')}</span><div class="muted">${esc(session.user.email)}</div>
-    ${session.user.emailVerified ? '' : '<div class="small" style="margin-top:.25rem"><span class="pill pill-setup">Email not verified</span> <button class="btn link small" type="button" id="verify-send">Send link</button></div>'}</div>`
+  box.innerHTML = `<div class="account-head"><span class="avatar" aria-hidden="true">${esc(initialsOf(session.user.name))}</span>
+      <div class="account-id small"><strong>${esc(session.user.name)}</strong> <span class="badge">${esc(ROLE_LABEL[session.user.role] || '')}</span><div class="muted">${esc(session.user.email)}</div></div></div>
+    ${session.user.emailVerified ? '' : '<div class="small"><span class="pill pill-setup">Email not verified</span> <button class="btn link small" type="button" id="verify-send">Send link</button></div>'}`
   box.querySelector('#verify-send')?.addEventListener('click', async () => {
     try { await api('/api/me/verification/send', { method: 'POST', body: {} }); toast(`Verification link sent to ${session.user.email}.`) } catch (error) { toast(error.message) }
   })
   const out = document.createElement('button')
   out.className = 'btn ghost small'
   out.id = 'sign-out'
-  out.textContent = 'Sign out'
+  out.innerHTML = `${icon('logout', '')}<span>Sign out</span>`
   out.addEventListener('click', async () => {
     await api('/api/session/logout', { method: 'POST', body: {} }).catch(() => {})
     session.user = null
@@ -872,7 +949,7 @@ async function renderIntegrations() {
   main.innerHTML = `
     <div class="page-head"><div><h1>Integrations</h1>
       <p>The apps DealSaathi works with. You sign in on each app’s own page; viaSocket keeps the access, and DealSaathi stores only a reference to your connection.</p></div></div>
-    <div id="int-notice"></div><div class="int-grid" id="int-grid"><p class="muted">Loading…</p></div>`
+    <div id="int-notice"></div><div class="int-grid" id="int-grid"><p class="muted loading">Loading…</p></div>`
   const notice = document.getElementById('int-notice')
   let ready = null
   try {
@@ -979,7 +1056,7 @@ async function renderAutomations() {
   main.innerHTML = `
     <div class="page-head"><div><h1>Real Estate Automations</h1>
       <p>Ready-made automations for your brokerage. DealSaathi runs them for you, and each one acts only through the accounts you connect on the Integrations page.</p></div></div>
-    <div id="auto-notice"></div><div class="auto-grid" id="auto-grid"><p class="muted">Loading…</p></div>
+    <div id="auto-notice"></div><div class="auto-grid" id="auto-grid"><p class="muted loading">Loading…</p></div>
     <dialog id="auto-dialog" class="wide-dialog" aria-labelledby="auto-title"><div id="auto-panel"></div></dialog>`
   const draw = async () => {
     const grid = document.getElementById('auto-grid')
@@ -1021,7 +1098,7 @@ async function renderAutomations() {
   async function openConfigure(a) {
     const dialog = document.getElementById('auto-dialog')
     const panel = document.getElementById('auto-panel')
-    panel.innerHTML = '<p class="muted">Loading…</p>'
+    panel.innerHTML = '<p class="muted loading">Loading…</p>'
     dialog.showModal()
     if (!a.available) {
       panel.innerHTML = `<h2 id="auto-title">${esc(a.name)}</h2><p>${esc(a.description)}</p><div class="notice info">${esc(a.problems[0])}</div>
@@ -1282,7 +1359,7 @@ async function renderProperties(params, { scope = params.get('scope') || 'mine' 
       <div class="field"><label for="ps">Status</label><select id="ps" name="status"><option value="">All</option>${Object.entries(P_LABELS.status).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
       <div class="field"><label for="pc">City</label><input id="pc" name="city" placeholder="e.g. Pune"></div>
     </form>
-    <div class="card" style="padding:0"><div class="table-wrap" id="p-results"><p class="empty">Loading…</p></div></div>`
+    <div class="card" style="padding:0"><div class="table-wrap" id="p-results"><p class="empty loading">Loading…</p></div></div>`
   const form = document.getElementById('p-filters')
   const load = async () => {
     const qs = new URLSearchParams(Object.entries(Object.fromEntries(new FormData(form))).filter(([, v]) => v))
@@ -1292,7 +1369,7 @@ async function renderProperties(params, { scope = params.get('scope') || 'mine' 
       const { properties } = await api(`/api/properties?${qs}`)
       const showState = qs.get('scope') === 'mine'
       box.innerHTML = properties.length ? `<table><thead><tr><th>Listing</th><th>Type</th><th>Where</th><th>Price</th><th>Status</th>${showState ? '<th>Listing state</th>' : ''}${role !== 'buyer' ? '<th>Matched buyers</th>' : ''}</tr></thead><tbody>
-        ${properties.map((p) => `<tr data-id="${p.id}" tabindex="0"><td><div class="cell-name">${esc(p.title)}${sampleBadge(p)}</div><div class="code">${esc(p.code)}</div></td>
+        ${properties.map((p) => `<tr data-id="${p.id}" tabindex="0"><td><div class="cell-flex">${propArt(p.property_type)}<div><div class="cell-name">${esc(p.title)}${sampleBadge(p)}</div><div class="code">${esc(p.code)}</div></div></div></td>
           <td>${esc(P_LABELS.listing_type[p.listing_type])} · ${esc(label('property_type', p.property_type))}${p.bedrooms != null ? ` · ${p.bedrooms} BHK` : ''}</td>
           <td>${esc([p.locality, p.city].filter(Boolean).join(', '))}</td><td>${esc(priceText(p))}</td><td>${esc(P_LABELS.status[p.status])}</td>${showState ? `<td>${STATE_BADGE[p.listing_state]}</td>` : ''}${role !== 'buyer' ? `<td>${p.match_count}</td>` : ''}</tr>`).join('')}</tbody></table>`
         : `<p class="empty">${qs.has('q') || qs.has('city') || qs.has('status') || qs.has('listing_type') ? 'No listings match these filters.' : role === 'buyer' ? 'No listings are published yet.' : 'No listings yet. Add your first one.'}</p>`
@@ -1598,8 +1675,8 @@ async function renderViewings(params) {
   main.innerHTML = `
     <div class="page-head"><div><h1>Viewings</h1><p>Booked in your Google Calendar after you confirm a free time. You record whether each viewing took place.</p></div></div>
     <div id="v-setup"></div>
-    <section class="card" id="v-new"><h2>Schedule a viewing</h2><p class="muted">Loading…</p></section>
-    <section class="card" style="margin-top:1rem"><h2>Your viewings</h2><div id="v-list"><p class="muted">Loading…</p></div></section>`
+    <section class="card" id="v-new"><h2>Schedule a viewing</h2><p class="muted loading">Loading…</p></section>
+    <section class="card" style="margin-top:1rem"><h2>Your viewings</h2><div id="v-list"><p class="muted loading">Loading…</p></div></section>`
   const auto = (await api('/api/automations')).automations.find((a) => a.key === 'viewing_scheduler')
   const box = document.getElementById('v-new')
   if (auto.status !== 'enabled') {
@@ -1760,7 +1837,7 @@ const VERDICT_LABEL = { liked: 'Liked it', too_expensive: 'Too expensive', wrong
 
 async function renderFeedback() {
   main.innerHTML = `<div class="page-head"><div><h1>Feedback</h1><p>Requests sent after viewings you marked as taken place, and what buyers answered.</p></div></div>
-    <section class="card"><div id="fb-list"><p class="muted">Loading…</p></div></section>`
+    <section class="card"><div id="fb-list"><p class="muted loading">Loading…</p></div></section>`
   const box = document.getElementById('fb-list')
   try {
     const { requests } = await api('/api/feedback')
@@ -1809,7 +1886,7 @@ const T_FIELDS = [
 
 async function renderRent() {
   main.innerHTML = `<div class="page-head"><div><h1>Tenancies and rent</h1><p>Rent is paid only when Razorpay confirms it or you record a payment you verified.</p></div>
-      <div class="row"><a class="btn primary" href="#/rent/new">Add tenancy</a></div></div><div id="rent-body"><p class="muted">Loading…</p></div>`
+      <div class="row"><a class="btn primary" href="#/rent/new">Add tenancy</a></div></div><div id="rent-body"><p class="muted loading">Loading…</p></div>`
   const box = document.getElementById('rent-body')
   try {
     const d = await api('/api/rent')
@@ -1936,7 +2013,7 @@ async function renderTenancy(id) {
 // ---------- every role: notifications and profile ----------
 async function renderNotifications() {
   main.innerHTML = `<div class="page-head"><div><h1>Notifications</h1><p>What DealSaathi told you, newest first. Each fact reaches you once.</p></div>
-    <button class="btn ghost" id="n-all">Mark all as read</button></div><section class="card"><div id="n-list"><p class="muted">Loading…</p></div></section>`
+    <button class="btn ghost" id="n-all">Mark all as read</button></div><section class="card"><div id="n-list"><p class="muted loading">Loading…</p></div></section>`
   const box = document.getElementById('n-list')
   const load = async () => {
     const { notifications } = await api('/api/notifications?limit=100')
@@ -1976,7 +2053,7 @@ async function renderProfile() {
 // ---------- agents: the unassigned pool and the activity log ----------
 async function renderPool() {
   main.innerHTML = `<div class="page-head"><div><h1>Lead pool</h1><p>Leads no agent is responsible for yet (for example, buyers in an area no agent serves). Nobody is notified about them; claim one to see its contact details.</p></div></div>
-    <section class="card"><div id="pool"><p class="muted">Loading…</p></div></section>`
+    <section class="card"><div id="pool"><p class="muted loading">Loading…</p></div></section>`
   const box = document.getElementById('pool')
   const { leads } = await api('/api/pool')
   box.innerHTML = leads.length ? `<ul class="timeline">${leads.map((l) => `<li class="conn-row"><div style="flex:1;min-width:0"><strong>${esc(l.firstName)}</strong> ${typeBadge(l.customerType)} ${l.selfRegistered ? '<span class="badge">Registered buyer</span>' : ''}
@@ -1997,7 +2074,7 @@ async function renderActivity(params) {
   const status = params.get('status') || ''
   main.innerHTML = `<div class="page-head"><div><h1>Activity log</h1><p>Every platform event about your leads and listings, and what processing it did. Failed events are retried automatically up to 5 times; then you can retry them here.</p></div>
     <div class="row">${[['', 'All'], ['failed', 'Failed'], ['pending', 'Waiting']].map(([k, v]) => `<a class="btn ${status === k ? 'primary' : 'ghost'} small" href="#/activity${k ? `?status=${k}` : ''}">${v}</a>`).join('')}</div></div>
-    <section class="card" style="padding:0"><div class="table-wrap" id="ev"><p class="empty">Loading…</p></div></section>`
+    <section class="card" style="padding:0"><div class="table-wrap" id="ev"><p class="empty loading">Loading…</p></div></section>`
   const { events } = await api(`/api/events${status ? `?status=${status}` : ''}`)
   const box = document.getElementById('ev')
   box.innerHTML = events.length ? `<table><thead><tr><th>When</th><th>Event</th><th>Status</th><th>Result</th></tr></thead><tbody>${events.map((e) => `<tr>
@@ -2072,13 +2149,13 @@ async function renderRequirements() {
 }
 
 async function renderRecommendations() {
-  main.innerHTML = '<div class="page-head"><div><h1>Recommendations</h1><p>Published properties that fit your saved requirements, best first, with the reasons. Updated automatically.</p></div><button class="btn ghost" id="rec-refresh">Refresh</button></div><div id="recs"><p class="muted">Loading…</p></div>'
+  main.innerHTML = '<div class="page-head"><div><h1>Recommendations</h1><p>Published properties that fit your saved requirements, best first, with the reasons. Updated automatically.</p></div><button class="btn ghost" id="rec-refresh">Refresh</button></div><div id="recs"><p class="muted loading">Loading…</p></div>'
   const box = document.getElementById('recs')
   const load = async () => {
     const [{ recommendations, state }, mine] = await Promise.all([api('/api/me/recommendations'), openInterests()])
     box.innerHTML = state === 'no_requirements' ? '<div class="notice info">Save <a href="#/requirements">your requirements</a> first.</div>'
       : state === 'no_consent' ? '<div class="notice warn">Matching is off until you agree to it in <a href="#/requirements">My requirements</a>.</div>'
-        : recommendations.length ? `<div class="grid cards">${recommendations.map((r) => `<article class="card"><h2><a href="#/browse/${r.property.id}">${esc(r.property.title)}</a></h2>
+        : recommendations.length ? `<div class="grid cards">${recommendations.map((r) => `<article class="card"><div class="prop-banner t-${esc(r.property.property_type || 'other')}">${icon(PROP_ART[r.property.property_type] || 'house', '')}</div><h2><a href="#/browse/${r.property.id}">${esc(r.property.title)}</a></h2>
             <div><strong>${esc(priceText(r.property))}</strong> · ${esc([r.property.locality, r.property.city].filter(Boolean).join(', '))} <span class="badge">${r.score}/100</span></div>
             <ul class="small">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}${(r.gaps || []).map((g) => `<li class="muted">Unknown: ${esc(g)}</li>`).join('')}</ul>
             <div class="small muted">Matched ${esc(fmtDate(r.matchedAt))}</div><div class="row">${interestControl(r.property.id, mine.get(r.property.id))}<a class="btn ghost small" href="#/browse/${r.property.id}">View and request a viewing</a></div></article>`).join('')}</div>`
@@ -2168,7 +2245,7 @@ function requestItem(i) {
 
 async function renderMyRequests() {
   main.innerHTML = `<div class="page-head"><div><h1>My requests</h1><p>Listings you told your agent you are interested in, with any viewing of them. Your agent contacts you; a request is not an offer or a booking.</p></div></div>
-    <section class="card"><div id="mr" aria-live="polite"><p class="muted">Loading…</p></div></section>`
+    <section class="card"><div id="mr" aria-live="polite"><p class="muted loading">Loading…</p></div></section>`
   const box = document.getElementById('mr')
   const busy = (b, on) => { b.disabled = on; b.dataset.text ??= b.textContent; b.textContent = on ? 'Sending…' : b.dataset.text }
   const fail = (li, error) => { li.querySelector('.i-msg').innerHTML = `<div class="notice err small">${esc(error.message)}</div>` }
@@ -2178,7 +2255,7 @@ async function renderMyRequests() {
       ({ interests } = await api('/api/me/interests'))
     } catch (error) {
       box.innerHTML = `<div class="notice err">${esc(error.message)}</div><button class="btn ghost small" id="mr-retry">Try again</button>`
-      document.getElementById('mr-retry').addEventListener('click', () => { box.innerHTML = '<p class="muted">Loading…</p>'; load() })
+      document.getElementById('mr-retry').addEventListener('click', () => { box.innerHTML = '<p class="muted loading">Loading…</p>'; load() })
       return
     }
     box.innerHTML = interests.length ? `<ul class="timeline">${interests.map(requestItem).join('')}</ul>`
@@ -2215,7 +2292,7 @@ async function renderInterestList(box, url, { showLead = true } = {}) {
     ({ interests } = await api(url))
   } catch (error) {
     box.innerHTML = `<div class="notice err">${esc(error.message)}</div><button class="btn ghost small" data-retry>Try again</button>`
-    box.querySelector('[data-retry]').addEventListener('click', () => { box.innerHTML = '<p class="muted">Loading…</p>'; renderInterestList(box, url, { showLead }) })
+    box.querySelector('[data-retry]').addEventListener('click', () => { box.innerHTML = '<p class="muted loading">Loading…</p>'; renderInterestList(box, url, { showLead }) })
     return
   }
   box.innerHTML = interests.length ? `<ul class="timeline">${interests.map((i) => {
@@ -2254,7 +2331,7 @@ async function renderAgentInterests(params) {
   const status = ['open', 'withdrawn', 'closed', 'all'].includes(params.get('status')) ? params.get('status') : 'open'
   main.innerHTML = `<div class="page-head"><div><h1>Buyer interest</h1><p>Listings your buyers said they are interested in. Only you, as their agent, see these; the listing’s owner is not told who they are.</p></div>
     <div class="row"><label for="bi-status" class="sr-only">Show</label><select id="bi-status" style="width:auto">${[['open', 'Open'], ['withdrawn', 'Withdrawn'], ['closed', 'Closed'], ['all', 'All']].map(([v, l]) => `<option value="${v}"${v === status ? ' selected' : ''}>${l}</option>`).join('')}</select></div></div>
-    <section class="card"><div id="bi" aria-live="polite"><p class="muted">Loading…</p></div></section>`
+    <section class="card"><div id="bi" aria-live="polite"><p class="muted loading">Loading…</p></div></section>`
   document.getElementById('bi-status').addEventListener('change', (e) => { location.hash = `#/interests?status=${e.target.value}` })
   await renderInterestList(document.getElementById('bi'), `/api/interests?status=${status}`)
 }
@@ -2362,7 +2439,7 @@ async function renderOfferList(box, url, kind, opts = {}) {
     ({ offers } = await api(url))
   } catch (error) {
     box.innerHTML = `<div class="notice err">${esc(error.message)}</div><button class="btn ghost small" data-retry>Try again</button>`
-    box.querySelector('[data-retry]').addEventListener('click', () => { box.innerHTML = '<p class="muted">Loading…</p>'; renderOfferList(box, url, kind, opts) })
+    box.querySelector('[data-retry]').addEventListener('click', () => { box.innerHTML = '<p class="muted loading">Loading…</p>'; renderOfferList(box, url, kind, opts) })
     return
   }
   const reload = () => renderOfferList(box, url, kind, opts)
@@ -2406,8 +2483,8 @@ async function renderAgentOffers(params) {
   const status = ['active', 'all'].includes(params.get('status')) ? params.get('status') : 'active'
   main.innerHTML = `<div class="page-head"><div><h1>Offers</h1><p>Offers and rental applications from your buyers, and those forwarded to you on listings you own. “Accepted” is in principle only: agreements and payments happen outside DealSaathi.</p></div>
     <div class="row"><label for="of-status" class="sr-only">Show</label><select id="of-status" style="width:auto"><option value="active"${status === 'active' ? ' selected' : ''}>Active</option><option value="all"${status === 'all' ? ' selected' : ''}>All</option></select></div></div>
-    <section class="card"><h2>Your buyers’ offers</h2><div id="of-mine" aria-live="polite"><p class="muted">Loading…</p></div></section>
-    <section class="card" style="margin-top:1rem"><h2>Offers on listings you own</h2><div id="of-owned" aria-live="polite"><p class="muted">Loading…</p></div></section>`
+    <section class="card"><h2>Your buyers’ offers</h2><div id="of-mine" aria-live="polite"><p class="muted loading">Loading…</p></div></section>
+    <section class="card" style="margin-top:1rem"><h2>Offers on listings you own</h2><div id="of-owned" aria-live="polite"><p class="muted loading">Loading…</p></div></section>`
   document.getElementById('of-status').addEventListener('change', (e) => { location.hash = `#/offers?status=${e.target.value}` })
   await Promise.all([
     renderOfferList(document.getElementById('of-mine'), `/api/offers?status=${status}`, 'agent', { empty: 'No offers from your buyers yet.' }),
@@ -2417,13 +2494,13 @@ async function renderAgentOffers(params) {
 
 async function renderSellerOffers() {
   main.innerHTML = `<div class="page-head"><div><h1>Offers</h1><p>Offers and rental applications that a buyer’s agent forwarded to you. Buyers’ identities stay private. Accepting is in principle only: no agreement is signed and no payment is taken in DealSaathi.</p></div></div>
-    <section class="card"><div id="so" aria-live="polite"><p class="muted">Loading…</p></div></section>`
+    <section class="card"><div id="so" aria-live="polite"><p class="muted loading">Loading…</p></div></section>`
   await renderOfferList(document.getElementById('so'), '/api/listing-offers', 'owner', { empty: 'No offers yet. When a buyer’s agent forwards one, it appears here and you are notified.' })
 }
 
 const BV_STATUS = { requested:'<span class="pill pill-setup">Waiting for your agent</span>', booked: '<span class="pill pill-on">Booked</span>', completed: '<span class="pill pill-on">Took place</span>', no_show: '<span class="pill pill-off">Missed</span>', cancelled: '<span class="pill pill-off">Cancelled</span>', failed: '<span class="pill pill-err">Not booked</span>', unknown: '<span class="pill pill-setup">Being checked</span>', booking: '<span class="pill pill-setup">Booking…</span>' }
 async function renderMyViewings() {
-  main.innerHTML = '<div class="page-head"><div><h1>My viewings</h1><p>Request one from any listing’s page. After a viewing, tell us what you thought: it improves your matches.</p></div></div><section class="card"><div id="mv"><p class="muted">Loading…</p></div></section>'
+  main.innerHTML = '<div class="page-head"><div><h1>My viewings</h1><p>Request one from any listing’s page. After a viewing, tell us what you thought: it improves your matches.</p></div></div><section class="card"><div id="mv"><p class="muted loading">Loading…</p></div></section>'
   const box = document.getElementById('mv')
   const { viewings } = await api('/api/me/viewings')
   box.innerHTML = viewings.length ? `<ul class="timeline">${viewings.map((v) => `<li data-v="${v.id}"><div class="row" style="justify-content:space-between"><div><strong>${esc(v.when)}</strong> ${BV_STATUS[v.status] || esc(v.status)}
@@ -2463,7 +2540,7 @@ const AGENT_ACTION_STATE = {
   completed: '<div class="notice ok small"><strong>Request sent.</strong> Your agent confirms it before it is booked in their Google Calendar. Follow it in <a href="#/my-viewings">My viewings</a>.</div>',
   cancelled: '<div class="notice small">Cancelled. Nothing was sent.</div>', expired: '<div class="notice warn small">This request expired. Ask the assistant to check free times again.</div>'
 }
-const agentListingCard = (l) => `<article class="card"><h2><a href="#/browse/${Number(l.id)}">${esc(l.title)}</a></h2>
+const agentListingCard = (l) => `<article class="card"><div class="prop-banner t-${esc(l.property_type || 'other')}">${icon(PROP_ART[l.property_type] || 'house', '')}</div><h2><a href="#/browse/${Number(l.id)}">${esc(l.title)}</a></h2>
   <div><strong>${esc(l.price_text)}</strong> · ${esc([l.locality, l.city].filter(Boolean).join(', '))}${l.score != null ? ` <span class="badge">${Number(l.score)}/100</span>` : ''}</div>
   ${l.reasons?.length || l.gaps?.length ? `<ul class="small">${(l.reasons || []).map((x) => `<li>${esc(x)}</li>`).join('')}${(l.gaps || []).map((g) => `<li class="muted">Unknown: ${esc(g)}</li>`).join('')}</ul>` : ''}
   ${l.flags?.length ? `<div class="notice warn small">This listing’s own text includes ${l.flags.map((f) => (f === 'contact_details' ? 'contact details' : 'instructions addressed to an assistant')).join(' and ')}. DealSaathi does not endorse it: request viewings only through DealSaathi.</div>` : ''}
@@ -2665,6 +2742,8 @@ const ROUTES = {
 }
 
 async function route() {
+  document.querySelector('.sidebar')?.classList.remove('open')
+  document.getElementById('nav-toggle')?.setAttribute('aria-expanded', 'false')
   if (session.mode === 'locked') return renderLocked()
   const [path, query = ''] = location.hash.replace(/^#/, '').split('?')
   const parts = path.split('/').filter(Boolean)
@@ -2704,6 +2783,10 @@ async function checkHealth() {
 }
 
 window.addEventListener('hashchange', route)
+document.getElementById('nav-toggle')?.addEventListener('click', (e) => {
+  const open = document.querySelector('.sidebar').classList.toggle('open')
+  e.currentTarget.setAttribute('aria-expanded', String(open))
+})
 if (!location.hash) history.replaceState(null, '', '#/dashboard')
 api('/api/session')
   .then((s) => Object.assign(session, s))

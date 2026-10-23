@@ -74,7 +74,7 @@ await register(agentPage, { role: 'agent', name: 'Asha Broker', email: 'asha@age
 const agentNav = await visitAllNav(agentPage, 'agent')
 check('agent: sees the agent sections', ['#/leads', '#/pool', '#/automations', '#/activity'].every((h) => agentNav.includes(h)), agentNav.join(' '))
 await go(agentPage, '#/dashboard')
-await agentPage.waitForSelector('main .page-head')
+await agentPage.waitForSelector('main .hero')
 check('agent: a new agent is told the first step (service areas)', /First step:/.test(await agentPage.textContent('main')) && Boolean(await agentPage.$('main a[href="#/profile"]')))
 await go(agentPage, `#/profile`)
 await agentPage.fill('#pr-areas', 'Pune, Baner')
@@ -583,7 +583,9 @@ for (const [who, page, hrefs] of [['buyer', buyerPage, ['#/dashboard', '#/privac
 }
 await shot(buyerPage, '53-buyer-mobile')
 
-// ---- Sign out ends the session
+// ---- Sign out ends the session (on a phone, Sign out sits in the menu)
+if (await sellerPage.isVisible('#nav-toggle')) await sellerPage.click('#nav-toggle')
+check('phone: the menu reveals navigation and Sign out', await sellerPage.isVisible('#nav a[href="#/my-listings"]') && await sellerPage.isVisible('#sign-out'))
 await sellerPage.click('#sign-out')
 await sellerPage.waitForSelector('#auth-form')
 check('sign-out: back to sign-in, API refuses the old session', (await sellerPage.evaluate(async () => (await fetch('/api/me')).status)) === 401)
