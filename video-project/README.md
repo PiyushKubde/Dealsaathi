@@ -4,8 +4,14 @@ A ~3-minute product demo (1920×1080, 16:9, 30 fps, H.264 + AAC, English caption
 from real recordings and evidence cards. No video framework is needed: everything here runs with what is
 already installed (FFmpeg 6 with libass, Python 3 with NumPy, Node 22 with Playwright and Chromium).
 
-**Current state:** narrated with your recording of 23 Oct 2026 (`audio/voice/take-2026-10-23.m4a`, cut
-into `scene1..5.wav`). `python3 src/build.py` writes `DealSaathi-Demo.mp4`. See `asset-manifest.md` for
+**Two cuts, both narrated with your voice:**
+
+| Cut | Story | Files | Render |
+|---|---|---|---|
+| **Launch** (main) | DealSaathi launched as the product: hook, introduction, the workflow, integrations, then how it was built with Claude Code, the ViaSocket SDK and Embarko, and "live now" | `narration-launch.md`, `timeline-launch.json`, `audio/voice/launch/`, `captions/launch/` | `python3 src/build.py --cut launch` → `DealSaathi-Launch.mp4` |
+| Walkthrough | Idea → build → deploy → demo → result | `narration.md`, `timeline.json`, `audio/voice/`, `captions/` | `python3 src/build.py` → `DealSaathi-Demo.mp4` |
+
+`align-voice.py` and `build.py` take `--cut launch` to work on the launch cut. See `asset-manifest.md` for
 every source.
 
 ## Layout

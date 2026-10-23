@@ -16,14 +16,14 @@ wording while recording, change the '> ' lines in narration.md to match first.
 import json, subprocess, sys, tempfile, wave
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from narr import ROOT, narration, spoken_words, VOICE, CAPTIONS
+from narr import ROOT, narration, spoken_words, VOICE, CAPTIONS, loudness, quiet_point
 
 try:
     from pocketsphinx import Decoder
 except ImportError:
     sys.exit('PocketSphinx is not installed: pip install pocketsphinx')
 
-EXTRA_WORDS = {'saathi': 'S AA TH IY', 'embarko': 'EH M B AA R K OW'}
+EXTRA_WORDS = {'saathi': 'S AA TH IY', "saathi's": 'S AA TH IY Z', 'embarko': 'EH M B AA R K OW', 'viewings': 'V Y UW IH NG Z'}
 
 
 def to16k(src, dst):
@@ -31,7 +31,7 @@ def to16k(src, dst):
 
 
 def align(wav16, words):
-    d = Decoder(samprate=16000, loglevel='FATAL', bestpath=False)
+    d = Decoder(samprate=16000, loglevel='FATAL', bestpath=False, beam=1e-80, wbeam=1e-60, pbeam=1e-80)  # wide beams: short files fail with the defaults
     for w, ph in EXTRA_WORDS.items():
         d.add_word(w, ph, True)
     d.set_align_text(' '.join(words))
@@ -43,7 +43,7 @@ def align(wav16, words):
                 break
             d.process_raw(b, False, False)
         d.end_utt()
-    seg = [(s.start_frame / 100, s.end_frame / 100) for s in d.seg() if s.word not in ('<s>', '</s>', '<sil>', '(NULL)')]
+    seg = [(s.start_frame / 100, s.end_frame / 100) for s in (d.seg() or []) if s.word not in ('<s>', '</s>', '<sil>', '(NULL)')]
     if len(seg) != len(words):
         sys.exit(f'alignment failed: {len(seg)} of {len(words)} words placed. Does the recording follow narration.md?')
     return seg
@@ -59,26 +59,30 @@ scenes = narration()
 args = [a for i, a in enumerate(sys.argv[1:]) if a != '--cut' and (i == 0 or sys.argv[i] != '--cut')]
 tmp = Path(tempfile.mkdtemp())
 
+def align_scene(sid, src, note):
+    """Aligns one scene's file to that scene's lines and writes its word timings."""
+    words, owner = [], []
+    for li, line in enumerate(scenes[sid]):
+        ws = spoken_words(line)
+        words += ws
+        owner += [li] * len(ws)
+    to16k(src, tmp / 'a.wav')
+    seg = align(tmp / 'a.wav', words)
+    out = [{'word': w, 'line': o, 'start': round(a, 3), 'end': round(b, 3)} for w, o, (a, b) in zip(words, owner, seg)]
+    (ROOT / f'{CAPTIONS}/scene{sid}.words.json').write_text(json.dumps({'source': note, 'words': out}, indent=0))
+    return out
+
+
 if args[:1] == ['--scenes']:
-    jobs = []
     for sid in scenes:
         src = next((ROOT / f'{VOICE}/scene{sid}{e}' for e in ('.wav', '.mp3', '.m4a') if (ROOT / f'{VOICE}/scene{sid}{e}').exists()), None)
         if not src:
             sys.exit(f'missing {VOICE}/scene{sid}.*')
-        jobs.append((sid, src))
-    for sid, src in jobs:
-        words, owner = [], []
-        for li, line in enumerate(scenes[sid]):
-            ws = spoken_words(line)
-            words += ws
-            owner += [li] * len(ws)
-        to16k(src, tmp / 'a.wav')
-        seg = align(tmp / 'a.wav', words)
-        out = [{'word': w, 'line': o, 'start': a, 'end': b} for w, o, (a, b) in zip(words, owner, seg)]
-        (ROOT / f'{CAPTIONS}/scene{sid}.words.json').write_text(json.dumps({'source': src.name, 'words': out}, indent=0))
-        print(f'scene {sid}: {len(out)} words aligned in {src.name}')
+        print(f'scene {sid}: {len(align_scene(sid, src, src.name))} words aligned in {src.name}')
     sys.exit(0)
 
+# One take: align the whole script once to find the scenes, cut each at the quiet stretch between them,
+# then align each scene again on its own (forced alignment is most accurate on short files).
 take = Path(args[0])
 words, owner = [], []
 for sid, lines in scenes.items():
@@ -89,17 +93,23 @@ for sid, lines in scenes.items():
 to16k(take, tmp / 'take.wav')
 seg = align(tmp / 'take.wav', words)
 total = duration(take)
+db = loudness(take)
 spans = {}
 for (sid, _), (a, b) in zip(owner, seg):
     s = spans.setdefault(sid, [a, b])
     s[0], s[1] = min(s[0], a), max(s[1], b)
 ids = list(scenes)
+bounds = [0.0]
+for prev, nxt in zip(ids, ids[1:]):
+    guess = (spans[prev][1] + spans[nxt][0]) / 2
+    bounds.append(quiet_point(db, min(spans[prev][1], guess) - 1.5, max(spans[nxt][0], guess) + 0.5) or guess)
+bounds.append(total)
 for i, sid in enumerate(ids):
-    # cut half-way through the pause between scenes, never into a word
-    start = 0.0 if i == 0 else (spans[ids[i - 1]][1] + spans[sid][0]) / 2
-    end = total if i == len(ids) - 1 else (spans[sid][1] + spans[ids[i + 1]][0]) / 2
+    start, end = bounds[i], bounds[i + 1]
     out = ROOT / f'{VOICE}/scene{sid}.wav'
     subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-ss', f'{start:.3f}', '-to', f'{end:.3f}', '-i', str(take), '-ac', '1', '-ar', '48000', str(out)], check=True)
-    ws = [{'word': w, 'line': o[1], 'start': round(a - start, 3), 'end': round(b - start, 3)} for w, o, (a, b) in zip(words, owner, seg) if o[0] == sid]
-    (ROOT / f'{CAPTIONS}/scene{sid}.words.json').write_text(json.dumps({'source': f'{take.name} {start:.2f}–{end:.2f} s', 'words': ws}, indent=0))
-    print(f'scene {sid}: {start:6.2f}–{end:6.2f} s of {take.name} → {VOICE}/scene{sid}.wav ({len(ws)} words)')
+    try:
+        n = len(align_scene(sid, out, f'{take.name} {start:.2f}–{end:.2f} s'))
+    except (SystemExit, TypeError) as e:
+        sys.exit(f'scene {sid} ({start:.2f}–{end:.2f} s) could not be aligned on its own: {e}')
+    print(f'scene {sid}: {start:6.2f}–{end:6.2f} s of {take.name} → {VOICE}/scene{sid}.wav ({n} words)')

@@ -22,7 +22,7 @@ written either way.
 import json, math, re, subprocess, sys, wave
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from narr import spoken_words, TIMELINE, VOICE, CAPTIONS, NAME, CUT
+from narr import spoken_words, TIMELINE, VOICE, CAPTIONS, NAME, CUT, loudness, quiet_point
 
 ROOT = Path(__file__).resolve().parent.parent
 FAST = '--fast' in sys.argv
@@ -150,7 +150,8 @@ def line_layout(sid, voice, breaks):
             sys.exit(f'break "{phrase}" is not in the narration of scene {sid}')
         pause_before[hit] = max(pause_before.get(hit, 0), sec)
     starts = sorted(pause_before)
-    cuts = [0.0] + [(words[i - 1]['end'] + words[i]['start']) / 2 for i in starts] + [vd]
+    db = loudness(voice)  # cut in the quiet between words, not at a guessed midpoint
+    cuts = [0.0] + [quiet_point(db, words[i - 1]['end'] - 0.3, words[i]['start'] + 0.3) or (words[i - 1]['end'] + words[i]['start']) / 2 for i in starts] + [vd]
     first = [0] + starts
     pieces, at = [], LEAD
     for k in range(len(first)):

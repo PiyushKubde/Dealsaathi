@@ -1,0 +1,467 @@
+{
+"source": "take-launch.m4a 59.34\u201384.85 s",
+"words": [
+{
+"word": "we",
+"line": 0,
+"start": 0.42,
+"end": 0.56
+},
+{
+"word": "built",
+"line": 0,
+"start": 0.57,
+"end": 0.8
+},
+{
+"word": "deal",
+"line": 0,
+"start": 0.81,
+"end": 1.08
+},
+{
+"word": "saathi",
+"line": 0,
+"start": 1.09,
+"end": 1.55
+},
+{
+"word": "with",
+"line": 0,
+"start": 1.56,
+"end": 1.73
+},
+{
+"word": "claude",
+"line": 0,
+"start": 1.74,
+"end": 2.01
+},
+{
+"word": "code",
+"line": 0,
+"start": 2.02,
+"end": 2.31
+},
+{
+"word": "starting",
+"line": 0,
+"start": 2.32,
+"end": 2.72
+},
+{
+"word": "from",
+"line": 0,
+"start": 2.73,
+"end": 2.96
+},
+{
+"word": "one",
+"line": 0,
+"start": 2.97,
+"end": 3.14
+},
+{
+"word": "detailed",
+"line": 0,
+"start": 3.15,
+"end": 3.45
+},
+{
+"word": "prompt",
+"line": 0,
+"start": 3.46,
+"end": 3.82
+},
+{
+"word": "and",
+"line": 0,
+"start": 3.83,
+"end": 4.41
+},
+{
+"word": "refining",
+"line": 0,
+"start": 4.42,
+"end": 5.11
+},
+{
+"word": "it",
+"line": 0,
+"start": 5.32,
+"end": 5.44
+},
+{
+"word": "along",
+"line": 0,
+"start": 5.45,
+"end": 5.71
+},
+{
+"word": "the",
+"line": 0,
+"start": 5.72,
+"end": 5.8
+},
+{
+"word": "way",
+"line": 0,
+"start": 5.81,
+"end": 5.97
+},
+{
+"word": "the",
+"line": 1,
+"start": 6.32,
+"end": 6.54
+},
+{
+"word": "via",
+"line": 1,
+"start": 6.55,
+"end": 6.75
+},
+{
+"word": "socket",
+"line": 1,
+"start": 6.76,
+"end": 7.01
+},
+{
+"word": "s",
+"line": 1,
+"start": 7.02,
+"end": 7.16
+},
+{
+"word": "d",
+"line": 1,
+"start": 7.17,
+"end": 7.27
+},
+{
+"word": "k",
+"line": 1,
+"start": 7.28,
+"end": 7.43
+},
+{
+"word": "gave",
+"line": 1,
+"start": 7.44,
+"end": 7.62
+},
+{
+"word": "us",
+"line": 1,
+"start": 7.63,
+"end": 7.79
+},
+{
+"word": "those",
+"line": 1,
+"start": 7.8,
+"end": 8.06
+},
+{
+"word": "integrations",
+"line": 1,
+"start": 8.07,
+"end": 8.81
+},
+{
+"word": "and",
+"line": 1,
+"start": 8.82,
+"end": 8.98
+},
+{
+"word": "the",
+"line": 1,
+"start": 8.99,
+"end": 9.07
+},
+{
+"word": "a",
+"line": 1,
+"start": 9.08,
+"end": 9.38
+},
+{
+"word": "i",
+"line": 1,
+"start": 9.39,
+"end": 9.52
+},
+{
+"word": "without",
+"line": 1,
+"start": 9.99,
+"end": 10.26
+},
+{
+"word": "building",
+"line": 1,
+"start": 10.27,
+"end": 10.59
+},
+{
+"word": "each",
+"line": 1,
+"start": 10.6,
+"end": 10.83
+},
+{
+"word": "connection",
+"line": 1,
+"start": 10.84,
+"end": 11.24
+},
+{
+"word": "from",
+"line": 1,
+"start": 11.25,
+"end": 11.46
+},
+{
+"word": "scratch",
+"line": 1,
+"start": 11.47,
+"end": 11.93
+},
+{
+"word": "and",
+"line": 2,
+"start": 12.65,
+"end": 12.81
+},
+{
+"word": "embarko",
+"line": 2,
+"start": 12.82,
+"end": 13.29
+},
+{
+"word": "took",
+"line": 2,
+"start": 13.3,
+"end": 13.61
+},
+{
+"word": "it",
+"line": 2,
+"start": 13.62,
+"end": 13.75
+},
+{
+"word": "live",
+"line": 2,
+"start": 13.76,
+"end": 14.06
+},
+{
+"word": "one",
+"line": 2,
+"start": 14.07,
+"end": 14.5
+},
+{
+"word": "hosting",
+"line": 2,
+"start": 14.51,
+"end": 14.84
+},
+{
+"word": "prompt",
+"line": 2,
+"start": 14.85,
+"end": 15.27
+},
+{
+"word": "and",
+"line": 2,
+"start": 15.28,
+"end": 15.43
+},
+{
+"word": "claude",
+"line": 2,
+"start": 15.44,
+"end": 15.65
+},
+{
+"word": "code",
+"line": 2,
+"start": 15.66,
+"end": 15.86
+},
+{
+"word": "deployed",
+"line": 2,
+"start": 15.87,
+"end": 16.21
+},
+{
+"word": "it",
+"line": 2,
+"start": 16.22,
+"end": 16.68
+},
+{
+"word": "with",
+"line": 2,
+"start": 16.69,
+"end": 16.79
+},
+{
+"word": "traffic",
+"line": 2,
+"start": 16.8,
+"end": 17.36
+},
+{
+"word": "and",
+"line": 2,
+"start": 17.37,
+"end": 17.52
+},
+{
+"word": "scheduled",
+"line": 2,
+"start": 17.53,
+"end": 17.89
+},
+{
+"word": "jobs",
+"line": 2,
+"start": 17.9,
+"end": 18.2
+},
+{
+"word": "in",
+"line": 2,
+"start": 18.21,
+"end": 18.35
+},
+{
+"word": "one",
+"line": 2,
+"start": 18.36,
+"end": 18.51
+},
+{
+"word": "dashboard",
+"line": 2,
+"start": 18.52,
+"end": 18.97
+},
+{
+"word": "every",
+"line": 3,
+"start": 19.35,
+"end": 19.81
+},
+{
+"word": "release",
+"line": 3,
+"start": 19.82,
+"end": 20.03
+},
+{
+"word": "since",
+"line": 3,
+"start": 20.04,
+"end": 20.54
+},
+{
+"word": "up",
+"line": 3,
+"start": 20.79,
+"end": 20.96
+},
+{
+"word": "to",
+"line": 3,
+"start": 20.97,
+"end": 21.08
+},
+{
+"word": "the",
+"line": 3,
+"start": 21.09,
+"end": 21.16
+},
+{
+"word": "design",
+"line": 3,
+"start": 21.17,
+"end": 21.67
+},
+{
+"word": "you",
+"line": 3,
+"start": 21.99,
+"end": 22.44
+},
+{
+"word": "just",
+"line": 3,
+"start": 22.52,
+"end": 22.71
+},
+{
+"word": "saw",
+"line": 3,
+"start": 22.72,
+"end": 23.07
+},
+{
+"word": "was",
+"line": 3,
+"start": 23.17,
+"end": 23.37
+},
+{
+"word": "built",
+"line": 3,
+"start": 23.38,
+"end": 23.71
+},
+{
+"word": "tested",
+"line": 3,
+"start": 23.72,
+"end": 24.06
+},
+{
+"word": "and",
+"line": 3,
+"start": 24.07,
+"end": 24.21
+},
+{
+"word": "shipped",
+"line": 3,
+"start": 24.22,
+"end": 24.58
+},
+{
+"word": "the",
+"line": 3,
+"start": 24.59,
+"end": 24.68
+},
+{
+"word": "same",
+"line": 3,
+"start": 24.69,
+"end": 24.92
+},
+{
+"word": "way",
+"line": 3,
+"start": 24.93,
+"end": 25.3
+}
+]
+}

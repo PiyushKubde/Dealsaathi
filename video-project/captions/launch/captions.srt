@@ -1,139 +1,139 @@
 1
-00:00:00,600 --> 00:00:04,220
+00:00:01,540 --> 00:00:04,790
 Buying, selling or renting a home
 still runs on endless calls,
 
 2
-00:00:04,340 --> 00:00:06,040
+00:00:04,850 --> 00:00:06,600
 messages and follow-ups.
 
 3
-00:00:06,160 --> 00:00:10,083
+00:00:07,720 --> 00:00:12,040
 Agents juggle chat groups and
 spreadsheets, buyers wait for updates,
 
 4
-00:00:10,203 --> 00:00:12,762
+00:00:12,100 --> 00:00:15,370
 and sellers rarely know who's interested.
 
 5
-00:00:12,882 --> 00:00:17,513
+00:00:16,340 --> 00:00:20,470
 Today, we're launching DealSaathi:
 an AI-powered real estate workspace for agents,
 
 6
-00:00:17,633 --> 00:00:19,080
+00:00:20,530 --> 00:00:21,990
 buyers and sellers.
 
 7
-00:00:20,600 --> 00:00:28,250
+00:00:24,520 --> 00:00:29,060
 Agents get one dashboard for their
 leads, listings, viewings and follow-ups.
 
 8
-00:00:28,370 --> 00:00:34,343
+00:00:30,070 --> 00:00:32,880
 They can add a lead just by
 describing it in plain words,
 
 9
-00:00:34,463 --> 00:00:39,023
+00:00:32,940 --> 00:00:35,920
 and DealSaathi's AI fills in the details.
 
 10
-00:00:39,143 --> 00:00:43,173
+00:00:37,200 --> 00:00:38,850
 Sellers list a property in minutes,
 
 11
-00:00:43,293 --> 00:00:49,354
+00:00:38,910 --> 00:00:42,150
 and it's matched against every
 buyer's saved requirements.
 
 12
-00:00:49,474 --> 00:00:56,330
+00:00:43,410 --> 00:00:49,430
 Buyers see what fits them, tap
 "I'm interested", and make an offer.
 
 13
-00:00:56,450 --> 00:01:02,687
+00:00:50,400 --> 00:00:56,030
 Their agent forwards it to
 the owner, the owner can counter,
 
 14
-00:01:02,807 --> 00:01:06,837
+00:00:56,510 --> 00:00:59,310
 and the buyer accepts in principle.
 
 15
-00:01:06,957 --> 00:01:11,164
+00:01:00,570 --> 00:01:02,520
 Every step notifies the right people,
 
 16
-00:01:11,284 --> 00:01:17,080
+00:01:02,580 --> 00:01:05,960
 and the buyer's identity
 stays private from the seller.
 
 17
-00:01:18,600 --> 00:01:25,922
+00:01:08,721 --> 00:01:12,501
 Each agent connects their own Gmail,
 Slack and Google Calendar, for alerts,
 
 18
-00:01:26,042 --> 00:01:32,080
+00:01:12,561 --> 00:01:16,611
 reminders, and viewings booked
 straight into their calendar.
 
 19
-00:01:33,600 --> 00:01:37,668
+00:01:20,486 --> 00:01:22,326
 We built DealSaathi with Claude Code,
 
 20
-00:01:37,788 --> 00:01:44,163
+00:01:22,386 --> 00:01:26,566
 starting from one detailed prompt
 and refining it along the way.
 
 21
-00:01:44,283 --> 00:01:49,975
+00:01:27,586 --> 00:01:31,196
 The ViaSocket SDK gave us
 those integrations and the AI,
 
 22
-00:01:50,095 --> 00:01:54,932
+00:01:31,256 --> 00:01:33,726
 without building each
 connection from scratch.
 
 23
-00:01:55,052 --> 00:02:02,282
+00:01:35,116 --> 00:01:40,576
 And Embarko took it live: one hosting
 prompt, and Claude Code deployed it,
 
 24
-00:02:02,402 --> 00:02:07,495
+00:01:40,956 --> 00:01:43,766
 with traffic and scheduled
 jobs in one dashboard.
 
 25
-00:02:07,615 --> 00:02:13,820
+00:01:44,816 --> 00:01:49,126
 Every release since, up to
 the design you just saw, was built,
 
 26
-00:02:13,940 --> 00:02:17,580
+00:01:49,186 --> 00:01:51,296
 tested and shipped the same way.
 
 27
-00:02:19,100 --> 00:02:21,289
+00:01:53,951 --> 00:01:55,221
 DealSaathi is live today.
 
 28
-00:02:21,409 --> 00:02:25,845
+00:01:55,281 --> 00:01:59,911
 Sign up as a buyer or a seller,
 or bring your team of agents.
 
 29
-00:02:25,965 --> 00:02:31,337
+00:02:01,171 --> 00:02:05,231
 Built with Claude Code, powered by
 the ViaSocket SDK, and hosted on Embarko.
 
 30
-00:02:31,457 --> 00:02:36,580
+00:02:06,351 --> 00:02:11,001
 DealSaathi: find, show and agree on
 property, with your agent alongside.

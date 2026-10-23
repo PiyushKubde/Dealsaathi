@@ -81,6 +81,10 @@ const CARDS = {
       <div style="font-size:120px;font-weight:800;letter-spacing:-.035em;line-height:1.02;color:#8a9a8f">Follow-ups.</div>
       <div style="font-size:36px;color:#a7b5ad;margin-top:30px;font-weight:500">Buying, selling or renting a home still runs on all three.</div>
     </div>` }),
+  'c00-hook2': () => ({ css: `body{background:#0b0f0d;color:#f7f5ef}`, html: `
+    <div style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,1fr);align-items:center;padding:0 140px;gap:60px">
+      ${[['Agents', 'juggle chat groups and spreadsheets'], ['Buyers', 'wait for updates'], ['Sellers', 'rarely know who’s interested']].map(([a, b]) => `<div><div style="font-size:84px;font-weight:800;letter-spacing:-.03em">${a}</div><div style="font-size:36px;color:#a7b5ad;margin-top:16px;line-height:1.3">${b}</div></div>`).join('')}
+    </div>` }),
   'c00-launch': () => ({ css: `body{background:radial-gradient(1100px 700px at 75% 20%,#0b7a5a 0%,transparent 60%),linear-gradient(135deg,#064e3b,#042f24);color:#f7f5ef}`, html: `
     <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30px">
       <div style="font-size:30px;font-weight:700;letter-spacing:.32em;color:#6ee7b7">INTRODUCING</div>

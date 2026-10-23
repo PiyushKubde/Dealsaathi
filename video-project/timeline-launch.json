@@ -4,7 +4,7 @@
   "height": 1080,
   "fps": 30,
   "transition": 0.5,
-  "line_gap": 1.0,
+  "line_gap": 1.2,
   "scenes": [
     {
       "id": 1,
@@ -14,11 +14,21 @@
         {
           "type": "card",
           "src": "assets/cards/c00-hook.png",
-          "dur": 9,
+          "dur": 5,
           "zoom": [
             1.0,
             1.04
           ]
+        },
+        {
+          "type": "card",
+          "src": "assets/cards/c00-hook2.png",
+          "dur": 6,
+          "zoom": [
+            1.0,
+            1.04
+          ],
+          "cue": "Agents juggle chat groups"
         },
         {
           "type": "card",
@@ -37,8 +47,9 @@
       "name": "Meet DealSaathi",
       "hold": 1.0,
       "breaks": {
-        "the owner can counter": 0.8,
-        "and the buyer accepts in principle": 0.8
+        "tap \"I'm interested\"": 1.2,
+        "the owner can counter": 1.0,
+        "and the buyer accepts in principle": 1.0
       },
       "segments": [
         {
@@ -207,16 +218,17 @@
             1.0,
             1.05
           ],
-          "cue": "for alerts, reminders"
+          "cue": "and viewings booked"
         }
       ]
     },
     {
       "id": 4,
       "name": "How we built it",
-      "hold": 2.5,
+      "hold": 1.0,
       "breaks": {
-        "one hosting prompt": 0.5
+        "one hosting prompt": 0.9,
+        "with traffic and scheduled jobs": 0.9
       },
       "segments": [
         {
@@ -303,16 +315,6 @@
         },
         {
           "type": "card",
-          "src": "assets/cards/c08-deploy.png",
-          "dur": 5,
-          "zoom": [
-            1.0,
-            1.05
-          ],
-          "cue": "and Claude Code deployed it"
-        },
-        {
-          "type": "card",
           "src": "assets/cards/m03-embarko-dashboard.png",
           "dur": 4,
           "zoom": [
@@ -330,22 +332,6 @@
         },
         {
           "type": "card",
-          "src": "assets/cards/m03-embarko-dashboard.png",
-          "dur": 3.5,
-          "zoom": [
-            1.0,
-            1.03
-          ],
-          "supplied": "recordings/supplied/embarko-dashboard.png",
-          "crop": [
-            0.24,
-            0.71,
-            0.52,
-            0.29
-          ]
-        },
-        {
-          "type": "card",
           "src": "assets/cards/c08-deploy.png",
           "dur": 5,
           "zoom": [
@@ -359,7 +345,7 @@
     {
       "id": 5,
       "name": "Live today",
-      "hold": 3.5,
+      "hold": 2.5,
       "segments": [
         {
           "type": "clip",

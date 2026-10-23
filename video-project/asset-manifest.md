@@ -51,6 +51,7 @@ cursor is drawn in, as screen capture does not include it). Not committed to git
 | `seller-counter.mp4` | Owner counters at ₹90 L | Staging, demo seller |
 | `buyer-accept.mp4` | Buyer accepts the counter: "Accepted in principle" with the disclaimer | Staging, demo buyer |
 | `agent-close.mp4` | Agent records it as agreed, then the Notifications page | Staging, demo agent |
+| `buyer-recommendations.mp4` | The buyer's Recommendations page: a 100/100 match with its reasons (launch cut) | Staging, demo buyer, read-only |
 
 The offer workflow really ran. Afterwards the staging API reported for that offer:
 `buyer:submitted@8800000 > agent:forwarded > owner:countered@9000000 > buyer:accepted@9000000 > agent:closed_won`.
@@ -74,6 +75,7 @@ on-screen label saying so.
 | `c08-deploy` | First deploy under the account (18:04:22 building → 18:04:34 live, claimed) and the latest deployments v17–v20 | Session log line 665; Embarko API (E1) |
 | `c09-running` | Status live, start-up log (user counts removed), scheduled job `*/15 * * * *`, last run ok 200 | Embarko API (E1) |
 | `c10-live-tests` | Gmail and Slack live tests passed; Google Calendar test confirmed later that day | Your screenshot of 22 Oct 2026 (`evidence/screenshots/`, **e-mail addresses redacted**), and the session log |
+| `c00-hook`, `c00-hook2`, `c00-launch`, `c12-closing-launch` | Launch cut: the opening hook, "Introducing DealSaathi", and the "Live now" closing with the official logos | — / `assets/brand/` |
 | `c11-closing` | Closing card: DealSaathi, the ViaSocket and Embarko logos, "Build. Integrate. Deploy.", the dashboard | `assets/brand/`, `assets/stills/dashboard.png` |
 | `m01`–`m06` | MISSING-asset slates, shown only when a screenshot or recording is absent | — |
 
@@ -87,6 +89,10 @@ on-screen label saying so.
   e-mail addresses blurred and covered.
 
 ## Audio
+
+- `audio/voice/launch/take-launch.m4a`: **your narration of the launch cut**, one take (1:40), uploaded on
+  23 Oct 2026. Cut into scenes at the pauses and aligned word by word (all 283 words of
+  `narration-launch.md`). Not in git.
 
 - `audio/voice/take-2026-10-23.m4a`: **your narration**, one take (2:14), uploaded on 23 Oct 2026. Cut into
   `scene1..5.wav` and aligned word by word by `src/align-voice.py` (all 385 words of `narration.md`
