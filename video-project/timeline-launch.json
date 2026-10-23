@@ -4,7 +4,7 @@
   "height": 1080,
   "fps": 30,
   "transition": 0.5,
-  "line_gap": 1.2,
+  "line_gap": 0.8,
   "scenes": [
     {
       "id": 1,
@@ -47,9 +47,9 @@
       "name": "Meet DealSaathi",
       "hold": 1.0,
       "breaks": {
-        "tap \"I'm interested\"": 1.2,
-        "the owner can counter": 1.0,
-        "and the buyer accepts in principle": 1.0
+        "tap \"I'm interested\"": 0.35,
+        "the owner can counter": 0.35,
+        "and the buyer accepts in principle": 0.35
       },
       "segments": [
         {
@@ -227,8 +227,8 @@
       "name": "How we built it",
       "hold": 1.0,
       "breaks": {
-        "one hosting prompt": 0.9,
-        "with traffic and scheduled jobs": 0.9
+        "one hosting prompt": 0.35,
+        "with traffic and scheduled jobs": 0.35
       },
       "segments": [
         {

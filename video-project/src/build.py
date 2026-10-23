@@ -4,6 +4,7 @@
     python3 src/build.py            # full render
     python3 src/build.py --fast     # quicker, lower-quality preview (same timing)
     python3 src/build.py --plan     # print the timing only
+    python3 src/build.py --audio-only   # re-mix the sound over the last render's picture (same timing)
     python3 src/build.py --cut launch   # the launch cut: narration-launch.md + timeline-launch.json
 
 Inputs it looks for (all optional; see README.md):
@@ -32,7 +33,7 @@ OUT = ROOT / 'out'
 SEG = OUT / 'segments'
 SEG.mkdir(parents=True, exist_ok=True)
 LEAD, TAIL = 0.6, 1.0  # seconds of picture before a scene's voice starts / after it ends
-GAP = TL.get('line_gap', 0.9)  # breath added after each sentence when word timings exist
+GAP = TL.get('line_gap', 0.8)  # breath added after each sentence when word timings exist
 
 
 def run(args):
@@ -230,6 +231,9 @@ draft = bool(draft_reasons)
 print(f'plan: {TOTAL:.1f} s total' + ''.join(f'\n  scene {p["id"]}: {p["start"]:6.1f}–{p["start"] + p["length"]:6.1f} s  voice: {(p["voice"].name + (" (sentences placed from word timings)" if p["layout"] else "")) if p["voice"] else "none (temporary timing)"}' for p in plan))
 
 
+if '--mark-rendered' in sys.argv:  # the picture in out/video.mp4 was rendered from this exact timing
+    (OUT / 'video.json').write_text(json.dumps({'cut': NAME, 'total': round(TOTAL, 3), 'segments': [[str(s['src']), round(s['dur'], 3)] for p in plan for s in p['segments']]}))
+    sys.exit(0)
 if '--plan' in sys.argv:  # print the scene and segment timing only
     for p in plan:
         for s in p['segments']:
@@ -294,30 +298,39 @@ def render_segment(i, s, d):
     return out
 
 
-flat = []
-for p in plan:
-    for s in p['segments']:
-        flat.append(s)
-files, offsets, acc = [], [], 0.0
-for i, s in enumerate(flat):
-    last = i == len(flat) - 1
-    d = s['dur'] + (0 if last else T)  # each segment runs T longer so the cross-fade does not eat its time
-    print(f'  segment {i:02} {s["type"]:8} {Path(s["src"]).name:34} {s["dur"]:5.2f} s')
-    files.append(render_segment(i, s, d))
-    offsets.append(acc)
-    acc += s['dur']
-
-# ---------- join with cross-fades ----------
 video = OUT / 'video.mp4'
-args = ['ffmpeg', '-y', '-loglevel', 'error']
-for f in files:
-    args += ['-i', str(f)]
-graph, last = '', '0:v'
-for i in range(1, len(files)):
-    graph += f'[{last}][{i}:v]xfade=transition=fade:duration={T}:offset={offsets[i]:.3f}[x{i}];'
-    last = f'x{i}'
-args += ['-filter_complex', graph.rstrip(';'), '-map', f'[{last}]', '-c:v', 'libx264', '-preset', 'ultrafast' if FAST else 'fast', '-crf', '24' if FAST else '15', '-pix_fmt', 'yuv420p', '-r', str(FPS), str(video)]
-run(args)
+stamp = OUT / 'video.json'
+want = {'cut': NAME, 'total': round(TOTAL, 3), 'segments': [[str(s['src']), round(s['dur'], 3)] for p in plan for s in p['segments']]}
+# --audio-only: keep the picture from the last render when its timing is unchanged (for music or voice tweaks)
+reuse = '--audio-only' in sys.argv and video.exists() and stamp.exists() and json.loads(stamp.read_text()) == want
+if '--audio-only' in sys.argv and not reuse:
+    print('picture timing changed (or no earlier render): rendering the picture too')
+if not reuse:
+    flat = []
+    for p in plan:
+        for s in p['segments']:
+            flat.append(s)
+    files, offsets, acc = [], [], 0.0
+    for i, s in enumerate(flat):
+        last = i == len(flat) - 1
+        d = s['dur'] + (0 if last else T)  # each segment runs T longer so the cross-fade does not eat its time
+        print(f'  segment {i:02} {s["type"]:8} {Path(s["src"]).name:34} {s["dur"]:5.2f} s')
+        files.append(render_segment(i, s, d))
+        offsets.append(acc)
+        acc += s['dur']
+
+    # ---------- join with cross-fades ----------
+    args = ['ffmpeg', '-y', '-loglevel', 'error']
+    for f in files:
+        args += ['-i', str(f)]
+    graph, last = '', '0:v'
+    for i in range(1, len(files)):
+        graph += f'[{last}][{i}:v]xfade=transition=fade:duration={T}:offset={offsets[i]:.3f}[x{i}];'
+        last = f'x{i}'
+    args += ['-filter_complex', graph.rstrip(';'), '-map', f'[{last}]', '-c:v', 'libx264', '-preset', 'ultrafast' if FAST else 'fast', '-crf', '24' if FAST else '15', '-pix_fmt', 'yuv420p', '-r', str(FPS), str(video)]
+    run(args)
+
+    stamp.write_text(json.dumps(want))
 
 # ---------- captions ----------
 cues = []
@@ -386,7 +399,32 @@ if not music:
             break
         x = np.arange(ln) / sr
         pluck[s0:s0 + ln] += np.exp(-x * 5.5) * np.sin(2 * np.pi * hz(m) * x) * (0.55 if k % 2 else 0.75)
-    mix = pad / np.abs(pad).max() * 0.55 + pluck / np.abs(pluck).max() * 0.22
+    beat = 60 / 92
+    kick = np.zeros(n)
+    shaker = np.zeros(n)
+    rng = np.random.default_rng(7)
+    for k in range(int(TOTAL / beat)):
+        s0 = int(k * beat * sr)
+        ln = int(0.35 * sr)
+        if s0 + ln >= n:
+            break
+        x = np.arange(ln) / sr
+        if k % 2 == 0:  # a soft kick on beats 1 and 3
+            kick[s0:s0 + ln] += np.sin(2 * np.pi * (48 * x + 70 * (1 - np.exp(-x * 30)) / 30)) * np.exp(-x * 9)
+        h0 = s0 + int(beat / 2 * sr)  # a light shaker on the off-beats
+        hl = int(0.08 * sr)
+        if h0 + hl < n:
+            noise = np.diff(rng.standard_normal(hl + 1))
+            shaker[h0:h0 + hl] += noise * np.exp(-np.arange(hl) / sr * 45)
+    chime = np.zeros(n)
+    for p in plan[1:]:  # a gentle chime where each scene starts
+        s0 = int(max(0, p['start'] - 0.15) * sr)
+        ln = int(2.2 * sr)
+        x = np.arange(min(ln, n - s0)) / sr
+        chime[s0:s0 + len(x)] += (np.sin(2 * np.pi * 880 * x) + 0.5 * np.sin(2 * np.pi * 1320 * x) + 0.25 * np.sin(2 * np.pi * 1760 * x)) * np.exp(-x * 2.2) * np.clip(x / 0.01, 0, 1)
+    intro = np.clip(tt / 6.0, 0.35, 1)  # the beat builds in over the first seconds
+    mix = (pad / np.abs(pad).max() * 0.50 + pluck / np.abs(pluck).max() * 0.24 + kick / np.abs(kick).max() * 0.30 * intro
+           + shaker / np.abs(shaker).max() * 0.07 * intro + (chime / np.abs(chime).max() * 0.22 if chime.any() else 0))
     fade = np.clip(tt / 2.5, 0, 1) * np.clip((TOTAL - tt) / 4.0, 0, 1)
     mix = (mix * fade * 0.6 * 32767).astype(np.int16)
     with wave.open(str(music), 'wb') as w:
@@ -394,18 +432,30 @@ if not music:
     print('music: generated a temporary bed (audio/music-temp.wav); add audio/music.* to use your own')
 
 # Each scene's voice as one track that starts with the scene: sentences placed per the layout, else the
-# whole file after LEAD. A light clean-up for phone recordings: rumble filter, gentle denoise, compression.
-CLEAN = 'highpass=f=80,afftdn=nf=-40:nr=10,acompressor=threshold=-22dB:ratio=2.5:attack=8:release=120:makeup=2'
+# whole file after LEAD. The gaps between sentences are filled with the recording's own room tone (its
+# quietest stretch, looped), so the background never drops to dead silence; cuts fade over 0.1-0.15 s; then
+# one gentle chain runs over the whole track: rumble and hiss filters, light denoise, a little warmth and
+# presence, soft compression and a de-esser.
+CLEAN = ('highpass=f=70,lowpass=f=14000,afftdn=nf=-45:nr=6,equalizer=f=250:t=q:w=1.2:g=-2,equalizer=f=4000:t=q:w=1.5:g=1.5,'
+         'acompressor=threshold=-20dB:ratio=2:attack=15:release=250:makeup=1.5,deesser=i=0.3')
 for p in plan:
     if not p['voice']:
         continue
     track = OUT / f'voice-scene{p["id"]}.wav'
     if p['layout']:
-        parts = [f'[0:a]aformat=sample_rates=48000:channel_layouts=mono,{CLEAN},asplit={len(p["layout"]["pieces"])}' + ''.join(f'[c{i}]' for i in range(len(p['layout']['pieces'])))]
+        import numpy as np
+        db = loudness(p['voice'])
+        win = 60  # 0.6 s of room tone, from the quietest part of the take
+        means = np.convolve(db, np.ones(win) / win, 'valid')
+        r0 = int(np.argmin(means)) / 100
+        n = len(p['layout']['pieces'])
+        parts = [f'[0:a]aformat=sample_rates=48000:channel_layouts=mono,asplit={n + 1}' + ''.join(f'[c{i}]' for i in range(n + 1))]
+        parts.append(f'[c{n}]atrim={r0:.3f}:{r0 + win / 100:.3f},asetpts=PTS-STARTPTS,afade=t=in:d=0.05,afade=t=out:st={win / 100 - 0.05:.3f}:d=0.05,'
+                     f'aloop=loop=-1:size={int(win / 100 * 48000)},atrim=0:{p["length"]:.3f},volume=0.8[room]')
         for i, (a, b, at) in enumerate(p['layout']['pieces']):
             ms = int(at * 1000)
-            parts.append(f'[c{i}]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS,afade=t=in:d=0.04,afade=t=out:st={max(0, b - a - 0.06):.3f}:d=0.06,adelay={ms}[p{i}]')
-        parts.append(''.join(f'[p{i}]' for i in range(len(p['layout']['pieces']))) + f'amix=inputs={len(p["layout"]["pieces"])}:normalize=0,apad=whole_dur={p["length"]:.3f}[o]')
+            parts.append(f'[c{i}]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS,afade=t=in:d=0.10,afade=t=out:st={max(0, b - a - 0.14):.3f}:d=0.14,adelay={ms}[p{i}]')
+        parts.append('[room]' + ''.join(f'[p{i}]' for i in range(n)) + f'amix=inputs={n + 1}:normalize=0,apad=whole_dur={p["length"]:.3f},{CLEAN},afade=t=in:d=0.3,afade=t=out:st={max(0, p["length"] - 0.4):.3f}:d=0.4[o]')
     else:
         ms = int(LEAD * 1000)
         parts = [f'[0:a]aformat=sample_rates=48000:channel_layouts=mono,{CLEAN},adelay={ms},apad=whole_dur={p["length"]:.3f}[o]']
@@ -417,14 +467,14 @@ args = ['ffmpeg', '-y', '-loglevel', 'error', '-i', str(music)]
 voices = [p for p in plan if p['voice']]
 for p in voices:
     args += ['-i', str(p['track'])]
-music_chain = f'[0:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=0:{TOTAL:.3f},afade=t=out:st={max(0, TOTAL - 4):.3f}:d=4,volume={0.16 if voices else 0.30}[m]'
+music_chain = f'[0:a]aformat=sample_rates=48000:channel_layouts=stereo,atrim=0:{TOTAL:.3f},afade=t=out:st={max(0, TOTAL - 4):.3f}:d=4,volume={0.6 if voices else 0.30}[m]'
 if voices:
     parts = [music_chain]
     for i, p in enumerate(voices):
         ms = int(p['start'] * 1000)
         parts.append(f'[{i + 1}:a]aformat=sample_rates=48000:channel_layouts=stereo,adelay={ms}|{ms}[v{i}]')
     parts.append(''.join(f'[v{i}]' for i in range(len(voices))) + f'amix=inputs={len(voices)}:normalize=0,apad=whole_dur={TOTAL:.3f},asplit=2[vo][sc]')
-    parts.append('[m][sc]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400[md]')
+    parts.append('[m][sc]sidechaincompress=threshold=0.02:ratio=7:attack=35:release=500[md]')  # the music steps back while you speak and returns in the pauses
     parts.append('[vo][md]amix=inputs=2:weights=1 1:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11[a]')
 else:
     parts = [music_chain, '[m]loudnorm=I=-26:TP=-3[a]']

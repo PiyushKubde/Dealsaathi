@@ -136,8 +136,8 @@
       ],
       "hold": 1.5,
       "breaks": {
-        "Claude could build": 0.5,
-        "without us having": 0.5
+        "Claude could build": 0.35,
+        "without us having": 0.35
       }
     },
     {
@@ -263,7 +263,7 @@
       ],
       "hold": 3.5,
       "breaks": {
-        "and let our AI coding agent": 0.8
+        "and let our AI coding agent": 0.35
       }
     },
     {
@@ -394,9 +394,9 @@
       ],
       "hold": 1.0,
       "breaks": {
-        "A buyer finds it": 0.7,
-        "who makes a counter-offer": 0.9,
-        "and the agent records": 0.9
+        "A buyer finds it": 0.35,
+        "who makes a counter-offer": 0.35,
+        "and the agent records": 0.35
       }
     },
     {
@@ -452,5 +452,5 @@
       "hold": 2.5
     }
   ],
-  "line_gap": 1.0
+  "line_gap": 0.8
 }
