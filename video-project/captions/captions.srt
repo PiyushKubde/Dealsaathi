@@ -1,0 +1,194 @@
+1
+00:00:00,600 --> 00:00:05,080
+What if you could build an AI-powered
+application starting from a single prompt,
+
+2
+00:00:05,200 --> 00:00:09,030
+connect real-world integrations
+without building them from scratch,
+
+3
+00:00:09,150 --> 00:00:10,830
+and deploy it with ease?
+
+4
+00:00:10,950 --> 00:00:14,580
+Meet DealSaathi, built using
+Claude Code and the ViaSocket SDK,
+
+5
+00:00:14,700 --> 00:00:16,380
+and deployed on Embarko.
+
+6
+00:00:16,500 --> 00:00:19,080
+Let me show you how it all comes together.
+
+7
+00:00:20,600 --> 00:00:25,676
+I started with a single,
+detailed prompt in Claude Code,
+
+8
+00:00:25,796 --> 00:00:32,936
+describing the application I wanted to
+build, and refined it with follow-up prompts
+
+9
+00:00:33,056 --> 00:00:34,922
+along the way.
+
+10
+00:00:35,042 --> 00:00:41,265
+With the ViaSocket SDK and skill
+available in the development workflow,
+
+11
+00:00:41,385 --> 00:00:47,607
+Claude could build DealSaathi and
+integrate the capabilities it needed,
+
+12
+00:00:47,727 --> 00:00:52,956
+without us having to build
+every integration from scratch.
+
+13
+00:00:53,076 --> 00:00:58,153
+The goal is to spend less
+time wiring services together,
+
+14
+00:00:58,273 --> 00:01:02,279
+and more time building the product itself.
+
+15
+00:01:02,399 --> 00:01:06,788
+But building the app is
+only half the job. Now,
+
+16
+00:01:06,908 --> 00:01:09,080
+let's get it live.
+
+17
+00:01:10,600 --> 00:01:15,675
+Now that the application is
+built, we need to get it online.
+
+18
+00:01:15,795 --> 00:01:21,952
+This is Embarko, a hosting platform
+designed to make deploying applications
+
+19
+00:01:22,072 --> 00:01:23,972
+straightforward.
+
+20
+00:01:24,092 --> 00:01:29,672
+We follow its hosting workflow,
+provide the required configuration,
+
+21
+00:01:29,792 --> 00:01:34,578
+and let our AI coding agent
+handle the deployment steps.
+
+22
+00:01:34,698 --> 00:01:41,216
+Once the deployment succeeds, DealSaathi
+is accessible through its own live URL.
+
+23
+00:01:41,336 --> 00:01:45,905
+Embarko also gives us a
+dashboard to monitor traffic,
+
+24
+00:01:46,025 --> 00:01:49,080
+performance, and scheduled jobs.
+
+25
+00:01:50,600 --> 00:01:53,839
+Now let's see DealSaathi in action.
+
+26
+00:01:53,959 --> 00:01:58,556
+A seller lists a four-bedroom
+villa. A buyer finds it,
+
+27
+00:01:58,676 --> 00:02:02,416
+taps "I'm interested", and makes an offer.
+
+28
+00:02:02,536 --> 00:02:06,847
+The buyer's agent forwards
+the offer to the owner,
+
+29
+00:02:06,967 --> 00:02:09,563
+who makes a counter-offer.
+
+30
+00:02:09,683 --> 00:02:15,137
+The buyer accepts in principle,
+and the agent records the outcome.
+
+31
+00:02:15,257 --> 00:02:21,784
+Every step notifies the right people, and
+the buyer's identity stays private from
+
+32
+00:02:21,904 --> 00:02:23,428
+the seller.
+
+33
+00:02:23,548 --> 00:02:29,217
+Behind the scenes, the ViaSocket
+SDK connects each agent's own Gmail,
+
+34
+00:02:29,337 --> 00:02:34,291
+Slack and Google Calendar, and
+each one passed a live test.
+
+35
+00:02:34,411 --> 00:02:39,080
+One workflow, three roles,
+and far less back-and-forth.
+
+36
+00:02:40,600 --> 00:02:45,356
+And that's DealSaathi: built with Claude
+Code, integrated using the ViaSocket SDK,
+
+37
+00:02:45,476 --> 00:02:47,223
+and deployed on Embarko.
+
+38
+00:02:47,343 --> 00:02:52,047
+We've gone from an idea to a working,
+integrated application that's running live.
+
+39
+00:02:52,167 --> 00:02:55,989
+Less time building integrations
+and dealing with infrastructure.
+
+40
+00:02:56,109 --> 00:02:58,426
+More time building useful products.
+
+41
+00:02:58,546 --> 00:03:03,250
+If you're building your next AI application,
+give the ViaSocket SDK and Embarko a
+
+42
+00:03:03,370 --> 00:03:04,080
+try.

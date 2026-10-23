@@ -1,0 +1,12 @@
+# Media is regenerated (record.mjs, build.py) or supplied by you; keep it out of git.
+out/
+recordings/*.mp4
+recordings/raw/
+recordings/supplied/*
+!recordings/supplied/.gitkeep
+audio/music-temp.wav
+audio/voice/*
+!audio/voice/.gitkeep
+assets/supplied/*
+!assets/supplied/.gitkeep
+DealSaathi-Demo.mp4

@@ -1,0 +1,64 @@
+{
+  "_doc": "Editable timeline. See README.md. dur = seconds on screen (planned, before voice re-timing). card: still PNG with a slow zoom. clip: video; src_in/src_out pick the source span, tail = last N source seconds kept at real speed (the rest is sped up to fit). supplied: a recording that replaces this segment when the file exists. overlays: [png, from, to] in segment seconds.",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "transition": 0.5,
+  "scenes": [
+    {
+      "id": 1,
+      "name": "The idea and DealSaathi",
+      "segments": [
+        { "type": "card", "src": "assets/cards/c01-title.png", "dur": 5.5, "zoom": [1.0, 1.05] },
+        { "type": "clip", "src": "recordings/agent-dashboard.mp4", "src_in": 0.8, "src_out": 15.8, "dur": 14.5, "zoom": [1.0, 1.06], "overlays": [["assets/overlays/o-title.png", 0.6, 7.5], ["assets/overlays/o-staging.png", 0.0, 15.0]] }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Building with Claude Code and ViaSocket",
+      "segments": [
+        { "type": "card", "src": "assets/cards/c02-prompt.png", "dur": 9, "zoom": [1.0, 1.04], "supplied": "recordings/supplied/claude-code-build.mp4" },
+        { "type": "card", "src": "assets/cards/c03-steps.png", "dur": 9, "zoom": [1.0, 1.04] },
+        { "type": "card", "src": "assets/cards/c04-skill.png", "dur": 7, "zoom": [1.02, 1.08] },
+        { "type": "card", "src": "assets/cards/c05-sdk.png", "dur": 8, "zoom": [1.02, 1.08] },
+        { "type": "clip", "src": "recordings/agent-integrations.mp4", "src_in": 0.8, "src_out": 12.0, "dur": 9, "tail": 4, "overlays": [["assets/overlays/o-viasocket.png", 1.2, 8.4]] },
+        { "type": "card", "src": "assets/cards/c06-actions.png", "dur": 8, "zoom": [1.02, 1.08] }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Hosting on Embarko",
+      "segments": [
+        { "type": "card", "src": "assets/cards/m01-embarko-host.png", "dur": 4, "supplied": "recordings/supplied/embarko-host-new-app.mp4" },
+        { "type": "card", "src": "assets/cards/c07-hosting-prompt.png", "dur": 7, "zoom": [1.0, 1.05] },
+        { "type": "card", "src": "assets/cards/m02-claude-paste.png", "dur": 3, "supplied": "recordings/supplied/claude-code-deploy.mp4" },
+        { "type": "card", "src": "assets/cards/c08-deploy.png", "dur": 8, "zoom": [1.0, 1.05] },
+        { "type": "clip", "src": "recordings/prod-landing.mp4", "src_in": 0.5, "src_out": 7.5, "dur": 6, "zoom": [1.0, 1.05], "overlays": [["assets/overlays/o-live.png", 0.5, 5.8]] },
+        { "type": "card", "src": "assets/cards/m03-embarko-dashboard.png", "dur": 4, "supplied": "recordings/supplied/embarko-dashboard.mp4" },
+        { "type": "card", "src": "assets/cards/c09-running.png", "dur": 8, "zoom": [1.0, 1.05] }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "DealSaathi in action: the offer workflow",
+      "segments": [
+        { "type": "clip", "src": "recordings/seller-listing.mp4", "src_in": 1.0, "src_out": 29.5, "dur": 8, "tail": 3, "overlays": [["assets/overlays/o-step1.png", 0.2, 8.3]] },
+        { "type": "clip", "src": "recordings/buyer-offer.mp4", "src_in": 0.8, "src_out": 29.8, "dur": 9, "tail": 3, "overlays": [["assets/overlays/o-step2.png", 0.2, 9.3]] },
+        { "type": "clip", "src": "recordings/agent-forward.mp4", "src_in": 1.0, "src_out": 17.2, "dur": 6, "tail": 2.5, "overlays": [["assets/overlays/o-step3.png", 0.2, 6.3]] },
+        { "type": "clip", "src": "recordings/seller-counter.mp4", "src_in": 1.0, "src_out": 21.6, "dur": 6, "tail": 2.5, "overlays": [["assets/overlays/o-step4.png", 0.2, 6.3]] },
+        { "type": "clip", "src": "recordings/buyer-accept.mp4", "src_in": 1.0, "src_out": 21.9, "dur": 7, "tail": 3.5, "overlays": [["assets/overlays/o-step5.png", 0.2, 7.3]] },
+        { "type": "clip", "src": "recordings/agent-close.mp4", "src_in": 1.0, "src_out": 26.0, "dur": 8, "tail": 4, "overlays": [["assets/overlays/o-step6.png", 0.2, 8.3]] },
+        { "type": "card", "src": "assets/cards/c10-live-tests.png", "dur": 6, "zoom": [1.0, 1.05] }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "The result and closing",
+      "segments": [
+        { "type": "clip", "src": "recordings/buyer-accept.mp4", "src_in": 16.5, "src_out": 21.9, "dur": 4.5, "overlays": [["assets/overlays/o-staging.png", 0.0, 4.6]] },
+        { "type": "clip", "src": "recordings/agent-dashboard.mp4", "src_in": 1.0, "src_out": 13.0, "dur": 11, "tail": 11, "zoom": [1.0, 1.05], "overlays": [["assets/overlays/o-staging.png", 0.0, 11.5]] },
+        { "type": "closing", "src": "assets/cards/c11-closing.png", "supplied": "assets/supplied/closing.png", "dur": 9.5, "zoom": [1.0, 1.0] }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+{
+ "capturedAt": "2026-10-23T12:37:46.002Z",
+ "source": "Embarko API (ship.embarko.ai), read-only GET requests",
+ "apps": {
+  "dealsaathi-app": {
+   "url": "https://dealsaathi-app.embarko.app",
+   "status": {
+    "status": "live",
+    "deploy": "success"
+   },
+   "deployments": [
+    {
+     "id": "cmvkpo7l800sgsgizeqdtwcwk",
+     "version": "v20",
+     "status": "success",
+     "current": true,
+     "rollbackTarget": false,
+     "commit": "436fbee768a3d82ddbc0adb8b2636f150189e42a",
+     "createdAt": "2026-10-23T08:31:46.028Z",
+     "finishedAt": "2026-10-23T08:32:06.299Z",
+     "agent": "claude",
+     "source": "agent"
+    },
+    {
+     "id": "cmvkje75j05xs52pkrr02ohev",
+     "version": "v19",
+     "status": "success",
+     "current": false,
+     "rollbackTarget": true,
+     "commit": "2e9ea9109e1f1e52572b9755d0e3dead0306168a",
+     "createdAt": "2026-10-23T05:36:01.208Z",
+     "finishedAt": "2026-10-23T05:36:35.725Z",
+     "agent": "claude",
+     "source": "agent"
+    },
+    {
+     "id": "cmvjyo379036e52pkts7mwiqg",
+     "version": "v18",
+     "status": "success",
+     "current": false,
+     "rollbackTarget": true,
+     "commit": "4bf30cbbfbe578f67e27cf48509cb515d5584622",
+     "createdAt": "2026-10-22T19:55:50.709Z",
+     "finishedAt": "2026-10-22T19:56:10.662Z",
+     "agent": "claude",
+     "source": "agent"
+    },
+    {
+     "id": "cmvjy577l034552pkfzzzfcap",
+     "version": "v17",
+     "status": "success",
+     "current": false,
+     "rollbackTarget": true,
+     "commit": "f299e7ec8c3bda6adb7a2af4d01c93bb4825a8b5",
+     "createdAt": "2026-10-22T19:41:09.442Z",
+     "finishedAt": "2026-10-22T19:41:31.535Z",
+     "agent": "claude",
+     "source": "agent"
+    }
+   ],
+   "schedules": [
+    {
+     "name": "DealSaathi automations (follow-up reminders)",
+     "cron": "*/15 * * * *",
+     "path": "/tasks/automations",
+     "timezone": "Asia/Kolkata",
+     "enabled": true,
+     "lastRun": {
+      "at": "2026-10-23T12:30:30.165Z",
+      "outcome": "ok",
+      "http": 200
+     }
+    }
+   ],
+   "startupLog": [
+    "DealSaathi is running at port 26357",
+    "Database: DATA_DIR/dealsaathi.db schema v10 (8 users {\"agent\":1,\"buyer\":4,\"seller\":3}, 7 leads, 4 properties, 4 connections, 45 events)",
+    "viaSocket: configured (AI, integrations, automations).",
+    "Scheduler: on (/tasks/automations, every 15 minutes)",
+    "Backup download: on.",
+    "Access: accounts; buyers and sellers sign up openly, new agents need the team access code",
+    "System email: on (Gmail connection #1, live on viaSocket)"
+   ]
+  },
+  "dealsaathi-staging": {
+   "url": "https://dealsaathi-staging.embarko.app",
+   "status": {
+    "status": "live",
+    "deploy": "success"
+   },
+   "deployments": [
+    {
+     "id": "cmvkpf1uj0096kt6wcwuou1zz",
+     "version": "v4",
+     "status": "success",
+     "current": true,
+     "rollbackTarget": false,
+     "commit": "436fbee768a3d82ddbc0adb8b2636f150189e42a",
+     "createdAt": "2026-10-23T08:24:38.683Z",
+     "finishedAt": "2026-10-23T08:25:03.235Z",
+     "agent": "claude",
+     "source": "agent"
+    },
+    {
+     "id": "cmvjyybo8037j52pkiubb4gsm",
+     "version": "v3",
+     "status": "success",
+     "current": false,
+     "rollbackTarget": true,
+     "commit": "4bf30cbbfbe578f67e27cf48509cb515d5584622",
+     "createdAt": "2026-10-22T20:03:48.249Z",
+     "finishedAt": "2026-10-22T20:04:04.023Z",
+     "agent": "claude",
+     "source": "agent"
+    },
+    {
+     "id": "cmvjw8o9002ux52pkckjvxtmj",
+     "version": "v2",
+     "status": "success",
+     "current": false,
+     "rollbackTarget": true,
+     "commit": "3e746a191b416a7b6f7a19d8bc83ecbe0d7ca97c",
+     "createdAt": "2026-10-22T18:47:52.261Z",
+     "finishedAt": "2026-10-22T18:48:04.046Z",
+     "agent": "claude",
+     "source": "agent"
+    },
+    {
+     "id": "cmvjw67r502ui52pko833o6dg",
+     "version": "v1",
+     "status": "success",
+     "current": false,
+     "rollbackTarget": true,
+     "commit": "3e746a191b416a7b6f7a19d8bc83ecbe0d7ca97c",
+     "createdAt": "2026-10-22T18:45:57.569Z",
+     "finishedAt": "2026-10-22T18:46:32.557Z",
+     "agent": "claude",
+     "source": "agent"
+    }
+   ],
+   "schedules": [
+    {
+     "name": "DealSaathi automations (follow-up reminders)",
+     "cron": "*/15 * * * *",
+     "path": "/tasks/automations",
+     "timezone": "Asia/Kolkata",
+     "enabled": true,
+     "lastRun": {
+      "at": "2026-10-23T12:30:32.324Z",
+      "outcome": "ok",
+      "http": 200
+     }
+    }
+   ],
+   "startupLog": [
+    "DealSaathi is running at port 25523",
+    "Database: DATA_DIR/dealsaathi.db schema v10 (4 users {\"agent\":2,\"buyer\":1,\"seller\":1}, 2 leads, 2 properties, 0 connections, 12 events)",
+    "viaSocket: configured (AI, integrations, automations).",
+    "Scheduler: on (/tasks/automations, every 15 minutes)",
+    "Backup download: off (no BACKUP_TOKEN).",
+    "Access: accounts; buyers and sellers sign up openly, new agents need the team access code",
+    "System email: off (No system email account is set on this server (SYSTEM_MAIL_CONNECTION).)"
+   ]
+  }
+ }
+}
