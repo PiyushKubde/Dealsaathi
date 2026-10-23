@@ -145,8 +145,13 @@ for sc in TL['scenes']:
     segs = []
     for s in sc['segments']:
         s = dict(s, dur=s['dur'] * k, _planned=s['dur'])
-        sup = ROOT / s['supplied'] if s.get('supplied') else None
-        if sup and sup.exists():
+        sup = None
+        if s.get('supplied'):  # a recording, or a screenshot with the same name (.png/.jpg)
+            base = ROOT / s['supplied']
+            sup = next((c for c in [base] + [base.with_suffix(x) for x in ('.mp4', '.mov', '.webm', '.png', '.jpg', '.jpeg')] if c.exists()), None)
+            if sup:
+                s = dict(s, supplied=str(sup.relative_to(ROOT)))
+        if sup:
             s = dict(s, type='closing' if s['type'] == 'closing' else ('still' if sup.suffix.lower() in ('.png', '.jpg', '.jpeg') else 'supplied'), src=s['supplied'])
         elif s['type'] == 'closing':
             draft_reasons.append('placeholder closing card (no assets/supplied/closing.png)')

@@ -63,6 +63,7 @@ If you read the script in one take, cut it into the five files at the scene brea
 Drop files at the paths named in `asset-manifest.md` and re-run `build.py`. No other edit is needed:
 
 - `recordings/supplied/*.mp4` take the place of the matching slate (`supplied` in `timeline.json`).
+  A screenshot with the same name (`.png` or `.jpg`) works too; it is shown whole, without cropping.
   A recording is sped up or slowed down to fit its slot, never cropped. Change the slot's `dur` to give
   it more time.
 - `assets/supplied/closing.png` replaces the closing card. It is fitted inside the frame with its
