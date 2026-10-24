@@ -699,6 +699,12 @@ const MIGRATIONS = [
     created_at  TEXT    NOT NULL
   );
   CREATE INDEX offer_events_offer ON offer_events(offer_id, id);
+  `,
+
+  // 11: the listings pages (buyer market, agent market) read published listings newest first; this index lets them
+  // stop after one page instead of sorting every listing on each request. Index only.
+  `
+  CREATE INDEX properties_published ON properties(listing_state, updated_at DESC, id DESC);
   `
 ]
 
@@ -714,9 +720,30 @@ export const SCHEMA_VERSION = MIGRATIONS.length
 export function openDatabase(file = databaseFile(), { log = () => {}, upTo = MIGRATIONS.length } = {}) {
   if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true })
   const db = new DatabaseSync(file)
+  cacheStatements(db)
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 3000;')
   migrate(db, file, log, upTo)
   return db
+}
+
+/**
+ * db.prepare compiles the SQL on every call, which costs more than running a simple query. Prepared statements
+ * are reused per SQL text instead (nothing here iterates a statement while running it again, and no statement
+ * settings are changed, so sharing them is safe). Bounded: SQL built with a varying number of placeholders
+ * cannot grow it without limit.
+ */
+function cacheStatements(db, max = 1000) {
+  const prepare = db.prepare.bind(db)
+  const cache = new Map()
+  db.prepare = (sql) => {
+    let statement = cache.get(sql)
+    if (!statement) {
+      statement = prepare(sql)
+      if (cache.size >= max) cache.clear()
+      cache.set(sql, statement)
+    }
+    return statement
+  }
 }
 
 /**

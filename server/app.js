@@ -16,7 +16,7 @@ import { requestPasswordReset, resetPassword, sendVerification, verificationStat
 import { acceptInvite, createInvite, previewInvite, revokeInvites, unlinkParty } from './rent/service.js'
 import { cancelAction, confirmAction, handleMessage, loadConversation } from './assistant/service.js'
 import { cancelAgentAction, confirmAgentAction, deleteAgentConversation, handleAgentMessage, loadAgentConversation } from './agent/runtime.js'
-import { createAuth } from './auth.js'
+import { createAuth, sweepExpired } from './auth.js'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { disconnect, listUserConnections, reconnectDetails, requireViasocket, saveConnection, viasocketError } from './integrations/service.js'
 import { curatedApps, requireCuratedServiceId } from './integrations/apps.js'
@@ -44,6 +44,30 @@ const parseUuid = (value, what) => {
   if (!UUID_RE.test(String(value))) throw new AppError(404, `${what}_not_found`, `No such ${what}.`)
   return String(value)
 }
+
+// The browser may run only this app's own scripts plus viaSocket's Connect window (connect.js, which opens its
+// iframe from embedfrontend.viasocket.com and calls viaSocket's APIs). No other site may frame the app.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' https://flow.viasocket.com",
+  "style-src 'self' 'unsafe-inline'", // the pages set small inline style attributes
+  "img-src 'self' data: https:", // app icons come from viaSocket's catalog
+  "connect-src 'self' https://*.viasocket.com https://flow.sokt.io",
+  "frame-src https://*.viasocket.com https://flow.sokt.io",
+  "font-src 'self' data:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'"
+].join('; ')
+export const securityHeaders = (req) => ({
+  'Content-Security-Policy': CSP,
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  ...(req.secure ? { 'Strict-Transport-Security': 'max-age=31536000' } : {})
+})
 
 const sameHost = (origin, host) => {
   try {
@@ -76,6 +100,7 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   })
   app.disable('x-powered-by')
   if (behindProxy) app.set('trust proxy', 1)
+  app.use((req, res, next) => { res.set(securityHeaders(req)); next() })
   app.use(express.json({ limit: '50kb' }))
 
   // Writes only from this app's own pages: a JSON body (forms on other sites cannot send one) and a same-site Origin.
@@ -97,6 +122,7 @@ export function createApp({ db, ai, vs = { configured: false }, auth = createAut
   // rate-limited per address so they cannot be used to flood mailboxes or guess tokens.
   const accountHits = new Map()
   const limitAccount = (req, max = 10) => {
+    sweepExpired(accountHits, 5000, 'reset')
     const key = `${req.path}:${req.ip || 'unknown'}`
     const e = accountHits.get(key)
     if (!e || e.reset < Date.now()) accountHits.set(key, { n: 1, reset: Date.now() + 15 * 60 * 1000 })

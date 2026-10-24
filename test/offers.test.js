@@ -289,7 +289,7 @@ test('migration 10 adds offers to a v9 database: a backup first, existing rows u
     assert.equal(before.property_interests.length, 1)
     old.close()
     const logs = []
-    const db = openDatabase(file, { log: (l) => logs.push(l) })
+    const db = openDatabase(file, { log: (l) => logs.push(l), upTo: 10 })
     assert.equal(db.prepare('SELECT version FROM schema_version').get().version, 10)
     assert.match(logs.join('\n'), /Backed up the database before migrating v9 → v10/)
     assert.deepEqual(snapshot(db), before)

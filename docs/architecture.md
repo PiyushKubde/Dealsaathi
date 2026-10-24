@@ -1,6 +1,6 @@
 # DealSaathi architecture: a three-sided marketplace
 
-## Data model (schema v6; v7 to v10 add tables, see below and server/db.js)
+## Data model (schema v6; v7 to v10 add tables, v11 an index; see below and server/db.js)
 
 ```
 users (role: buyer | seller | agent)
@@ -186,3 +186,24 @@ gets SQL, HTTP, shell or other users' data.
   shown), `agent_messages`, `agent_runs` and `agent_steps` (tool names, outcomes, timings: no message text),
   `agent_actions`. The log gets one line per run and per confirmed action, with no content.
 
+
+## Launch hardening (schema v11, an index only)
+
+- **Security headers** on every answer (`securityHeaders` in `server/app.js`): a Content-Security-Policy that allows
+  only this app's scripts plus viaSocket's Connect window (`flow.viasocket.com/connect.js`, its iframe on
+  `*.viasocket.com`), no framing by other sites (`frame-ancestors 'none'`, `X-Frame-Options: DENY`), `nosniff`, a
+  referrer policy (the feedback page keeps `no-referrer`), and HSTS when the request arrived over HTTPS.
+- **Sign-in limits**: 10 failed sign-ins per IP address and 20 per account per 15 minutes. A successful sign-in
+  clears only that account's count, never the address's. An unknown email is checked against a dummy hash, so it
+  takes as long as a wrong password. Each sign-in and sign-up is counted before its password is hashed, so a
+  burst of parallel requests cannot slip under the limits. The in-memory limit maps drop expired entries once they
+  hold 5,000.
+- **Passwords** are hashed with scrypt on libuv's thread pool for sign-in and sign-up, so a burst of sign-ins does
+  not hold up other requests. Password reset (rare, rate limited) still hashes inline.
+- **Statements**: `openDatabase` reuses prepared statements per SQL text (up to 1,000), since compiling SQL cost more
+  than running a simple query. Matching builds leads and listings from the rows it already read.
+- **Listings index** (`properties_published`): the market pages read published listings newest first and stop
+  after a page instead of sorting every listing.
+- **Measured** on a local copy with 5,000 listings and 5,000 buyers (one Node process): buyer market 90 → 480
+  requests/s; matching one listing against every buyer 685 → 175 ms, one buyer against every listing 133 → 36 ms;
+  other pages answered in 19 ms (p95) while 20 sign-ins ran, against 856 ms before.

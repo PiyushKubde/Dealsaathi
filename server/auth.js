@@ -2,13 +2,15 @@
 // unique_identifier viaSocket scopes their connections, flows and AI threads by.
 // A hosted copy is reachable from the internet, so creating an account there needs the team access
 // code (APP_PASSWORD); without one set, the hosted copy stays locked.
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'node:crypto'
+import { promisify } from 'node:util'
 import { now, transaction } from './db.js'
 import { AppError, validationError } from './errors.js'
 
 const COOKIE = 'ds_session'
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000
-const MAX_ATTEMPTS = 10
+const MAX_ATTEMPTS = 10 // failed sign-ins per IP address per 15 minutes
+const MAX_ACCOUNT_ATTEMPTS = 20 // failed sign-ins per account per 15 minutes, from any address
 const MAX_SIGNUPS = 20 // new accounts per IP address per hour
 const WINDOW_MS = 15 * 60 * 1000
 export const MIN_ACCESS_CODE = 12
@@ -32,14 +34,38 @@ export function verifyPassword(password, stored) {
   return timingSafeEqual(expected, actual)
 }
 
+// The sign-in and sign-up routes hash on libuv's thread pool, so a burst of sign-ins does not stall every other request.
+const scryptAsync = promisify(scrypt)
+export async function hashPasswordAsync(password) {
+  const salt = randomBytes(16)
+  const hash = await scryptAsync(password, salt, 32)
+  return `scrypt$${salt.toString('base64')}$${hash.toString('base64')}`
+}
+
+export async function verifyPasswordAsync(password, stored) {
+  const [scheme, salt, hash] = String(stored).split('$')
+  if (scheme !== 'scrypt' || !salt || !hash) return false
+  const expected = Buffer.from(hash, 'base64')
+  const actual = await scryptAsync(password, Buffer.from(salt, 'base64'), expected.length)
+  return timingSafeEqual(expected, actual)
+}
+
+// Checked when the email has no account, so an unknown address takes as long to refuse as a wrong password.
+let dummyHash = null
+const timingDummy = () => (dummyHash ??= hashPassword(randomBytes(16).toString('hex')))
+
+/** Drops expired entries from a rate-limit map once it grows, so many distinct addresses cannot exhaust memory. */
+export function sweepExpired(map, max = 5000, field = 'resetAt') {
+  if (map.size < max) return
+  const t = Date.now()
+  for (const [key, entry] of map) if (entry[field] < t) map.delete(key)
+}
+
 export const ROLES = ['buyer', 'seller', 'agent']
 const publicUser = (u) => (u ? { id: u.id, name: u.name, email: u.email, role: u.role, emailVerified: Boolean(u.email_verified_at) } : null)
 
-/**
- * Creates an account with its role and the matching profile, in one transaction.
- * Throws 400 for bad fields and 409 if the email is taken.
- */
-export function createUser(db, { name, email, password, role = 'agent', phone = null }) {
+/** The checked fields of a new account; throws 400 listing every field that needs attention. */
+function cleanNewUser({ name, email, password, role = 'agent', phone = null }) {
   const errors = {}
   const cleanName = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : ''
   const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
@@ -50,12 +76,21 @@ export function createUser(db, { name, email, password, role = 'agent', phone = 
   const cleanPhone = typeof phone === 'string' && phone.trim() ? phone.trim().slice(0, 20) : null
   if (cleanPhone && !/^[+\d][\d\s-]{6,19}$/.test(cleanPhone)) errors.phone = 'Enter a valid phone number.'
   if (Object.keys(errors).length) throw validationError(errors)
+  return { cleanName, cleanEmail, role, cleanPhone }
+}
+
+/**
+ * Creates an account with its role and the matching profile, in one transaction.
+ * Throws 400 for bad fields and 409 if the email is taken. `passwordHash`: already hashed (see register).
+ */
+export function createUser(db, { name, email, password, role = 'agent', phone = null, passwordHash = null }) {
+  const { cleanName, cleanEmail, cleanPhone } = cleanNewUser({ name, email, password, role, phone })
   return transaction(db, () => {
     if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(cleanEmail)) throw new AppError(409, 'email_taken', 'An account with this email already exists. Sign in instead.')
     const user = { id: `usr_${randomBytes(9).toString('hex')}`, email: cleanEmail, name: cleanName, role }
     const ts = now()
     db.prepare('INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(user.id, user.email, user.name, hashPassword(password), role, ts)
+      .run(user.id, user.email, user.name, passwordHash ?? hashPassword(password), role, ts)
     const table = { agent: 'agent_profiles', buyer: 'buyer_profiles', seller: 'seller_profiles' }[role]
     db.prepare(`INSERT INTO ${table} (user_id, phone, created_at, updated_at) VALUES (?, ?, ?, ?)`).run(user.id, cleanPhone, ts, ts)
     return user
@@ -102,16 +137,25 @@ export function createAuth({ db, accessCode, hosted = false }) {
   const cookie = (req, value, maxAgeSeconds) =>
     `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}${req.secure ? '; Secure' : ''}`
 
-  function checkRate(ip) {
-    const entry = attempts.get(ip)
-    if (entry && entry.resetAt > Date.now() && entry.count >= MAX_ATTEMPTS) {
+  // Failed attempts are counted per IP address and, for sign-in, per account. A successful sign-in clears only that
+  // account's count: clearing the address's count would let someone with one account reset it between guesses.
+  function checkRate(key, max = MAX_ATTEMPTS) {
+    const entry = attempts.get(key)
+    if (entry && entry.resetAt > Date.now() && entry.count >= max) {
       throw new AppError(429, 'too_many_attempts', 'Too many attempts. Wait 15 minutes and try again.')
     }
   }
-  function recordFailure(ip) {
-    const entry = attempts.get(ip)
-    if (!entry || entry.resetAt < Date.now()) attempts.set(ip, { count: 1, resetAt: Date.now() + WINDOW_MS })
+  function recordFailure(key) {
+    sweepExpired(attempts)
+    const entry = attempts.get(key)
+    if (!entry || entry.resetAt < Date.now()) attempts.set(key, { count: 1, resetAt: Date.now() + WINDOW_MS })
     else entry.count++
+  }
+  // Sign-in counts an attempt before the (asynchronous) password check, so parallel guesses cannot all slip in
+  // under the limit while the hashes run; a correct password takes its attempt back.
+  function takeBack(key) {
+    const entry = attempts.get(key)
+    if (entry && entry.count > 0) entry.count--
   }
   const lockedError = () => new AppError(503, 'password_not_set', `This hosted copy is locked until APP_PASSWORD (at least ${MIN_ACCESS_CODE} characters) is set in the hosting settings.`)
 
@@ -139,7 +183,7 @@ export function createAuth({ db, accessCode, hosted = false }) {
       next()
     },
 
-    register(req, res) {
+    async register(req, res) {
       if (mode === 'locked') throw lockedError()
       const ip = req.ip || 'unknown'
       checkRate(ip)
@@ -155,24 +199,41 @@ export function createAuth({ db, accessCode, hosted = false }) {
       }
       const s = signups.get(ip)
       if (s && s.resetAt > Date.now() && s.count >= MAX_SIGNUPS) throw new AppError(429, 'too_many_signups', 'Too many new accounts from this network. Try again in an hour.')
-      const user = createUser(db, { name, email, password, phone, role })
+      const clean = cleanNewUser({ name, email, password, phone, role })
+      if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(clean.cleanEmail)) throw new AppError(409, 'email_taken', 'An account with this email already exists. Sign in instead.')
+      // The signup is counted before the password is hashed (parallel requests cannot all pass the check) and
+      // handed back if the account is not created after all.
+      sweepExpired(signups)
       if (!s || s.resetAt < Date.now()) signups.set(ip, { count: 1, resetAt: Date.now() + 60 * 60 * 1000 })
       else s.count++
+      let user
+      try {
+        const passwordHash = await hashPasswordAsync(password)
+        user = createUser(db, { name, email, password, phone, role, passwordHash }) // re-checks the email inside its transaction
+      } catch (error) {
+        const entry = signups.get(ip)
+        if (entry && entry.count > 0) entry.count--
+        throw error
+      }
       startSession(req, res, user)
     },
 
-    login(req, res) {
+    async login(req, res) {
       if (mode === 'locked') throw lockedError()
       const ip = req.ip || 'unknown'
-      checkRate(ip)
       const { email, password } = req.body || {}
-      const row = typeof email === 'string' ? db.prepare('SELECT * FROM users WHERE email = ?').get(email.trim().toLowerCase()) : null
-      const ok = row && typeof password === 'string' && password.length <= 200 && verifyPassword(password, row.password_hash)
-      if (!ok) {
-        recordFailure(ip)
-        throw new AppError(401, 'wrong_password', 'That email and password do not match.')
-      }
-      attempts.delete(ip)
+      const clean = typeof email === 'string' ? email.trim().toLowerCase().slice(0, 200) : ''
+      const account = `account:${clean}`
+      checkRate(ip)
+      checkRate(account, MAX_ACCOUNT_ATTEMPTS)
+      recordFailure(ip)
+      if (clean) recordFailure(account)
+      const row = clean ? db.prepare('SELECT * FROM users WHERE email = ?').get(clean) : null
+      const usable = typeof password === 'string' && password.length <= 200
+      const ok = usable && (await verifyPasswordAsync(password, row ? row.password_hash : timingDummy())) && Boolean(row)
+      if (!ok) throw new AppError(401, 'wrong_password', 'That email and password do not match.')
+      takeBack(ip)
+      attempts.delete(account)
       startSession(req, res, row)
     },
 

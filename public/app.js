@@ -956,7 +956,9 @@ const STATUS_BADGE = {
   missing: '<span class="badge danger-badge">Removed on viaSocket</span>',
   unknown: '<span class="badge">Status unknown</span>'
 }
-const appIcon = (url, name) => (url ? `<img class="app-icon" src="${esc(url)}" alt="" width="28" height="28" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">` : `<span class="app-icon app-icon-fallback" aria-hidden="true">${esc((name || '?')[0])}</span>`)
+const appIcon = (url, name) => (url ? `<img class="app-icon" src="${esc(url)}" alt="" width="28" height="28" referrerpolicy="no-referrer">` : `<span class="app-icon app-icon-fallback" aria-hidden="true">${esc((name || '?')[0])}</span>`)
+// A broken icon is hidden. One listener instead of inline onerror attributes, which the Content-Security-Policy blocks.
+document.addEventListener('error', (e) => { if (e.target instanceof HTMLImageElement && e.target.classList.contains('app-icon')) e.target.style.visibility = 'hidden' }, true)
 
 const TIMEZONES = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Hong_Kong', 'Asia/Shanghai', 'Asia/Tokyo', 'Australia/Sydney', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid', 'Europe/Moscow', 'Africa/Johannesburg', 'America/New_York', 'America/Toronto', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Mexico_City', 'America/Sao_Paulo']
 const PILL = {

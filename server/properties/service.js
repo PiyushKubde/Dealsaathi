@@ -63,7 +63,7 @@ function checkComplete(p) {
   return errors
 }
 
-function toProperty(row) {
+export function toProperty(row) {
   if (!row) return null
   return { ...row, amenities: row.amenities ? JSON.parse(row.amenities) : [], is_sample: Boolean(row.is_sample), code: `P-${String(row.id).padStart(4, '0')}` }
 }

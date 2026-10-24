@@ -7,8 +7,8 @@
 // is never announced twice, whichever direction finds it again.
 import { createHash, randomUUID } from 'node:crypto'
 import { now, transaction } from '../db.js'
-import { getLead, logActivity } from '../leads/service.js'
-import { getProperty, scoreMatch, withExclusions } from '../properties/service.js'
+import { getLead, logActivity, toLead } from '../leads/service.js'
+import { getProperty, scoreMatch, toProperty, withExclusions } from '../properties/service.js'
 import { emit } from '../events/bus.js'
 
 const ACTIVE_LEAD = "customer_type IN ('buyer','tenant') AND status NOT IN ('won','lost')"
@@ -110,7 +110,7 @@ export function matchLead(db, leadId, { trigger = randomUUID(), actorId = null }
     const params = [wants]
     let budget = ''
     if (lead.budget_max != null) { budget = ' AND price <= ?'; params.push(lead.budget_max) }
-    const props = db.prepare(`SELECT * FROM properties WHERE ${ELIGIBLE_PROPERTY} AND listing_type = ?${budget}`).all(...params).map((r) => getProperty(db, r.id))
+    const props = db.prepare(`SELECT * FROM properties WHERE ${ELIGIBLE_PROPERTY} AND listing_type = ?${budget}`).all(...params).map(toProperty)
     const hits = props.map((property) => ({ property, match: scoreMatch(lead, property) })).filter((m) => m.match).sort(sortMatches)
     const keep = new Set(hits.map((h) => h.property.id))
     let withdrawn = 0
@@ -140,7 +140,7 @@ export function matchProperty(db, propertyId, { trigger = randomUUID(), actorId 
     }
     const wants = property.listing_type === 'sale' ? 'buyer' : 'tenant'
     const leads = db.prepare(`SELECT * FROM leads WHERE ${ACTIVE_LEAD} AND customer_type = ? AND (budget_max IS NULL OR budget_max >= ?)`).all(wants, property.price)
-      .map((r) => getLead(db, r.id)).filter((l) => leadEligibility(db, l).ok).map((l) => withExclusions(db, l))
+      .map(toLead).filter((l) => leadEligibility(db, l).ok).map((l) => withExclusions(db, l))
     const hits = leads.map((lead) => ({ lead, match: scoreMatch(lead, property) })).filter((m) => m.match)
       .sort((a, b) => b.match.score - a.match.score || a.lead.id - b.lead.id)
     const keep = new Set(hits.map((h) => h.lead.id))

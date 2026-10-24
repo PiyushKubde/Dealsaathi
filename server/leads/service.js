@@ -20,7 +20,7 @@ export const MATCH_FIELDS = ['customer_type', 'property_type', 'bedrooms', 'pref
 /** Leads following up needs: still New or Contacted and untouched for this many days. */
 export const FOLLOW_UP_AFTER_DAYS = 3
 
-function toLead(row) {
+export function toLead(row) {
   if (!row) return null
   const { email_norm, phone_norm, ...lead } = row // eslint-disable-line no-unused-vars
   return { ...lead, code: leadCode(row.id), origin: 'local' }
