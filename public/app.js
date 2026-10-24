@@ -30,6 +30,7 @@ const FIELDS = [
 const safeUrl = (u) => (/^https:\/\/[^\s"'<>]+$/.test(String(u || '')) ? u : null)
 /** Line icons for navigation and actions (24×24, stroke = currentColor). */
 const ICONS = {
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   dashboard: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
   notifications: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   assistant: '<path d="M12 3l1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6-4.6-1.9 4.6-1.9z"/><path d="M19 15l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"/>',
@@ -695,38 +696,55 @@ function renderPrivacy() {
 
 function renderLogin(view = session.hasUsers ? 'signin' : 'register') {
   document.querySelectorAll('[data-nav]').forEach((a) => a.classList.remove('active'))
+  document.body.classList.add('signed-out')
   const register = view === 'register'
-  main.innerHTML = `<div class="landing">
+  const tab = (key, text) => (key === view ? `<button type="button" class="auth-tab active" role="tab" aria-selected="true">${text}</button>` : `<button type="button" class="auth-tab" role="tab" aria-selected="false" id="auth-switch">${text}</button>`)
+  const roleCard = (value, title, text, iconKey) => `<label class="role-card"><input type="radio" name="role" value="${value}"><span class="role-icon" aria-hidden="true">${icon(iconKey)}</span><span><strong>${title}</strong><span class="small muted">${text}</span></span></label>`
+  main.innerHTML = `<div class="auth-page">
+    <header class="auth-top"><span class="auth-brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><rect width="32" height="32" rx="8" fill="currentColor"/><path d="M8 17l8-7 8 7v7H8z" fill="#fff"/></svg></span>DealSaathi</span>
+      <div class="auth-links"><a href="#/privacy">Privacy</a><button type="button" class="btn ghost small" id="top-switch">${register ? 'Sign in' : 'Create account'}</button></div></header>
+    <div class="landing">
     <section class="landing-intro">
-      <h1>Find, show and agree on property, with your agent alongside</h1>
-      <p>DealSaathi connects buyers and tenants, sellers and landlords, and the agents who help them, in one place.</p>
+      <span class="eyebrow"><span class="live-dot" aria-hidden="true"></span>Live now · for agents, buyers and sellers</span>
+      <h1>Find, show and agree on property, <em>with your agent alongside.</em></h1>
+      <p class="lead">Listings, matches, viewings and offers in one shared workspace, so nobody is left chasing calls and messages.</p>
       <ul class="landing-roles">
-        <li><strong>Buyers and tenants</strong> save what they want, get matching listings with the reasons, say “I’m interested”, request viewings in their agent’s calendar, and make offers or rental applications.</li>
-        <li><strong>Sellers and landlords</strong> list a property, see how many buyers match (never who), and answer offers that buyers’ agents forward: accept in principle, decline or counter.</li>
-        <li><strong>Agents</strong> receive buyers in their area, confirm viewings, pass offers on and record outcomes.</li>
+        <li><span class="role-icon" aria-hidden="true">${icon('browse')}</span><span><strong>Buyers and tenants</strong> get matching listings with the reasons, request viewings and make offers.</span></li>
+        <li><span class="role-icon" aria-hidden="true">${icon('offers')}</span><span><strong>Sellers and landlords</strong> list a property, see how many buyers match, and answer offers.</span></li>
+        <li><span class="role-icon" aria-hidden="true">${icon('leads')}</span><span><strong>Agents</strong> receive buyers in their area, confirm viewings and record outcomes.</span></li>
       </ul>
-      <p class="small muted">An accepted offer is an agreement in principle only: DealSaathi takes no payments or signatures. <a href="#/privacy">Privacy</a></p>
+      <div class="landing-preview" aria-hidden="true">
+        <div class="pv-card pv-match"><div class="pv-top"><span class="pv-thumb">${icon('properties')}</span><div><strong>3 BHK apartment, Vijay Nagar</strong><span>₹85 L · Indore</span></div><span class="pv-score">96/100</span></div>
+          <ul><li>In the area they asked for</li><li>Within their budget</li><li>3 BHK as wanted</li></ul></div>
+        <div class="pv-card pv-offer"><span class="pv-step">Offer ₹82 L</span><span class="pv-arrow">→</span><span class="pv-step">Counter ₹84 L</span><span class="pv-arrow">→</span><span class="pv-step ok">Accepted in principle</span></div>
+        <div class="pv-card pv-toast"><span class="pv-bell">${icon('notifications')}</span><div><strong>Viewing booked</strong><span>Saturday, 11:00 · added to your calendar</span></div></div>
+        <span class="pv-label">Example</span>
+      </div>
+      <p class="small muted landing-note">An accepted offer is an agreement in principle only: DealSaathi takes no payments or signatures. <a href="#/privacy">Privacy</a></p>
     </section>
     <div class="card landing-card">
-      <h1>${register ? 'Create your account' : 'Sign in'}</h1>
-      <p class="muted">${register ? 'DealSaathi connects buyers, sellers and the agents who help them.' : 'Sign in to DealSaathi.'}</p>
+      <div class="auth-tabs" role="tablist" aria-label="Account">${tab('signin', 'Sign in')}${tab('register', 'Create account')}</div>
+      <h2>${register ? 'Create your account' : 'Welcome back'}</h2>
+      <p class="muted">${register ? 'Pick how you use DealSaathi. It takes a minute.' : 'Sign in to your DealSaathi workspace.'}</p>
       <form id="auth-form" class="stack" novalidate>
         ${register ? `<fieldset class="field role-pick" data-field="role"><legend>I am a…</legend>
-          <label class="radio"><input type="radio" name="role" value="buyer"> <span><strong>Buyer or tenant</strong><br><span class="small muted">Save what you are looking for and get matching properties</span></span></label>
-          <label class="radio"><input type="radio" name="role" value="seller"> <span><strong>Seller or landlord</strong><br><span class="small muted">List your property and see interest</span></span></label>
-          <label class="radio"><input type="radio" name="role" value="agent"> <span><strong>Agent</strong><br><span class="small muted">Manage leads, listings, viewings and rent${session.registrationNeedsCode ? ' (needs your team’s access code)' : ''}</span></span></label>
+          <div class="role-cards">
+          ${roleCard('buyer', 'Buyer or tenant', 'Get matching properties', 'browse')}
+          ${roleCard('seller', 'Seller or landlord', 'List and see interest', 'offers')}
+          ${roleCard('agent', 'Agent', session.registrationNeedsCode ? 'Needs your team’s code' : 'Leads, viewings, offers', 'leads')}
+          </div>
           <div class="err"></div></fieldset>
-          <div class="field" data-field="name"><label for="a-name">Your name</label><input id="a-name" name="name" autocomplete="name" required><div class="err"></div></div>
-          <div class="field" data-field="phone"><label for="a-phone">Phone (optional)</label><input id="a-phone" name="phone" type="tel" autocomplete="tel"><div class="err"></div></div>` : ''}
-        <div class="field" data-field="email"><label for="a-email">Email</label><input id="a-email" name="email" type="email" autocomplete="email" required><div class="err"></div></div>
-        <div class="field" data-field="password"><label for="a-password">Password</label><input id="a-password" name="password" type="password" autocomplete="${register ? 'new-password' : 'current-password'}" required>${register ? '<div class="hint">At least 10 characters.</div>' : ''}<div class="err"></div></div>
+          <div class="field" data-field="name"><label for="a-name">Your name</label><input id="a-name" name="name" autocomplete="name" placeholder="e.g. Priya Sharma" required><div class="err"></div></div>
+          <div class="field" data-field="phone"><label for="a-phone">Phone (optional)</label><input id="a-phone" name="phone" type="tel" autocomplete="tel" placeholder="+91"><div class="err"></div></div>` : ''}
+        <div class="field" data-field="email"><label for="a-email">Email</label><input id="a-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required><div class="err"></div></div>
+        <div class="field" data-field="password"><label for="a-password">Password</label><div class="pw-wrap"><input id="a-password" name="password" type="password" autocomplete="${register ? 'new-password' : 'current-password'}" required><button type="button" class="pw-toggle" id="pw-toggle" aria-label="Show password" aria-pressed="false">${icon('eye')}</button></div>${register ? '<div class="hint">At least 10 characters.</div>' : ''}<div class="err"></div></div>
         ${register && session.registrationNeedsCode ? '<div class="field" data-field="accessCode" id="code-field" hidden><label for="a-code">Team access code</label><input id="a-code" name="accessCode" type="password" autocomplete="off"><div class="hint">Agents only. Ask the person who set up DealSaathi.</div><div class="err"></div></div>' : ''}
         <div id="auth-error"></div>
-        <button class="btn primary" type="submit">${register ? 'Create account' : 'Sign in'}</button>
-        <button class="btn ghost" type="button" id="auth-switch">${register ? 'I already have an account' : 'Create an account'}</button>
-        ${register ? '' : '<button class="btn link small" type="button" id="auth-forgot">Forgot your password?</button>'}
+        <button class="btn primary auth-submit" type="submit">${register ? 'Create account' : 'Sign in'}</button>
+        ${register ? '<p class="small muted auth-legal">By creating an account you agree to how we handle your data: <a href="#/privacy">Privacy</a>.</p>' : '<button class="btn link small" type="button" id="auth-forgot">Forgot your password?</button>'}
       </form>
-    </div></div>`
+    </div></div>
+    <footer class="auth-foot"><span>© DealSaathi</span><span>Integrations by viaSocket · Hosted on Embarko</span><a href="#/privacy">Privacy</a></footer></div>`
   const form = document.getElementById('auth-form')
   form.querySelector('input').focus()
   form.querySelectorAll('input[name=role]').forEach((r) => r.addEventListener('change', () => {
@@ -734,7 +752,15 @@ function renderLogin(view = session.hasUsers ? 'signin' : 'register') {
     if (code) code.hidden = form.elements.role.value !== 'agent'
   }))
   document.getElementById('auth-switch').addEventListener('click', () => renderLogin(register ? 'signin' : 'register'))
+  document.getElementById('top-switch').addEventListener('click', () => renderLogin(register ? 'signin' : 'register'))
   document.getElementById('auth-forgot')?.addEventListener('click', renderForgot)
+  document.getElementById('pw-toggle').addEventListener('click', (e) => {
+    const input = document.getElementById('a-password')
+    const show = input.type === 'password'
+    input.type = show ? 'text' : 'password'
+    e.currentTarget.setAttribute('aria-pressed', String(show))
+    e.currentTarget.setAttribute('aria-label', show ? 'Hide password' : 'Show password')
+  })
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
     const body = Object.fromEntries(new FormData(form))
@@ -844,6 +870,7 @@ async function refreshUnread() {
 }
 
 function updateAccessUi() {
+  document.body.classList.toggle('signed-out', !session.user)
   const foot = document.querySelector('.sidebar-foot')
   document.getElementById('account')?.remove()
   renderNav()

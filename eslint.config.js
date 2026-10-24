@@ -2,7 +2,7 @@ import js from '@eslint/js'
 import globals from 'globals'
 
 export default [
-  { ignores: ['node_modules/', 'data/', 'viasocket-integrations/'] },
+  { ignores: ['node_modules/', 'data/', 'viasocket-integrations/', 'video-project/'] },  // video-project: separate video tooling (Node + browser scripts), not the app
   js.configs.recommended,
   { files: ['server/**/*.js', 'test/**/*.js', 'scripts/**/*.js', 'scripts/**/*.mjs', 'eslint.config.js'], languageOptions: { globals: globals.node } },
   // Browser journeys: Node code that also runs functions inside the page.
