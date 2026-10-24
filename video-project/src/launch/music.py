@@ -12,7 +12,8 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-OUT = ROOT / 'out/launch'
+import os  # noqa: E402
+OUT = ROOT / 'out' / os.environ.get('FILM', 'launch')
 SR = 48000
 plan = json.loads((OUT / 'plan.json').read_text())
 shots = json.loads((OUT / 'shots.json').read_text())['shots']
@@ -26,8 +27,16 @@ def at(lid, word, n=0):
     return [w['s'] for w in L[lid]['spoken'] if w['w'] == word][n]
 
 
+def maybe(lid, word):
+    try:
+        return at(lid, word)
+    except (KeyError, IndexError):
+        return None
+
+
 HIT = at('reveal', 'launching')                    # the drop
-BUILD = next(s['start'] for s in shots if s['kind'] == 'buildTitle')
+BUILD = next(s['start'] for s in shots if s['kind'] in ('buildTitle', 'vsTitle'))
+EXTRA_HITS = [s['start'] for s in shots if s['kind'] in ('getOnline', 'deployStats', 'recap')]
 OUTRO = next(s['start'] for s in shots if s['kind'] == 'outro')
 TAG = at('tagline', 'deal')
 END_MUSIC = L['tagline']['end'] + 0.6
@@ -169,24 +178,33 @@ riser(HIT - 0.3)
 impact(HIT, 1.0)
 impact(BUILD + 0.05, 0.7); riser(BUILD + 0.02, 1.2, 0.18)
 impact(OUTRO + 0.4, 0.6)
+for h in EXTRA_HITS:
+    impact(h + 0.05, 0.45)
 impact(TAG - 0.05, 0.5)
 for s in shots:
-    if s['kind'] not in ('hook1', 'reveal', 'buildTitle', 'outro'):
+    if s['kind'] not in ('hook1', 'reveal', 'buildTitle', 'vsTitle', 'getOnline', 'deployStats', 'recap', 'outro'):
         whoosh(s['start'])
 for w in ('calls', 'messages', 'follow'):
-    pop_(at('hook1', w))
+    if maybe('hook1', w) is not None:
+        pop_(at('hook1', w))
 for w in ('agents', 'buyers', 'sellers'):
-    pop_(at('hook2', w), 0.1)
+    if maybe('hook2', w) is not None:
+        pop_(at('hook2', w), 0.1)
 for w in ('agents', 'buyers', 'sellers'):
-    pop_(at('reveal', w), 0.07)
+    if maybe('reveal', w) is not None:
+        pop_(at('reveal', w), 0.07)
 for w in ('forwards', 'counter', 'accepts'):
-    pop_(at('offer', w) - 0.3, 0.09)
+    if maybe('offer', w) is not None:
+        pop_(at('offer', w) - 0.3, 0.09)
 for w in ('every', 'notifies', 'people'):
-    pop_(at('notify', w), 0.07)
+    if maybe('notify', w) is not None:
+        pop_(at('notify', w), 0.07)
 for w in ('gmail', 'slack', 'google'):
-    pop_(at('tools', w), 0.08)
+    if maybe('tools', w) is not None:
+        pop_(at('tools', w), 0.08)
 for w in ('claude', 'via', 'embarko'):
-    pop_(at('built', w), 0.09)
+    if maybe('built', w) is not None:
+        pop_(at('built', w), 0.09)
 # a soft chime ringing over the closing graphic
 n = int(4.0 * SR); x = np.arange(n) / SR
 add(sfx, END_MUSIC - 0.1, (np.sin(2 * np.pi * 880 * x) + .5 * np.sin(2 * np.pi * 1320 * x) + .3 * np.sin(2 * np.pi * 1760 * x)) * np.exp(-x * 1.4) * 0.12)

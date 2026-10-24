@@ -217,11 +217,12 @@
     build(s) {
       s.head = el('div', 'chead', 'Offers, without the back-and-forth', s.root)
       const steps = [['forward', 'Agent forwards it', '₹88 L offer', 'forwards'], ['counter', 'Owner counters', '₹90 L', 'counter'], ['accept', 'Buyer accepts', 'In principle ✓', 'accepts']]
+      const lineOf = L.offer ? ['offer', 'offer', 'offer'] : ['w_forward', 'w_forward', 'w_accept']
       s.cols = steps.map(([clip, title, chip, word], i) => {
         const col = el('div', 'ocol', `<div class="otitle"><span class="on">${i + 1}</span>${title}</div><div class="ochip">${chip}</div>`, s.root)
         css(col, { left: `${90 + i * 600}px`, top: '250px' })
         const dv = device(col, { w: 540, url: 'demo data' })
-        return { col, dv, clip, at: at('offer', word) }
+        return { col, dv, clip, at: at(lineOf[i], word) }
       })
       s.arrows = [0, 1].map((i) => { const a = el('div', 'arrow', '', s.root); css(a, { left: `${640 + i * 600}px`, top: '560px' }); return a })
     },
@@ -363,6 +364,243 @@
     }
   }
 
+
+  // ---------- showcase shots (the reference-style 3-minute film) ----------
+  const SERIF = (x) => `<em class="serif">${x}</em>`
+  const beat = (id) => D.plan.beats.find((b) => b.id === id)
+
+  S.essentials = {
+    build(s) {
+      s.k = el('div', 'pk centerk', 'What’s inside', s.root)
+      s.h = el('div', 'ess-h', `One workspace, ${SERIF('every side of the deal.')}`, s.root)
+      s.cards = [['recommendations', 'Matches with reasons', 'Buyers see why a listing fits them'], ['offers', 'Offers and counters', 'Agent forwards, owner answers'], ['viewings', 'Viewings in your calendar', 'Booked into Google Calendar'], ['assistant', 'AI lead entry', 'Describe it; AI fills the details']]
+        .map(([ic, a, b], i) => { const c = el('div', 'ess-card', `<div class="gi">${ICON(D.icons[ic], 40, '#6ee7b7')}</div><b>${a}</b><span>${b}</span>`, s.root); css(c, { left: `${150 + i * 410}px`, top: '560px' }); return c })
+    },
+    draw(s, t, u, d, out) {
+      css(s.k, { left: '0', right: '0', top: '250px' }); pop(s.k, t, s.start + 0.1, { y: 20, s: 0.95 })
+      pop(s.h, t, s.start + 0.25, { y: 40, s: 0.92 })
+      s.cards.forEach((c, i) => pop(c, t, s.start + 1.2 + i * 0.55, { y: 70, s: 0.8, d: 0.5 }))
+      css(s.root, { opacity: String(1 - out), transform: `translateY(${-out * 60}px)` })
+    }
+  }
+
+  S.vsTitle = {
+    build(s) {
+      s.frame = el('div', 'stillframe', `<img src="${D.stills.viasocket}">`, s.root)
+      s.logo = el('div', 'vs-logo', `<img class="inv" src="${D.brand.viasocket}">`, s.root)
+      s.sub = el('div', 'vs-sub', 'Integrations · AI · connected apps, behind one SDK', s.root)
+    },
+    draw(s, t, u, d, out) {
+      const e = outCubic(u / 1.2)
+      css(s.frame, { opacity: String(0.28 * clamp(u / 0.6)), transform: `scale(${lerp(1.15, 1.04, e)})`, filter: 'blur(3px)' })
+      pop(s.logo, t, s.start + 0.2, { y: 30, s: 0.8, d: 0.6 })
+      pop(s.sub, t, s.start + 0.8, { y: 20, s: 0.95 })
+      css(s.root, { opacity: String(1 - out), transform: `scale(${1 + out * 0.08})` })
+    }
+  }
+
+  S.claudeW = productShot({ id: 'w_claude', kicker: 'The build', head: 'One prompt in Claude Code', url: 'claude.ai/code', w: 1180, top: 210, ratio: 958 / 1920,
+    subs: [['A single, detailed prompt', 'detailed'], ['Refined with follow-ups', 'refined']],
+    play(s, t, u, d) { s.dev.show('claude', span(u, 0, d, 0.2, 15.5)); s.dev.focus(0.3, 0.3, lerp(1.0, 1.4, inOut((u - 0.6) / (d - 0.6)))) } })
+
+  S.sdk = {
+    build(s) {
+      s.text = el('div', 'ptext', '<div class="pk">The integration</div><div class="ph">viaSocket SDK</div><div class="ps">The skill: one setup prompt</div><div class="ps">The SDK: one client on the server</div><div class="ps">No connector built from scratch</div>', s.root)
+      css(s.text, { left: '110px', width: '600px' })
+      s.persp = el('div', 'persp', '', s.root)
+      s.dev = el('div', 'dev', `<div class="bar"><i></i><i></i><i></i><span>viasocket.com</span></div><div class="scr" style="height:${Math.round(1120 * 940 / 1903)}px"><div class="zoomer"><img src="${D.stills.viasocket}"></div></div>`, s.persp)
+      css(s.dev, { width: '1120px' })
+      css(s.persp, { left: '720px', top: '200px' })
+      s.zoomer = s.dev.querySelector('.zoomer')
+      s.skill = el('div', 'codecard sm', `<div class="cbar"><i></i><i></i><i></i><span>viasocket-integrations/SKILL.md</span></div><pre>${D.skill.map((x) => x.replace(/</g, '&lt;')).join('\n')}</pre>`, s.root)
+      s.code = el('div', 'codecard sm', `<div class="cbar"><i></i><i></i><i></i><span>server/viasocket.js</span></div><pre>${D.code.map((x) => x.replace(/</g, '&lt;').replace(/(ViaSocket|runAction)/g, '<em>$1</em>').replace(/('[^']*')/g, '<q>$1</q>')).join('\n')}</pre>`, s.root)
+      s.tSkill = at('w_sdk', 'skill'), s.tWithout = at('w_sdk', 'without')
+    },
+    draw(s, t, u, d, out) {
+      const k = s.text.children
+      pop(k[0], t, s.start + 0.1, { y: 20, s: 0.95 }); pop(k[1], t, s.start + 0.2, { y: 40, s: 0.9 })
+      pop(k[2], t, s.tSkill - 0.1); pop(k[3], t, s.tSkill + 2.2); pop(k[4], t, s.tWithout - 0.1)
+      const cut = s.tSkill + 1.4
+      const e = outCubic(u / 0.7)
+      css(s.persp.firstChild, { transform: `perspective(2200px) rotateY(${lerp(28, 7, e)}deg) translateX(${(1 - e) * 400}px)`, opacity: String(clamp(u / 0.35) * (1 - clamp((t - cut) / 0.4))) })
+      const z = lerp(1.0, 2.1, inOut((u - 0.4) / 1.6)), W2 = 1120, H2 = Math.round(1120 * 940 / 1903)
+      css(s.zoomer, { transform: `translate(${clamp(W2 / 2 - 0.2 * W2 * z, W2 - W2 * z, 0)}px, ${clamp(H2 / 2 - 0.58 * H2 * z, H2 - H2 * z, 0)}px) scale(${z})` })
+      const p1 = outBack(prog(t, cut, 0.55)), p2 = outBack(prog(t, cut + 0.7, 0.55))
+      css(s.skill, { left: '720px', top: '170px', opacity: String(clamp(p1 * 2)), transform: `translateY(${(1 - p1) * 80}px)` })
+      css(s.code, { left: '980px', top: '520px', opacity: String(clamp(p2 * 2)), transform: `translateY(${(1 - p2) * 80}px)` })
+      css(s.root, { opacity: String(1 - out), transform: `translateX(${-out * 160}px)` })
+    }
+  }
+
+  S.hub = {
+    build(s) {
+      s.k = el('div', 'pk centerk', 'One SDK in the middle', s.root)
+      s.svg = el('div', 'hubsvg', '', s.root)
+      const nodes = [['Gmail', -1, -1], ['Slack', 1, -1], ['Google Calendar', -1, 1], ['AI', 1, 1]]
+      s.nodes = nodes.map(([n, x, y]) => { const e = el('div', 'hubnode', n, s.root); e.pos = [960 + x * 520, 560 + y * 230]; return e })
+      s.center = el('div', 'hubcenter', `${LOGO(110)}<span>DealSaathi</span>`, s.root)
+      s.ring = el('div', 'hubring', '<span>viaSocket SDK</span>', s.root)
+      s.tail = el('div', 'hubtail', `…and the tools ${SERIF('around it.')}`, s.root)
+    },
+    draw(s, t, u, d, out) {
+      css(s.k, { left: '0', right: '0', top: '120px' }); pop(s.k, t, s.start + 0.1, { y: 20, s: 0.95 })
+      pop(s.center, t, s.start + 0.15, { y: 0, s: 0.6 })
+      const rp = outBack(prog(t, s.start + 0.5, 0.6)); css(s.ring, { opacity: String(clamp(rp * 2)), transform: `translate(-50%,-50%) scale(${lerp(0.6, 1, rp)}) rotate(${t * 6}deg)` })
+      let lines = ''
+      s.nodes.forEach((n, i) => {
+        const p = outCubic(prog(t, s.start + 0.9 + i * 0.35, 0.5))
+        css(n, { left: `${n.pos[0]}px`, top: `${n.pos[1]}px`, opacity: String(p), transform: `translate(-50%,-50%) scale(${lerp(0.7, 1, p)})` })
+        const [x, y] = n.pos, cx = 960, cy = 560
+        lines += `<line x1="${cx}" y1="${cy}" x2="${lerp(cx, x, p)}" y2="${lerp(cy, y, p)}" stroke="#34d399" stroke-opacity=".55" stroke-width="3" stroke-dasharray="10 10" stroke-dashoffset="${-t * 40}"/>`
+      })
+      s.svg.innerHTML = `<svg width="1920" height="1080">${lines}</svg>`
+      pop(s.tail, t, s.start + d - 2.2, { y: 20, s: 0.95 })
+      css(s.root, { opacity: String(1 - out) })
+    }
+  }
+
+  S.half = {
+    build(s) { s.h = el('div', 'bigline', `Building it is only ${SERIF('half the job.')}`, s.root) },
+    draw(s, t, u, d, out) { pop(s.h, t, s.start + 0.2, { y: 40, s: 0.92 }); css(s.root, { opacity: String(1 - out), filter: `blur(${out * 8}px)` }) }
+  }
+
+  S.getOnline = {
+    build(s) { s.k = el('div', 'pk centerk', 'The next step', s.root); s.h = el('div', 'bigline', `Get it ${SERIF('online.')}`, s.root); s.sub = el('div', 'bigsub', 'From a project to a URL anyone can open.', s.root) },
+    draw(s, t, u, d, out) {
+      css(s.k, { left: '0', right: '0', top: '360px' }); pop(s.k, t, s.start + 0.05, { y: 20, s: 0.95 })
+      pop(s.h, t, s.start + 0.2, { y: 50, s: 0.85 }); pop(s.sub, t, s.start + 0.7, { y: 20, s: 0.95 })
+      css(s.root, { opacity: String(1 - out), transform: `scale(${1 + out * 0.1})` })
+    }
+  }
+
+  S.embHome = {
+    build(s) {
+      s.text = el('div', 'ptext', '<div class="pk">The hosting</div><div class="ph">Embarko</div><div class="ps">Hosting for apps you build with AI</div><div class="ps">No Dockerfile, no servers</div>', s.root)
+      css(s.text, { left: '1260px', width: '600px' })
+      s.persp = el('div', 'persp', '', s.root)
+      s.dev = el('div', 'dev', `<div class="bar"><i></i><i></i><i></i><span>embarko.ai</span></div><div class="scr" style="height:${Math.round(1120 * 902 / 1918)}px"><div class="zoomer"><img src="${D.stills.embarko}"></div></div>`, s.persp)
+      css(s.dev, { width: '1120px' }); css(s.persp, { left: '90px', top: '230px' })
+      s.zoomer = s.dev.querySelector('.zoomer')
+      s.tE = at('w_embarko', 'embarko')
+    },
+    draw(s, t, u, d, out) {
+      const k = s.text.children
+      pop(k[0], t, s.start + 0.1, { y: 20, s: 0.95 }); pop(k[1], t, s.tE - 0.2, { y: 40, s: 0.9 }); pop(k[2], t, s.tE + 0.6); pop(k[3], t, s.tE + 2.0)
+      const e = outCubic(u / 0.7)
+      css(s.persp.firstChild, { transform: `perspective(2200px) rotateY(${lerp(-28, -7, e)}deg) translateX(${(e - 1) * 400}px)`, opacity: String(clamp(u / 0.35)) })
+      const z = lerp(1.0, 1.35, inOut(u / d)), W2 = 1120, H2 = Math.round(1120 * 902 / 1918)
+      css(s.zoomer, { transform: `translate(${clamp(W2 / 2 - 0.5 * W2 * z, W2 - W2 * z, 0)}px, ${clamp(H2 / 2 - 0.4 * H2 * z, H2 - H2 * z, 0)}px) scale(${z})` })
+      css(s.root, { opacity: String(1 - out), transform: `translateX(${out * 160}px)` })
+    }
+  }
+
+  S.workflow = productShot({ id: 'w_workflow', kicker: 'Host new app', head: 'Copy. Paste. Deployed.', url: 'embarko.ai/app', w: 1180, top: 210, ratio: 958 / 1920,
+    subs: [['Copy Embarko’s hosting prompt', 'hosting'], ['Paste it into Claude Code', 'configuration'], ['The agent handles the deploy', 'agent']],
+    play(s, t, u, d) { s.dev.show('host', span(u, 0, d, 1.0, 24.0)); s.dev.focus(0.45, 0.45, lerp(1.15, 1.75, inOut(u / d))) } })
+
+  S.url = {
+    build(s) {
+      s.term = el('div', 'codecard term', '<div class="cbar"><i></i><i></i><i></i><span>Claude Code · Embarko deploy (real output, 21 Oct 2026)</span></div><pre></pre>', s.root)
+      s.lines = D.deployLog
+      s.urlp = el('div', 'urlrow', '<span class="urlpill big">dealsaathi-app.embarko.app</span>', s.root)
+      s.chips = el('div', 'tagrow', '<div class="chip">No Dockerfile to write</div><div class="chip">Live in seconds</div>', s.root)
+      s.tUrl = at('w_url', 'live')
+    },
+    draw(s, t, u, d, out) {
+      const p = outBack(prog(t, s.start + 0.05, 0.5))
+      css(s.term, { left: '360px', top: '170px', width: '1200px', opacity: String(clamp(p * 2)), transform: `translateY(${(1 - p) * 60}px)` })
+      const shown = Math.floor(clamp((u - 0.4) / 2.6) * s.lines.length + 0.0001)
+      s.term.querySelector('pre').innerHTML = s.lines.slice(0, shown).map((x) => x.replace(/</g, '&lt;').replace(/\b(live|success|true)\b/g, '<b class="ok">$1</b>').replace(/\bbuilding\b/g, '<b class="wip">building</b>')).join('\n') + '<span class="caret">▍</span>'
+      css(s.urlp, { top: '650px' }); pop(s.urlp, t, s.tUrl - 0.3, { y: 30, s: 0.85 })
+      css(s.chips, { top: '780px' }); pop(s.chips, t, s.tUrl + 0.5, { y: 20, s: 0.95 })
+      css(s.root, { opacity: String(1 - out) })
+    }
+  }
+
+  S.edash = {
+    build(s) {
+      s.text = el('div', 'ptext', '<div class="pk">Running</div><div class="ph">One dashboard</div><div class="ps">Traffic</div><div class="ps">Deployments</div><div class="ps">Scheduled jobs</div>', s.root)
+      css(s.text, { left: '110px', width: '560px' })
+      s.persp = el('div', 'persp', '', s.root)
+      s.dev = el('div', 'dev', `<div class="bar"><i></i><i></i><i></i><span>embarko.ai/app · dealsaathi-app</span></div><div class="scr" style="height:${Math.round(1150 * 945 / 1906)}px"><div class="zoomer"><img src="${D.stills.embarkoDash}"></div></div>`, s.persp)
+      css(s.dev, { width: '1150px' }); css(s.persp, { left: '700px', top: '220px' })
+      s.zoomer = s.dev.querySelector('.zoomer')
+      s.subAt = [at('w_dash', 'traffic'), at('w_dash', 'performance'), at('w_dash', 'scheduled')]
+    },
+    draw(s, t, u, d, out) {
+      const k = s.text.children
+      pop(k[0], t, s.start + 0.1, { y: 20, s: 0.95 }); pop(k[1], t, s.start + 0.2, { y: 40, s: 0.9 })
+      for (let i = 0; i < 3; i++) pop(k[i + 2], t, s.subAt[i] - 0.1)
+      const e = outCubic(u / 0.7)
+      css(s.persp.firstChild, { transform: `perspective(2200px) rotateY(${lerp(28, 7, e)}deg) translateX(${(1 - e) * 400}px)`, opacity: String(clamp(u / 0.35)) })
+      const W2 = 1150, H2 = Math.round(1150 * 945 / 1906)
+      const ph = clamp((t - s.subAt[2] + 0.2) / 1.0)
+      const fx = 0.5, fy = lerp(0.42, 0.88, inOut(ph)), z = lerp(1.35, 1.7, inOut(u / d))
+      css(s.zoomer, { transform: `translate(${clamp(W2 / 2 - fx * W2 * z, W2 - W2 * z, 0)}px, ${clamp(H2 / 2 - fy * H2 * z, H2 - H2 * z, 0)}px) scale(${z})` })
+      css(s.root, { opacity: String(1 - out), transform: `translateX(${-out * 160}px)` })
+    }
+  }
+
+  S.deployStats = {
+    build(s) {
+      s.k = el('div', 'pk', 'Embarko deployment history · dealsaathi-app · real record', s.root)
+      css(s.k, { left: '120px', top: '110px' })
+      const deps = D.deploys.slice().reverse()
+      const max = 40
+      s.rows = deps.map((x, i) => { const r = el('div', 'drow', `<span class="dv">${x.v}</span><span class="dbar"><i></i></span><span class="ds">${x.secs > 99 ? '9 min*' : `${x.secs} s`}</span><span class="dok">✓</span>`, s.root); css(r, { left: '120px', top: `${170 + i * 38}px` }); r.w = Math.min(1, x.secs / max); return r })
+      s.big = el('div', 'bigstat', `<b>${D.deployStats.median} s</b><span>median from upload to live</span>`, s.root)
+      s.big2 = el('div', 'bigstat', `<b>${D.deployStats.ok}<small>/${D.deployStats.total}</small></b><span>deployments succeeded</span>`, s.root)
+      s.note = el('div', 'dnote', `Source: Embarko deployments API, read ${D.deployStats.read}. *v15 was a settings change made in the Embarko dashboard.`, s.root)
+    },
+    draw(s, t, u, d, out) {
+      pop(s.k, t, s.start + 0.05, { y: 20, s: 0.95 })
+      s.rows.forEach((r, i) => { const p = outCubic(prog(t, s.start + 0.2 + i * 0.06, 0.4)); css(r, { opacity: String(p) }); r.querySelector('i').style.width = `${r.w * 100 * outCubic(prog(t, s.start + 0.4 + i * 0.06, 0.6))}%` })
+      css(s.big, { left: '1180px', top: '300px' }); pop(s.big, t, s.start + 1.4, { y: 40, s: 0.7 })
+      css(s.big2, { left: '1180px', top: '560px' }); pop(s.big2, t, s.start + 2.2, { y: 40, s: 0.7 })
+      css(s.note, { left: '120px', top: '960px' }); pop(s.note, t, s.start + 1.0, { y: 10, s: 1 })
+      css(s.root, { opacity: String(1 - out) })
+    }
+  }
+
+  S.sellBuy = productShot({ id: 'w_seller', kicker: 'Live demo', head: 'List in minutes.', url: 'dealsaathi-staging.embarko.app · demo data',
+    subs: [['A seller lists a villa', 'seller'], ['A buyer taps “I’m interested”', 'buyer'], ['…and makes an offer', 'offer']],
+    play(s, t, u, d) {
+      const sw = at('w_seller', 'buyer') - s.start - 0.2
+      if (u < sw) { s.dev.show('seller', span(u, 0, sw, 2.2, 28.3)); s.dev.focus(0.55, lerp(0.25, 0.75, inOut(u / sw)), 1.25) } else { s.dev.show('offer', span(u, sw, d * 0.97, 3.0, 28.5)); s.dev.focus(0.5, 0.5, lerp(1.15, 1.3, (u - sw) / (d - sw))) }
+    } })
+
+  S.oneFlow = {
+    build(s) {
+      s.h = el('div', 'chead', `One workflow. ${SERIF('Three roles.')}`, s.root)
+      s.cards = [['leads', 'Agent', 'forwards and records'], ['browse', 'Buyer', 'finds, offers, accepts'], ['offers', 'Seller', 'lists and answers']]
+        .map(([ic, a, b], i) => { const c = el('div', 'glass small', `<div class="gi">${ICON(D.icons[ic], 46, '#6ee7b7')}</div><div class="gt">${a}</div><div class="gs">${b}</div>`, s.root); css(c, { left: `${250 + i * 520}px`, top: '380px' }); return c })
+      s.arrows = [0, 1].map((i) => { const a = el('div', 'arrow', '', s.root); css(a, { left: `${690 + i * 520}px`, top: '540px' }); return a })
+    },
+    draw(s, t, u, d, out) {
+      pop(s.h, t, s.start + 0.1, { y: 30, s: 0.95 })
+      s.cards.forEach((c, i) => pop(c, t, s.start + 0.35 + i * 0.4, { y: 70, s: 0.8, d: 0.5 }))
+      s.arrows.forEach((a, i) => css(a, { width: `${70 * outCubic(prog(t, s.start + 0.8 + i * 0.4, 0.4))}px` }))
+      css(s.root, { opacity: String(1 - out), transform: `scale(${1 + out * 0.06})` })
+    }
+  }
+
+  S.recap = {
+    build(s) {
+      s.steps = [['1', 'Build', 'with Claude Code'], ['2', 'Connect', 'apps and AI with the viaSocket SDK'], ['3', 'Host', 'on Embarko, at a live URL']]
+        .map(([n, a, b], i) => { const c = el('div', 'stepcard', `<span class="on">${n}</span><b>${a}</b><span>${b}</span>`, s.root); css(c, { left: `${220 + i * 520}px`, top: '360px' }); return c })
+      s.arrows = [0, 1].map((i) => { const a = el('div', 'arrow', '', s.root); css(a, { left: `${660 + i * 520}px`, top: '470px' }); return a })
+      s.url = el('div', 'urlrow', '<span class="urlpill big">dealsaathi-app.embarko.app</span>', s.root)
+      s.cap = el('div', 'bigsub', 'The journey, in one product.', s.root)
+    },
+    draw(s, t, u, d, out) {
+      s.steps.forEach((c, i) => pop(c, t, s.start + 0.15 + i * 0.45, { y: 60, s: 0.8, d: 0.5 }))
+      s.arrows.forEach((a, i) => css(a, { width: `${60 * outCubic(prog(t, s.start + 0.5 + i * 0.45, 0.4))}px` }))
+      css(s.url, { top: '700px' }); pop(s.url, t, s.start + 1.8, { y: 30, s: 0.85 })
+      css(s.cap, { top: '800px' }); pop(s.cap, t, s.start + 2.3, { y: 20, s: 0.95 })
+      css(s.root, { opacity: String(1 - out) })
+    }
+  }
+
   // ---------- setup & frame ----------
   window.setup = (data) => {
     D = data
@@ -387,15 +625,15 @@
     pending.length = 0
     drawBg(t)
     for (const s of shots) {
-      const live = t >= s.start && t < s.next + 0.5
+      const live = t >= s.start && t < s.next + 0.32
       s.root.style.display = live ? 'block' : 'none'
       if (!live) continue
-      const out = clamp((t - s.next) / 0.5)
+      const out = clamp((t - s.next) / 0.32) ** 0.7
       S[s.kind].draw(s, t, t - s.start, s.next - s.start, out)
       s.root.style.zIndex = String(out > 0 ? 1 : 2)
     }
     const cur = shots.find((s) => t >= s.start && t < s.next)
-    tagEl.style.opacity = cur && ['dash', 'ai', 'seller', 'buyer', 'offer', 'notify', 'tools'].includes(cur.kind) ? '1' : '0'
+    tagEl.style.opacity = cur && ['dash', 'ai', 'seller', 'buyer', 'offer', 'notify', 'tools', 'sellBuy'].includes(cur.kind) ? '1' : '0'
     drawCaptions(t)
     await Promise.all(pending)
   }

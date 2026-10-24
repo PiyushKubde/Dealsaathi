@@ -1,0 +1,206 @@
+{
+ "capturedAt": "2026-10-24T05:39:42.855Z",
+ "source": "Embarko API GET /api/apps/dealsaathi-app/deployments (read-only)",
+ "deployments": [
+  {
+   "v": "v20",
+   "status": "success",
+   "commit": "436fbee",
+   "created": "2026-10-23T08:31:46.028Z",
+   "finished": "2026-10-23T08:32:06.299Z",
+   "secs": 20,
+   "current": true,
+   "by": "claude"
+  },
+  {
+   "v": "v19",
+   "status": "success",
+   "commit": "2e9ea91",
+   "created": "2026-10-23T05:36:01.208Z",
+   "finished": "2026-10-23T05:36:35.725Z",
+   "secs": 35,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v18",
+   "status": "success",
+   "commit": "4bf30cb",
+   "created": "2026-10-22T19:55:50.709Z",
+   "finished": "2026-10-22T19:56:10.662Z",
+   "secs": 20,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v17",
+   "status": "success",
+   "commit": "f299e7e",
+   "created": "2026-10-22T19:41:09.442Z",
+   "finished": "2026-10-22T19:41:31.535Z",
+   "secs": 22,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v16",
+   "status": "success",
+   "commit": "3e746a1",
+   "created": "2026-10-22T18:58:21.014Z",
+   "finished": "2026-10-22T18:58:37.406Z",
+   "secs": 16,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v15",
+   "status": "success",
+   "commit": "1792662",
+   "created": "2026-10-22T10:31:23.732Z",
+   "finished": "2026-10-22T10:40:54.994Z",
+   "secs": 571,
+   "current": false,
+   "by": "dashboard"
+  },
+  {
+   "v": "v14",
+   "status": "success",
+   "commit": "1792662",
+   "created": "2026-10-22T09:45:18.595Z",
+   "finished": "2026-10-22T09:45:41.398Z",
+   "secs": 23,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v13",
+   "status": "success",
+   "commit": "1792661",
+   "created": "2026-10-22T09:31:57.395Z",
+   "finished": "2026-10-22T09:32:21.240Z",
+   "secs": 24,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v12",
+   "status": "success",
+   "commit": "1792659",
+   "created": "2026-10-22T08:52:53.683Z",
+   "finished": "2026-10-22T08:53:15.160Z",
+   "secs": 21,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v11",
+   "status": "success",
+   "commit": "1792653",
+   "created": "2026-10-22T07:22:33.741Z",
+   "finished": "2026-10-22T07:22:56.694Z",
+   "secs": 23,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v10",
+   "status": "success",
+   "commit": "1792652",
+   "created": "2026-10-22T07:01:09.755Z",
+   "finished": "2026-10-22T07:01:33.749Z",
+   "secs": 24,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v9",
+   "status": "success",
+   "commit": "1792651",
+   "created": "2026-10-22T06:39:46.398Z",
+   "finished": "2026-10-22T06:40:10.334Z",
+   "secs": 24,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v8",
+   "status": "success",
+   "commit": "1792649",
+   "created": "2026-10-22T06:13:46.717Z",
+   "finished": "2026-10-22T06:14:11.673Z",
+   "secs": 25,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v7",
+   "status": "success",
+   "commit": "1792614",
+   "created": "2026-10-21T20:20:38.827Z",
+   "finished": "2026-10-21T20:20:58.648Z",
+   "secs": 20,
+   "current": false,
+   "by": "claude"
+  },
+  {
+   "v": "v6",
+   "status": "success",
+   "commit": "41d8f89",
+   "created": "2026-10-21T19:04:49.378Z",
+   "finished": "2026-10-21T19:05:09.311Z",
+   "secs": 20,
+   "current": false,
+   "by": "claude-code"
+  },
+  {
+   "v": "v5",
+   "status": "success",
+   "commit": "1000ee7",
+   "created": "2026-10-21T18:39:57.807Z",
+   "finished": "2026-10-21T18:40:16.534Z",
+   "secs": 19,
+   "current": false,
+   "by": "claude-code"
+  },
+  {
+   "v": "v4",
+   "status": "success",
+   "commit": "eb575e5",
+   "created": "2026-10-21T18:08:42.777Z",
+   "finished": "2026-10-21T18:08:52.458Z",
+   "secs": 10,
+   "current": false,
+   "by": "dashboard"
+  },
+  {
+   "v": "v3",
+   "status": "success",
+   "commit": "eb575e5",
+   "created": "2026-10-21T18:04:42.125Z",
+   "finished": "2026-10-21T18:04:53.072Z",
+   "secs": 11,
+   "current": false,
+   "by": "claude-code"
+  },
+  {
+   "v": "v2",
+   "status": "success",
+   "commit": "eb575e5",
+   "created": "2026-10-21T18:04:17.658Z",
+   "finished": "2026-10-21T18:04:33.395Z",
+   "secs": 16,
+   "current": false,
+   "by": "claude-code"
+  },
+  {
+   "v": "v1",
+   "status": "success",
+   "commit": "eb575e5",
+   "created": "2026-10-21T18:00:52.252Z",
+   "finished": "2026-10-21T18:01:20.970Z",
+   "secs": 29,
+   "current": false,
+   "by": "claude-code"
+  }
+ ]
+}

@@ -11,3 +11,4 @@ assets/supplied/*
 !assets/supplied/.gitkeep
 DealSaathi-*.mp4
 __pycache__/
+reference/
