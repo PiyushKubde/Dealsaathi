@@ -199,6 +199,13 @@ const CLIPS = {
     for (const c of (await page.locator('main .card, main li').all()).slice(0, 3)) await hover(c, 650)
     await scroll(300, 1400); await wait(1200)
   }),
+  // Agent's "Add a lead with AI": a sentence is typed but NOT sent, so no AI request is made.
+  'agent-ai-entry': () => withClip('agent-ai-entry', { who: 'agent', url: `${STAGING}/#/dashboard` }, async ({ page, nav, click, hover, wait }) => {
+    await nav('assistant'); await wait(900)
+    await click(page.locator('#chat-input'))
+    await page.keyboard.type('Add Neha Joshi (demo), a buyer looking for a 3 BHK in Vijay Nagar, Indore, budget up to 90 lakh', { delay: 38 })
+    await wait(500); await hover(page.locator('#send'), 700); await wait(1500)
+  }),
   // Production: the public, signed-out landing page only.
   'prod-landing': () => withClip('prod-landing', { url: PRODUCTION }, async ({ scroll, wait }) => {
     await wait(1800); await scroll(600, 2200); await wait(1500); await scroll(-600, 1600); await wait(800)

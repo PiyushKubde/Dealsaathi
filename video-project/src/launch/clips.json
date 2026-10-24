@@ -1,0 +1,99 @@
+{
+  "_doc": "Source footage for the launch film: [file, from s, to s, crop w:h:x:y or null]. prep_clips.py extracts each at 30 fps into out/launch/clips/<name>/. Product clips are the staging recordings (synthetic demo data); claude/host/deploys/laptop/vsetup come from the user's Trupeer video with the browser bar and taskbar cropped off.",
+  "dash": [
+    "recordings/agent-dashboard.mp4",
+    0.8,
+    13.0,
+    null
+  ],
+  "ai": [
+    "recordings/agent-ai-entry.mp4",
+    1.0,
+    16.5,
+    null
+  ],
+  "seller": [
+    "recordings/seller-listing.mp4",
+    1.0,
+    29.5,
+    null
+  ],
+  "recs": [
+    "recordings/buyer-recommendations.mp4",
+    0.8,
+    9.0,
+    null
+  ],
+  "offer": [
+    "recordings/buyer-offer.mp4",
+    0.8,
+    29.8,
+    null
+  ],
+  "forward": [
+    "recordings/agent-forward.mp4",
+    9.0,
+    17.4,
+    null
+  ],
+  "counter": [
+    "recordings/seller-counter.mp4",
+    11.0,
+    21.8,
+    null
+  ],
+  "accept": [
+    "recordings/buyer-accept.mp4",
+    9.0,
+    22.0,
+    null
+  ],
+  "notif": [
+    "recordings/agent-close.mp4",
+    16.5,
+    26.2,
+    null
+  ],
+  "integ": [
+    "recordings/agent-integrations.mp4",
+    0.8,
+    13.0,
+    null
+  ],
+  "landing": [
+    "recordings/prod-landing.mp4",
+    0.5,
+    9.0,
+    null
+  ],
+  "claude": [
+    "recordings/supplied/trupeer-build-and-deploy.mp4",
+    24.0,
+    41.0,
+    "1920:958:0:72"
+  ],
+  "host": [
+    "recordings/supplied/trupeer-build-and-deploy.mp4",
+    66.0,
+    93.0,
+    "1920:958:0:72"
+  ],
+  "deploys": [
+    "recordings/supplied/trupeer-build-and-deploy.mp4",
+    95.5,
+    105.0,
+    "1920:958:0:72"
+  ],
+  "laptop": [
+    "recordings/supplied/trupeer-build-and-deploy.mp4",
+    1.0,
+    17.0,
+    "1920:900:0:118"
+  ],
+  "vsetup": [
+    "recordings/supplied/trupeer-build-and-deploy.mp4",
+    43.0,
+    43.2,
+    "1000:330:460:150"
+  ]
+}
